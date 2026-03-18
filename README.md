@@ -41,6 +41,13 @@ devclean list
 devclean config show
 ```
 
+## Documentation
+
+- [Architecture](docs/architecture.md) — system design and scanner patterns
+- [CLI Commands](docs/commands.md) — full command reference with examples
+- [Ecosystems](docs/ecosystems.md) — supported ecosystems, detection patterns, and safety levels
+- [Configuration](docs/configuration.md) — settings file spec and options
+
 ## License
 
 MIT

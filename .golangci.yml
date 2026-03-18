@@ -7,7 +7,19 @@ linters:
     - misspell
     - gocritic
 
+  exclusions:
+    rules:
+      - path: '_test\.go'
+        linters:
+          - errcheck
+
   settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Printf
+        - fmt.Println
     revive:
       rules:
         - name: exported

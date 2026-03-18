@@ -1,11 +1,16 @@
 package main
 
 import (
-	"fmt"
 	"os"
+
+	"github.com/ohing504/devclean/internal/cli"
 )
 
+var version = "dev"
+
 func main() {
-	fmt.Println("devclean")
-	os.Exit(0)
+	cmd := cli.NewRootCmd(version)
+	if err := cmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }
