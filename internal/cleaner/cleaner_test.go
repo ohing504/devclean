@@ -9,11 +9,25 @@ import (
 	"github.com/ohing504/devclean/internal/model"
 )
 
+func mustMkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+}
+
+func mustWriteFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
 func TestForceDelete(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "node_modules")
-	os.MkdirAll(filepath.Join(target, "pkg"), 0o755)
-	os.WriteFile(filepath.Join(target, "pkg", "index.js"), []byte("x"), 0o644)
+	mustMkdir(t, filepath.Join(target, "pkg"))
+	mustWriteFile(t, filepath.Join(target, "pkg", "index.js"), []byte("x"))
 
 	c := cleaner.New(cleaner.Options{Force: true})
 	result := model.ScanResult{Path: target, Size: 100, Safety: model.SafetySafe}
@@ -31,7 +45,7 @@ func TestForceDelete(t *testing.T) {
 func TestDryRun(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "node_modules")
-	os.MkdirAll(target, 0o755)
+	mustMkdir(t, target)
 
 	c := cleaner.New(cleaner.Options{DryRun: true})
 	result := model.ScanResult{Path: target, Safety: model.SafetySafe}
@@ -49,7 +63,7 @@ func TestDryRun(t *testing.T) {
 func TestProtectedNotDeleted(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "src")
-	os.MkdirAll(target, 0o755)
+	mustMkdir(t, target)
 
 	c := cleaner.New(cleaner.Options{Force: true})
 	result := model.ScanResult{Path: target, Protected: true, Safety: model.SafetyProtected}
@@ -67,12 +81,12 @@ func TestProtectedNotDeleted(t *testing.T) {
 func TestTrashDelete(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "node_modules")
-	os.MkdirAll(filepath.Join(target, "pkg"), 0o755)
-	os.WriteFile(filepath.Join(target, "pkg", "index.js"), []byte("x"), 0o644)
+	mustMkdir(t, filepath.Join(target, "pkg"))
+	mustWriteFile(t, filepath.Join(target, "pkg", "index.js"), []byte("x"))
 
 	// Use custom trash dir for testing (not actual system Trash)
 	trashDir := filepath.Join(dir, "trash")
-	os.MkdirAll(trashDir, 0o755)
+	mustMkdir(t, trashDir)
 
 	c := cleaner.New(cleaner.Options{TrashDir: trashDir})
 	result := model.ScanResult{Path: target, Size: 100, Safety: model.SafetySafe}
@@ -94,13 +108,36 @@ func TestTrashDelete(t *testing.T) {
 	}
 }
 
+func TestTrashDelete_NameConflict(t *testing.T) {
+	dir := t.TempDir()
+	trashDir := filepath.Join(dir, "trash")
+	mustMkdir(t, trashDir)
+	// Pre-create conflicting name in trash
+	mustMkdir(t, filepath.Join(trashDir, "node_modules"))
+
+	target := filepath.Join(dir, "node_modules")
+	mustMkdir(t, target)
+
+	c := cleaner.New(cleaner.Options{TrashDir: trashDir})
+	result := model.ScanResult{Path: target, Safety: model.SafetySafe}
+	err := c.Clean(result)
+	if err != nil {
+		t.Fatalf("Clean error: %v", err)
+	}
+
+	// Should create node_modules_1 in trash
+	if _, err := os.Stat(filepath.Join(trashDir, "node_modules_1")); os.IsNotExist(err) {
+		t.Error("expected node_modules_1 in trash for name conflict")
+	}
+}
+
 func TestCleanAll(t *testing.T) {
 	dir := t.TempDir()
 
 	t1 := filepath.Join(dir, "a")
 	t2 := filepath.Join(dir, "b")
-	os.MkdirAll(t1, 0o755)
-	os.MkdirAll(t2, 0o755)
+	mustMkdir(t, t1)
+	mustMkdir(t, t2)
 
 	c := cleaner.New(cleaner.Options{Force: true})
 	results := []model.ScanResult{
@@ -119,6 +156,13 @@ func TestCleanAll(t *testing.T) {
 			t.Errorf("unexpected error: %v", cr.Error)
 		}
 	}
+
+	// Verify all items were actually deleted
+	for _, r := range results {
+		if _, err := os.Stat(r.Path); !os.IsNotExist(err) {
+			t.Errorf("expected %s to be deleted after CleanAll", r.Path)
+		}
+	}
 }
 
 func TestCleanAllSkipsProtected(t *testing.T) {
@@ -126,8 +170,8 @@ func TestCleanAllSkipsProtected(t *testing.T) {
 
 	safe := filepath.Join(dir, "safe")
 	protected := filepath.Join(dir, "protected")
-	os.MkdirAll(safe, 0o755)
-	os.MkdirAll(protected, 0o755)
+	mustMkdir(t, safe)
+	mustMkdir(t, protected)
 
 	c := cleaner.New(cleaner.Options{Force: true})
 	results := []model.ScanResult{

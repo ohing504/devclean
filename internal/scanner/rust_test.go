@@ -2,7 +2,6 @@ package scanner_test
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -15,9 +14,9 @@ func TestRustScanner_FindsTarget(t *testing.T) {
 
 	projDir := filepath.Join(root, "myproject")
 	targetDir := filepath.Join(projDir, "target", "debug")
-	os.MkdirAll(targetDir, 0o755)
-	os.WriteFile(filepath.Join(targetDir, "myproject"), make([]byte, 8192), 0o644)
-	os.WriteFile(filepath.Join(projDir, "Cargo.toml"), []byte("[package]"), 0o644)
+	mustMkdir(t, targetDir)
+	mustWriteFile(t, filepath.Join(targetDir, "myproject"), make([]byte, 8192))
+	mustWriteFile(t, filepath.Join(projDir, "Cargo.toml"), []byte("[package]"))
 
 	s := scanner.NewRustScanner()
 	results, err := s.Scan(context.Background(), root)
@@ -46,7 +45,7 @@ func TestRustScanner_IgnoresWithoutCargoToml(t *testing.T) {
 
 	// target/ without Cargo.toml should be ignored
 	targetDir := filepath.Join(root, "random", "target")
-	os.MkdirAll(targetDir, 0o755)
+	mustMkdir(t, targetDir)
 
 	s := scanner.NewRustScanner()
 	results, err := s.Scan(context.Background(), root)
@@ -65,5 +64,27 @@ func TestRustScanner_NameAndEcosystem(t *testing.T) {
 	}
 	if s.Ecosystem() != model.EcoRust {
 		t.Errorf("expected ecosystem=rust, got %s", s.Ecosystem())
+	}
+}
+
+func TestRustScanner_Workspace(t *testing.T) {
+	root := t.TempDir()
+	// Rust workspace: root Cargo.toml + member crate
+	projDir := filepath.Join(root, "my-workspace")
+	mustMkdir(t, filepath.Join(projDir, "target", "debug"))
+	mustWriteFile(t, filepath.Join(projDir, "target", "debug", "bin"), make([]byte, 1024))
+	mustWriteFile(t, filepath.Join(projDir, "Cargo.toml"), []byte("[workspace]"))
+	// Member crate with its own Cargo.toml but NO target/
+	mustMkdir(t, filepath.Join(projDir, "crates", "core"))
+	mustWriteFile(t, filepath.Join(projDir, "crates", "core", "Cargo.toml"), []byte("[package]"))
+
+	s := scanner.NewRustScanner()
+	results, err := s.Scan(context.Background(), root)
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+	// Should find only 1 target/ (at workspace root)
+	if len(results) != 1 {
+		t.Errorf("expected 1 target, got %d", len(results))
 	}
 }

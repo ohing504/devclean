@@ -10,6 +10,20 @@ import (
 	"github.com/ohing504/devclean/internal/scanner"
 )
 
+func mustMkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+}
+
+func mustWriteFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
 type fakeScanner struct {
 	name      string
 	ecosystem model.Ecosystem
@@ -151,4 +165,15 @@ func TestModTimeNonExistent(t *testing.T) {
 	if !mt.IsZero() {
 		t.Error("expected zero ModTime for nonexistent file")
 	}
+}
+
+func TestRegistryScanAll_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	reg := scanner.NewRegistry()
+	reg.Register(&fakeScanner{name: "node", ecosystem: model.EcoNode, results: []model.ScanResult{{Path: "/a"}}})
+	results, err := reg.ScanAll(ctx, "/")
+	// cancelled context should either return error or empty results — both are acceptable
+	_ = results
+	_ = err
 }

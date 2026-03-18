@@ -2,6 +2,7 @@ package model_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/ohing504/devclean/internal/model"
 )
@@ -17,6 +18,7 @@ func TestEcosystemValues(t *testing.T) {
 		{model.EcoNode, "node"},
 		{model.EcoDocker, "docker"},
 		{model.EcoPython, "python"},
+		{model.EcoRust, "rust"},
 		{model.EcoGlobal, "global"},
 	}
 	for _, tt := range tests {
@@ -99,5 +101,104 @@ func TestSafetyLevelValues(t *testing.T) {
 		if string(tt.level) != tt.want {
 			t.Errorf("got %q, want %q", tt.level, tt.want)
 		}
+	}
+}
+
+func TestGroupByProject_SortsDescending(t *testing.T) {
+	results := []model.ScanResult{
+		{Path: "/projects/small/node_modules", ProjectRoot: "/projects/small", Size: 100, Ecosystem: model.EcoNode},
+		{Path: "/projects/big/node_modules", ProjectRoot: "/projects/big", Size: 1000, Ecosystem: model.EcoNode},
+		{Path: "/projects/big/.next", ProjectRoot: "/projects/big", Size: 500, Ecosystem: model.EcoNode},
+	}
+
+	groups := model.GroupByProject(results)
+
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	// First group should be bigger
+	if groups[0].TotalSize <= groups[1].TotalSize {
+		t.Errorf("expected groups sorted descending by size: got %d, %d", groups[0].TotalSize, groups[1].TotalSize)
+	}
+	if groups[0].TotalSize != 1500 {
+		t.Errorf("expected first group total=1500, got %d", groups[0].TotalSize)
+	}
+}
+
+func TestGroupByProject_PropagatesProtected(t *testing.T) {
+	results := []model.ScanResult{
+		{Path: "/proj/vendor", ProjectRoot: "/proj", Size: 100, Protected: true, Safety: model.SafetyProtected},
+		{Path: "/proj/target", ProjectRoot: "/proj", Size: 200, Protected: false, Safety: model.SafetySafe},
+	}
+
+	groups := model.GroupByProject(results)
+
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(groups))
+	}
+	if !groups[0].Protected {
+		t.Error("expected group to be Protected when any item is protected")
+	}
+}
+
+func TestGroupByProject_Empty(t *testing.T) {
+	groups := model.GroupByProject(nil)
+	if len(groups) != 0 {
+		t.Errorf("expected 0 groups for nil input, got %d", len(groups))
+	}
+}
+
+func TestProjectKey_WithProjectRoot(t *testing.T) {
+	r := model.ScanResult{
+		Path:        "/home/user/myapp/node_modules",
+		ProjectRoot: "/home/user/myapp",
+	}
+	got := r.ProjectKey()
+	if got != "/home/user/myapp" {
+		t.Errorf("ProjectKey() = %q, want %q", got, "/home/user/myapp")
+	}
+}
+
+func TestProjectKey_WithoutProjectRoot(t *testing.T) {
+	r := model.ScanResult{
+		Path: "/home/user/myapp/node_modules",
+	}
+	got := r.ProjectKey()
+	want := "/home/user/myapp"
+	if got != want {
+		t.Errorf("ProjectKey() = %q, want %q", got, want)
+	}
+}
+
+func TestFilterResults(t *testing.T) {
+	now := time.Now()
+	results := []model.ScanResult{
+		{Path: "/a", Ecosystem: model.EcoNode, Category: model.CatDeps, LastMod: now},
+		{Path: "/b", Ecosystem: model.EcoRust, Category: model.CatBuild, LastMod: now},
+		{Path: "/c", Ecosystem: model.EcoNode, Category: model.CatBuild, LastMod: now},
+	}
+
+	// Filter by ecosystem
+	nodeResults := model.FilterResults(results, func(r model.ScanResult) bool {
+		return r.Ecosystem == model.EcoNode
+	})
+	if len(nodeResults) != 2 {
+		t.Errorf("expected 2 node results, got %d", len(nodeResults))
+	}
+
+	// Filter by category
+	buildResults := model.FilterResults(results, func(r model.ScanResult) bool {
+		return r.Category == model.CatBuild
+	})
+	if len(buildResults) != 2 {
+		t.Errorf("expected 2 build results, got %d", len(buildResults))
+	}
+
+	// Filter returning nothing
+	none := model.FilterResults(results, func(r model.ScanResult) bool {
+		return r.Ecosystem == model.EcoPython
+	})
+	if len(none) != 0 {
+		t.Errorf("expected 0 results, got %d", len(none))
 	}
 }

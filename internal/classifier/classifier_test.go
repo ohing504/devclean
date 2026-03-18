@@ -83,7 +83,7 @@ func TestHasUncommittedChanges_CleanRepo(t *testing.T) {
 	gitInit(t, dir)
 
 	f := filepath.Join(dir, "file.txt")
-	os.WriteFile(f, []byte("hello"), 0o644)
+	mustWriteFile(t, f, []byte("hello"))
 	gitRun(t, dir, "add", ".")
 	gitRun(t, dir, "commit", "-m", "init")
 
@@ -97,11 +97,11 @@ func TestHasUncommittedChanges_DirtyRepo(t *testing.T) {
 	gitInit(t, dir)
 
 	f := filepath.Join(dir, "file.txt")
-	os.WriteFile(f, []byte("hello"), 0o644)
+	mustWriteFile(t, f, []byte("hello"))
 	gitRun(t, dir, "add", ".")
 	gitRun(t, dir, "commit", "-m", "init")
 
-	os.WriteFile(f, []byte("modified"), 0o644)
+	mustWriteFile(t, f, []byte("modified"))
 
 	if !classifier.HasUncommittedChanges(dir) {
 		t.Error("expected uncommitted changes after modification")
@@ -120,13 +120,13 @@ func TestApplyGitInfo_UsesProjectDirMtime(t *testing.T) {
 	gitInit(t, dir)
 
 	f := filepath.Join(dir, "file.txt")
-	os.WriteFile(f, []byte("hello"), 0o644)
+	mustWriteFile(t, f, []byte("hello"))
 	gitRun(t, dir, "add", ".")
 	gitRun(t, dir, "commit", "-m", "init")
 
 	// Create artifact with old mtime
 	nmDir := filepath.Join(dir, "node_modules")
-	os.MkdirAll(nmDir, 0o755)
+	mustMkdir(t, nmDir)
 	oldTime := time.Now().AddDate(0, -7, 0)
 
 	results := []model.ScanResult{
@@ -147,17 +147,17 @@ func TestApplyGitInfo_GitignoredArtifactNotProtected(t *testing.T) {
 	gitInit(t, dir)
 
 	// Create .gitignore that ignores node_modules
-	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules/\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello"), 0o644)
+	mustWriteFile(t, filepath.Join(dir, ".gitignore"), []byte("node_modules/\n"))
+	mustWriteFile(t, filepath.Join(dir, "file.txt"), []byte("hello"))
 	gitRun(t, dir, "add", ".")
 	gitRun(t, dir, "commit", "-m", "init")
 
 	// Make repo dirty (uncommitted changes in tracked file)
-	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("dirty"), 0o644)
+	mustWriteFile(t, filepath.Join(dir, "file.txt"), []byte("dirty"))
 
 	// Create gitignored artifact
 	nmDir := filepath.Join(dir, "node_modules")
-	os.MkdirAll(nmDir, 0o755)
+	mustMkdir(t, nmDir)
 
 	results := []model.ScanResult{
 		{Path: nmDir, Safety: model.SafetySafe},
@@ -180,14 +180,14 @@ func TestApplyGitInfo_TrackedArtifactProtected(t *testing.T) {
 
 	// Create a tracked directory (vendor/)
 	vendorDir := filepath.Join(dir, "vendor")
-	os.MkdirAll(vendorDir, 0o755)
-	os.WriteFile(filepath.Join(vendorDir, "lib.go"), []byte("package lib"), 0o644)
-	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello"), 0o644)
+	mustMkdir(t, vendorDir)
+	mustWriteFile(t, filepath.Join(vendorDir, "lib.go"), []byte("package lib"))
+	mustWriteFile(t, filepath.Join(dir, "file.txt"), []byte("hello"))
 	gitRun(t, dir, "add", ".")
 	gitRun(t, dir, "commit", "-m", "init")
 
 	// Make repo dirty
-	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("dirty"), 0o644)
+	mustWriteFile(t, filepath.Join(dir, "file.txt"), []byte("dirty"))
 
 	results := []model.ScanResult{
 		{Path: vendorDir, Safety: model.SafetyCaution},
@@ -204,21 +204,24 @@ func TestApplyGitInfo_TrackedArtifactProtected(t *testing.T) {
 	}
 }
 
-func TestApplyGitInfo(t *testing.T) {
+// TestApplyGitInfo_TrackedArtifactWithoutGitignore verifies that a non-gitignored
+// artifact (node_modules not listed in .gitignore) in a dirty repo is marked
+// protected, because ApplyGitInfo cannot confirm it is safely ignorable.
+func TestApplyGitInfo_TrackedArtifactWithoutGitignore(t *testing.T) {
 	dir := t.TempDir()
 	gitInit(t, dir)
 
 	f := filepath.Join(dir, "file.txt")
-	os.WriteFile(f, []byte("hello"), 0o644)
+	mustWriteFile(t, f, []byte("hello"))
 	gitRun(t, dir, "add", ".")
 	gitRun(t, dir, "commit", "-m", "init")
 
 	// Make it dirty
-	os.WriteFile(f, []byte("dirty"), 0o644)
+	mustWriteFile(t, f, []byte("dirty"))
 
-	// Create a fake artifact dir
+	// Create a fake artifact dir (no .gitignore, so not explicitly ignored)
 	nmDir := filepath.Join(dir, "node_modules")
-	os.MkdirAll(nmDir, 0o755)
+	mustMkdir(t, nmDir)
 
 	results := []model.ScanResult{
 		{Path: nmDir, Safety: model.SafetySafe},
@@ -234,6 +237,20 @@ func TestApplyGitInfo(t *testing.T) {
 	}
 	if results[0].Reason != "uncommitted changes" {
 		t.Errorf("expected reason='uncommitted changes', got %q", results[0].Reason)
+	}
+}
+
+func mustMkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+}
+
+func mustWriteFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }
 

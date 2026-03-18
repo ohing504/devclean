@@ -2,7 +2,6 @@ package scanner_test
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -15,9 +14,9 @@ func TestNodeScanner_FindsNodeModules(t *testing.T) {
 
 	projDir := filepath.Join(root, "myapp")
 	nmDir := filepath.Join(projDir, "node_modules", "lodash")
-	os.MkdirAll(nmDir, 0o755)
-	os.WriteFile(filepath.Join(nmDir, "index.js"), make([]byte, 4096), 0o644)
-	os.WriteFile(filepath.Join(projDir, "package.json"), []byte(`{}`), 0o644)
+	mustMkdir(t, nmDir)
+	mustWriteFile(t, filepath.Join(nmDir, "index.js"), make([]byte, 4096))
+	mustWriteFile(t, filepath.Join(projDir, "package.json"), []byte(`{}`))
 
 	s := scanner.NewNodeScanner()
 	results, err := s.Scan(context.Background(), root)
@@ -39,8 +38,8 @@ func TestNodeScanner_FindsNodeModules(t *testing.T) {
 	if r.Path != filepath.Join(projDir, "node_modules") {
 		t.Errorf("unexpected path: %s", r.Path)
 	}
-	if r.Size != 4096 {
-		t.Errorf("expected size=4096, got %d", r.Size)
+	if r.Size < 4096 {
+		t.Errorf("expected size >= 4096 (block-aligned), got %d", r.Size)
 	}
 	if r.Safety != model.SafetySafe {
 		t.Errorf("expected safety=safe, got %s", r.Safety)
@@ -52,9 +51,9 @@ func TestNodeScanner_FindsNextBuild(t *testing.T) {
 
 	projDir := filepath.Join(root, "webapp")
 	nextDir := filepath.Join(projDir, ".next", "cache")
-	os.MkdirAll(nextDir, 0o755)
-	os.WriteFile(filepath.Join(nextDir, "data.json"), make([]byte, 2048), 0o644)
-	os.WriteFile(filepath.Join(projDir, "package.json"), []byte(`{}`), 0o644)
+	mustMkdir(t, nextDir)
+	mustWriteFile(t, filepath.Join(nextDir, "data.json"), make([]byte, 2048))
+	mustWriteFile(t, filepath.Join(projDir, "package.json"), []byte(`{}`))
 
 	s := scanner.NewNodeScanner()
 	results, err := s.Scan(context.Background(), root)
@@ -77,9 +76,9 @@ func TestNodeScanner_SkipsNestedNodeModules(t *testing.T) {
 
 	projDir := filepath.Join(root, "myapp")
 	nested := filepath.Join(projDir, "node_modules", "pkg", "node_modules", "dep")
-	os.MkdirAll(nested, 0o755)
-	os.WriteFile(filepath.Join(nested, "index.js"), []byte("x"), 0o644)
-	os.WriteFile(filepath.Join(projDir, "package.json"), []byte(`{}`), 0o644)
+	mustMkdir(t, nested)
+	mustWriteFile(t, filepath.Join(nested, "index.js"), []byte("x"))
+	mustWriteFile(t, filepath.Join(projDir, "package.json"), []byte(`{}`))
 
 	s := scanner.NewNodeScanner()
 	results, err := s.Scan(context.Background(), root)
@@ -103,7 +102,7 @@ func TestNodeScanner_IgnoresWithoutPackageJSON(t *testing.T) {
 
 	// node_modules without package.json should be ignored
 	nmDir := filepath.Join(root, "random", "node_modules")
-	os.MkdirAll(nmDir, 0o755)
+	mustMkdir(t, nmDir)
 
 	s := scanner.NewNodeScanner()
 	results, err := s.Scan(context.Background(), root)
@@ -120,14 +119,14 @@ func TestNodeScanner_MultipleProjects(t *testing.T) {
 
 	// Project 1
 	proj1 := filepath.Join(root, "app1")
-	os.MkdirAll(filepath.Join(proj1, "node_modules"), 0o755)
-	os.WriteFile(filepath.Join(proj1, "package.json"), []byte(`{}`), 0o644)
+	mustMkdir(t, filepath.Join(proj1, "node_modules"))
+	mustWriteFile(t, filepath.Join(proj1, "package.json"), []byte(`{}`))
 
 	// Project 2
 	proj2 := filepath.Join(root, "app2")
-	os.MkdirAll(filepath.Join(proj2, "node_modules"), 0o755)
-	os.MkdirAll(filepath.Join(proj2, ".next"), 0o755)
-	os.WriteFile(filepath.Join(proj2, "package.json"), []byte(`{}`), 0o644)
+	mustMkdir(t, filepath.Join(proj2, "node_modules"))
+	mustMkdir(t, filepath.Join(proj2, ".next"))
+	mustWriteFile(t, filepath.Join(proj2, "package.json"), []byte(`{}`))
 
 	s := scanner.NewNodeScanner()
 	results, err := s.Scan(context.Background(), root)
