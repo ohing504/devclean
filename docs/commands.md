@@ -65,14 +65,21 @@ devclean clean --eco node --dry-run --yes
 devclean clean --eco node --force --yes
 ```
 
+### Interactive Tree Selector
+
+The clean command uses a tree selector matching scan's output style:
+- `[↑↓]` move, `[←→]` jump between projects, `[space]` toggle
+- `[a]` select all, `[n]` none, `[s]` safe only, `[d]` dormant only
+- `[enter]` confirm, `[esc]` cancel
+- Projects show `[✔]` selected, `[-]` partial, `[✖]` protected
+- Protected projects are hidden with explanation
+
 ### Flow
 
 1. Scan and classify (with progress spinner)
-2. Show scan results table
-3. Select projects interactively (protected projects hidden)
-4. Review selected projects with artifact details
-5. Choose: Move to Trash / Permanently delete / Cancel
-6. Execute with per-artifact results
+2. Tree selector: select projects/artifacts interactively
+3. Choose: Move to Trash / Permanently delete / Cancel
+4. Execute with per-artifact results
 
 ## list
 

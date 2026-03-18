@@ -27,7 +27,7 @@ internal/
   cleaner/             → trash (macOS/Linux) + force delete, dry-run, protection enforcement
   output/              → JSON formatter, lipgloss colored table (ecosystem → project → sub-package → artifact)
   cli/                 → cobra commands (scan, clean, list)
-  ui/                  → terminal spinner
+  ui/                  → terminal spinner, tree selector (bubbletea), shared styles
 ```
 
 ## Scanner Design
@@ -89,9 +89,11 @@ Table output groups results by: **ecosystem → project → sub-package → arti
 ## Clean Flow
 
 1. Scan + classify (same pipeline as scan command)
-2. Show scan results table
-3. Interactive multiselect (protected projects hidden with explanation)
-4. Show selected projects with artifact details
-5. Choose: Move to Trash / Permanently delete / Cancel
-6. Execute with per-artifact status output
-7. Summary: items cleaned, space freed
+2. Interactive tree selector (bubbletea) — ecosystem → project → artifact hierarchy with checkboxes
+   - `[space]` toggles project (all children) or individual artifact
+   - `[←→]` jumps between projects, `[↑↓]` moves through items
+   - Quick select: `[a]` all, `[n]` none, `[s]` safe only, `[d]` dormant only
+   - Protected projects hidden with explanation
+3. Choose: Move to Trash / Permanently delete / Cancel
+4. Execute with per-artifact status output
+5. Summary: items cleaned, space freed
