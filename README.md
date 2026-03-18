@@ -2,11 +2,23 @@
 
 Developer disk cleanup CLI — scan and clean build artifacts, caches, dependencies, and runtimes across multiple ecosystems.
 
+## Screenshots
+
+### Scan
+
+![devclean scan](demo/scan.png)
+
+### Clean (Interactive Tree Selector)
+
+![devclean clean](demo/clean.png)
+
 ## Features
 
-- Scan for reclaimable disk space across iOS/Xcode, Android, Flutter, Node.js, Docker, Python, and global caches
-- Classify items by activity status and safety level
-- Git-aware protection for projects with uncommitted changes
+- Scan for reclaimable disk space across Node.js, Rust, and more
+- Monorepo support — artifacts grouped by git root with sub-package breakdown
+- Activity classification — active, recent, stale, dormant (based on git + filesystem)
+- Gitignore-aware protection — only git-tracked artifacts are protected
+- Interactive tree selector for clean — select by project or individual artifact
 - Soft delete (Trash) by default, with force delete option
 - JSON output for scripting and AI agent integration
 - Colored terminal output with ecosystem grouping
@@ -27,18 +39,20 @@ go install github.com/ohing504/devclean/cmd/devclean@latest
 # Scan for reclaimable space
 devclean scan
 devclean scan --path ~/workspace
-devclean scan --eco xcode,node
+devclean scan --eco node,rust
+devclean scan --status dormant -n 10
 devclean scan --json
 
-# Clean up
+# Clean up (interactive)
+devclean clean --eco node
 devclean clean --eco node --status dormant
-devclean clean --safe
-devclean clean --dry-run
-devclean clean --force
+
+# Clean up (non-interactive)
+devclean clean --eco node --status dormant --yes
+devclean clean --safe --dry-run --yes
 
 # Utilities
 devclean list
-devclean config show
 ```
 
 ## Documentation
