@@ -5,6 +5,7 @@
 | ID | Name | Status |
 |----|------|--------|
 | `node` | Node.js | implemented |
+| `rust` | Rust | implemented |
 | `python` | Python | planned |
 | `xcode` | iOS/Xcode | planned |
 | `android` | Android | planned |
@@ -31,6 +32,18 @@
 | `.svelte-kit` | build | safe | SvelteKit cache |
 
 **Monorepo support**: artifacts in sub-packages (apps/, packages/) are grouped under the git root project. Sub-packages are displayed with headers showing their path and total size.
+
+## Rust
+
+**Detection**: `Cargo.toml` in parent directory
+
+**Artifacts**:
+
+| Pattern | Category | Safety | Description |
+|---------|----------|--------|-------------|
+| `target` | build | safe | Rust build artifacts (debug/release binaries, deps) |
+
+**Note**: Tauri projects (Node + Rust hybrid) are detected by both Node.js and Rust scanners, catching both `node_modules` and `target/`.
 
 ## Categories
 

@@ -17,6 +17,7 @@ const (
 	EcoNode    Ecosystem = "node"
 	EcoDocker  Ecosystem = "docker"
 	EcoPython  Ecosystem = "python"
+	EcoRust    Ecosystem = "rust"
 	EcoGlobal  Ecosystem = "global"
 )
 
@@ -24,7 +25,7 @@ const (
 func AllEcosystems() []Ecosystem {
 	return []Ecosystem{
 		EcoXcode, EcoAndroid, EcoFlutter,
-		EcoNode, EcoDocker, EcoPython, EcoGlobal,
+		EcoNode, EcoDocker, EcoPython, EcoRust, EcoGlobal,
 	}
 }
 
