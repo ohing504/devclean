@@ -6,6 +6,7 @@
 |----|------|--------|
 | `node` | Node.js | implemented |
 | `rust` | Rust | implemented |
+| `ruby` | Ruby | implemented |
 | `python` | Python | planned |
 | `xcode` | iOS/Xcode | planned |
 | `android` | Android | planned |
@@ -44,6 +45,23 @@
 | `target` | build | safe | Rust build artifacts (debug/release binaries, deps) |
 
 **Note**: Tauri projects (Node + Rust hybrid) are detected by both Node.js and Rust scanners, catching both `node_modules` and `target/`.
+
+## Ruby
+
+**Detection**: `Gemfile` in parent directory
+
+**Artifacts**:
+
+| Pattern | Category | Safety | Description |
+|---------|----------|--------|-------------|
+| `vendor/bundle` | deps | safe | Bundled gems (`bundle install` to restore) |
+| `.bundle` | cache | safe | Bundler configuration and cache |
+| `tmp` | cache | safe | Temporary files (Bootsnap compile cache, pids, sockets) |
+| `log` | build | safe | Development and test logs |
+| `coverage` | build | safe | Test coverage reports (SimpleCov) |
+| `.ruby-lsp` | cache | safe | Ruby LSP editor cache |
+
+**Note**: `node_modules` in Rails projects using jsbundling/cssbundling is detected by the Node.js scanner via `package.json`.
 
 ## Categories
 

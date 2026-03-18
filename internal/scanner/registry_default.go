@@ -5,5 +5,6 @@ func DefaultRegistry() *Registry {
 	reg := NewRegistry()
 	reg.Register(NewNodeScanner())
 	reg.Register(NewRustScanner())
+	reg.Register(NewRubyScanner())
 	return reg
 }

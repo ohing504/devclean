@@ -14,7 +14,7 @@ Developer disk cleanup CLI — scan and clean build artifacts, caches, dependenc
 
 ## Features
 
-- Scan for reclaimable disk space across Node.js, Rust, and more
+- Scan for reclaimable disk space across Node.js, Rust, Ruby, and more
 - Monorepo support — artifacts grouped by git root with sub-package breakdown
 - Activity classification — active, recent, stale, dormant (based on git + filesystem)
 - Gitignore-aware protection — only git-tracked artifacts are protected

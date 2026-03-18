@@ -19,6 +19,7 @@ func TestEcosystemValues(t *testing.T) {
 		{model.EcoDocker, "docker"},
 		{model.EcoPython, "python"},
 		{model.EcoRust, "rust"},
+		{model.EcoRuby, "ruby"},
 		{model.EcoGlobal, "global"},
 	}
 	for _, tt := range tests {
@@ -30,8 +31,8 @@ func TestEcosystemValues(t *testing.T) {
 
 func TestAllEcosystems(t *testing.T) {
 	ecos := model.AllEcosystems()
-	if len(ecos) != 8 {
-		t.Errorf("expected 8 ecosystems, got %d", len(ecos))
+	if len(ecos) != 9 {
+		t.Errorf("expected 9 ecosystems, got %d", len(ecos))
 	}
 }
 
