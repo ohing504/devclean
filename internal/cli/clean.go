@@ -2,14 +2,11 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/charmbracelet/huh"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/ohing504/devclean/internal/cleaner"
 	"github.com/ohing504/devclean/internal/model"
-	"github.com/ohing504/devclean/internal/output"
 	"github.com/ohing504/devclean/internal/pathutil"
 	"github.com/ohing504/devclean/internal/ui"
 	"github.com/spf13/cobra"
@@ -49,59 +46,28 @@ func newCleanCmd() *cobra.Command {
 				return nil
 			}
 
-			// Group by project
-			projects := model.GroupByProject(results)
+			var toClean []model.ScanResult
 
-			// Select projects to clean
-			var selected []model.ProjectGroup
 			if yes {
 				// Non-interactive: clean all non-protected
-				for _, p := range projects {
-					if !p.Protected {
-						selected = append(selected, p)
+				for _, r := range results {
+					if !r.Protected {
+						toClean = append(toClean, r)
 					}
 				}
 			} else {
-				// Show scan results first so user can see the full picture
-				fmt.Println()
-				output.WriteTableWithOptions(os.Stdout, results, output.TableOptions{})
-
-				// Interactive selection
-				var err error
-				selected, err = interactiveSelect(projects)
-				if err != nil {
-					return err
+				// Interactive tree selection
+				result := ui.RunTreeSelector(results)
+				if result.Aborted {
+					fmt.Println("Cancelled.")
+					return nil
 				}
+				toClean = result.Selected
 			}
 
-			if len(selected) == 0 {
-				fmt.Println("No projects selected. (Protected projects cannot be cleaned)")
+			if len(toClean) == 0 {
+				fmt.Println("No items selected.")
 				return nil
-			}
-
-			// Show what was selected with artifact details
-			fmt.Printf("\nSelected %d projects:\n", len(selected))
-			for _, p := range selected {
-				fmt.Printf("  %s (%s) %s\n", ui.ProjectStyle.Render(p.Name), model.HumanSize(p.TotalSize), ui.DimStyle.Render(pathutil.ShortenHome(p.Path)))
-				for _, r := range p.Items {
-					relPath := filepath.Base(r.Path)
-					if p.Path != "" {
-						if rel, err := filepath.Rel(p.Path, r.Path); err == nil {
-							relPath = rel
-						}
-					}
-					fmt.Printf("    %s %s (%s)\n",
-						ui.DimStyle.Render("•"),
-						relPath,
-						ui.DimStyle.Render(model.HumanSize(r.Size)),
-					)
-				}
-			}
-
-			// Collect items from selected projects
-			var toClean []model.ScanResult
-			for _, p := range selected {
-				toClean = append(toClean, p.Items...)
 			}
 
 			// Show summary
@@ -110,35 +76,32 @@ func newCleanCmd() *cobra.Command {
 				totalSize += r.Size
 			}
 
-			action := "Move to Trash"
-			if force {
-				action = "Permanently delete"
-			}
 			if dryRun {
-				action = "Would clean"
-			}
-
-			bold := lipgloss.NewStyle().Bold(true)
-			fmt.Printf("\n%s %d projects (%s)\n\n",
-				bold.Render(action+":"),
-				len(selected),
-				model.HumanSize(totalSize),
-			)
-
-			if dryRun {
-				for _, p := range selected {
-					fmt.Printf("  %s (%s)\n", p.Name, model.HumanSize(p.TotalSize))
-					fmt.Printf("  %s\n", ui.DimStyle.Render(pathutil.ShortenHome(p.Path)))
+				fmt.Printf("\n%s %d items (%s)\n\n",
+					ui.ProjectStyle.Render("Would clean:"),
+					len(toClean), model.HumanSize(totalSize),
+				)
+				groups := model.GroupByProject(toClean)
+				for _, p := range groups {
+					fmt.Printf("  %s (%s) %s\n", p.Name, model.HumanSize(p.TotalSize), ui.DimStyle.Render(pathutil.ShortenHome(p.Path)))
+					for _, r := range p.Items {
+						relPath := filepath.Base(r.Path)
+						if p.Path != "" {
+							if rel, err := filepath.Rel(p.Path, r.Path); err == nil {
+								relPath = rel
+							}
+						}
+						fmt.Printf("    %s %s (%s)\n", ui.DimStyle.Render("•"), relPath, ui.DimStyle.Render(model.HumanSize(r.Size)))
+					}
 				}
-				fmt.Println()
 				return nil
 			}
 
-			// Confirm and choose delete method if not --yes
+			// Choose delete method if not --yes
 			if !yes {
 				var deleteMethod string
 				err := huh.NewSelect[string]().
-					Title(fmt.Sprintf("Delete %d projects (%s)?", len(selected), model.HumanSize(totalSize))).
+					Title(fmt.Sprintf("Delete %d items (%s)?", len(toClean), model.HumanSize(totalSize))).
 					Options(
 						huh.NewOption("Move to Trash (recoverable)", "trash"),
 						huh.NewOption("Permanently delete", "force"),
@@ -162,20 +125,10 @@ func newCleanCmd() *cobra.Command {
 			var freedSize int64
 			var failed int
 
-			// Group toClean by project for display
-			projectItems := make(map[string][]model.ScanResult)
-			for _, r := range toClean {
-				key := r.ProjectRoot
-				if key == "" {
-					key = filepath.Dir(r.Path)
-				}
-				projectItems[key] = append(projectItems[key], r)
-			}
-
-			for _, p := range selected {
-				items := projectItems[p.Path]
+			groups := model.GroupByProject(toClean)
+			for _, p := range groups {
 				fmt.Printf("\n  %s %s\n", ui.ProjectStyle.Render(p.Name), ui.DimStyle.Render(pathutil.ShortenHome(p.Path)))
-				for _, r := range items {
+				for _, r := range p.Items {
 					relPath := r.Path
 					if p.Path != "" {
 						if rel, err := filepath.Rel(p.Path, r.Path); err == nil {
@@ -214,57 +167,4 @@ func newCleanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip confirmation and interactive selection")
 
 	return cmd
-}
-
-func interactiveSelect(projects []model.ProjectGroup) ([]model.ProjectGroup, error) {
-	// Separate cleanable and protected
-	var cleanable []model.ProjectGroup
-	var protectedCount int
-	for _, p := range projects {
-		if p.Protected {
-			protectedCount++
-		} else {
-			cleanable = append(cleanable, p)
-		}
-	}
-
-	if len(cleanable) == 0 {
-		if protectedCount > 0 {
-			fmt.Printf("\nAll %d projects are protected (uncommitted changes).\n", protectedCount)
-		}
-		return nil, nil
-	}
-
-	if protectedCount > 0 {
-		fmt.Printf("\n%s\n", ui.DimStyle.Render(fmt.Sprintf("(%d protected projects hidden — commit or stash changes first)", protectedCount)))
-	}
-
-	var options []huh.Option[int]
-	for i, p := range cleanable {
-		shortPath := pathutil.ShortenHome(p.Path)
-		label := fmt.Sprintf("%-25s %-10s %10s  %s",
-			p.Name,
-			string(p.Activity),
-			model.HumanSize(p.TotalSize),
-			shortPath,
-		)
-		options = append(options, huh.NewOption(label, i))
-	}
-
-	var selectedIndices []int
-
-	err := huh.NewMultiSelect[int]().
-		Title("Select projects to clean (space to toggle, enter to confirm)").
-		Options(options...).
-		Value(&selectedIndices).
-		Run()
-	if err != nil {
-		return nil, err
-	}
-
-	var selected []model.ProjectGroup
-	for _, idx := range selectedIndices {
-		selected = append(selected, cleanable[idx])
-	}
-	return selected, nil
 }
