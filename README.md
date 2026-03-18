@@ -12,6 +12,21 @@ Developer disk cleanup CLI — scan and clean build artifacts, caches, dependenc
 
 ![devclean clean](demo/clean.png)
 
+## Supported Ecosystems
+
+| Ecosystem | Detection | Artifacts | Status |
+|-----------|-----------|-----------|--------|
+| **Node.js** | `package.json` | `node_modules`, `.next`, `.nuxt`, `dist`, `.turbo`, `.parcel-cache`, `.svelte-kit`, `coverage` | ✅ |
+| **Rust** | `Cargo.toml` | `target` | ✅ |
+| **Ruby** | `Gemfile` | `vendor/bundle`, `.bundle`, `tmp`, `log`, `coverage`, `.ruby-lsp` | ✅ |
+| Python | | | planned |
+| iOS/Xcode | | | planned |
+| Android | | | planned |
+| Flutter | | | planned |
+| Docker | | | planned |
+
+See [Ecosystems](docs/ecosystems.md) for full detection and safety details.
+
 ## Features
 
 - Scan for reclaimable disk space across Node.js, Rust, Ruby, and more
