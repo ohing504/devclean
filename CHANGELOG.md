@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-This section accumulates changes for the upcoming first tagged release. Entries
-are grouped by capability rather than commit. Once tagged, this section becomes
-the `[0.1.0]` entry.
+_No changes yet._
+
+## [0.1.0] - 2026-05-04
+
+First tagged release. Entries are grouped by capability rather than commit.
 
 ### Added
 
@@ -54,4 +56,5 @@ the `[0.1.0]` entry.
 
 - No known issues. Report security concerns via [GitHub private vulnerability reporting](https://github.com/ohing504/devclean/security/advisories/new).
 
-[Unreleased]: https://github.com/ohing504/devclean/compare/HEAD...HEAD
+[Unreleased]: https://github.com/ohing504/devclean/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ohing504/devclean/releases/tag/v0.1.0
