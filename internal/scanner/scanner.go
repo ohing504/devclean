@@ -20,6 +20,23 @@ type Scanner interface {
 	Scan(ctx context.Context, root string) ([]model.ScanResult, error)
 }
 
+// VendorCleanup describes an ecosystem-native cleanup action that delegates to
+// an official tool (e.g. `xcrun simctl delete unavailable` for Xcode). These
+// run alongside path-based cleanup but use the vendor's own command so internal
+// state stays consistent.
+type VendorCleanup struct {
+	ID          string                          // stable identifier, e.g. "simctl-delete-unavailable"
+	Description string                          // user-facing summary
+	Command     string                          // command that would be run, for dry-run / display
+	Run         func(ctx context.Context) error // executes the cleanup
+}
+
+// VendorCleaner is implemented by scanners that contribute vendor-native
+// cleanup actions. Scanners without vendor commands simply do not implement it.
+type VendorCleaner interface {
+	VendorCleanups() []VendorCleanup
+}
+
 // Registry holds all registered scanners and orchestrates scanning.
 type Registry struct {
 	scanners []Scanner

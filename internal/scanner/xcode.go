@@ -60,6 +60,24 @@ func NewXcodeScanner() *XcodeScanner {
 func (s *XcodeScanner) Name() string               { return "xcode" }
 func (s *XcodeScanner) Ecosystem() model.Ecosystem { return model.EcoXcode }
 
+// VendorCleanups returns Xcode-native cleanup actions that delegate to Apple's
+// own tooling. Returns nil on non-darwin so the action is never offered there.
+func (s *XcodeScanner) VendorCleanups() []VendorCleanup {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	return []VendorCleanup{
+		{
+			ID:          "simctl-delete-unavailable",
+			Description: "Delete simulator devices whose runtime was removed",
+			Command:     "xcrun simctl delete unavailable",
+			Run: func(ctx context.Context) error {
+				return exec.CommandContext(ctx, "xcrun", "simctl", "delete", "unavailable").Run()
+			},
+		},
+	}
+}
+
 func (s *XcodeScanner) Scan(ctx context.Context, root string) ([]model.ScanResult, error) {
 	if runtime.GOOS != "darwin" {
 		return nil, nil

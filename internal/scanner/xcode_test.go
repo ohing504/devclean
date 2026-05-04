@@ -337,6 +337,34 @@ func TestXcodeScanner_FiltersByRoot(t *testing.T) {
 	}
 }
 
+func TestXcodeScanner_VendorCleanups(t *testing.T) {
+	s := scanner.NewXcodeScanner()
+	vc, ok := any(s).(scanner.VendorCleaner)
+	if !ok {
+		t.Fatal("XcodeScanner should implement VendorCleaner on darwin")
+	}
+	actions := vc.VendorCleanups()
+	if len(actions) == 0 {
+		t.Fatal("expected at least one vendor cleanup action")
+	}
+
+	found := false
+	for _, a := range actions {
+		if a.ID == "simctl-delete-unavailable" {
+			found = true
+			if a.Run == nil {
+				t.Error("Run must not be nil")
+			}
+			if a.Command == "" {
+				t.Error("Command should be populated for display")
+			}
+		}
+	}
+	if !found {
+		t.Error("expected simctl-delete-unavailable action")
+	}
+}
+
 func TestXcodeScanner_NoArtifactsInEmptyHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

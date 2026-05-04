@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
@@ -8,19 +9,21 @@ import (
 	"github.com/ohing504/devclean/internal/cleaner"
 	"github.com/ohing504/devclean/internal/model"
 	"github.com/ohing504/devclean/internal/pathutil"
+	"github.com/ohing504/devclean/internal/scanner"
 	"github.com/ohing504/devclean/internal/ui"
 	"github.com/spf13/cobra"
 )
 
 func newCleanCmd() *cobra.Command {
 	var (
-		scanPath string
-		ecos     []string
-		status   string
-		safeOnly bool
-		force    bool
-		dryRun   bool
-		yes      bool
+		scanPath      string
+		ecos          []string
+		status        string
+		safeOnly      bool
+		force         bool
+		dryRun        bool
+		yes           bool
+		vendorCleanup bool
 	)
 
 	cmd := &cobra.Command{
@@ -29,7 +32,8 @@ func newCleanCmd() *cobra.Command {
 		Example: `  devclean clean --eco node
   devclean clean --eco node --status dormant --yes
   devclean clean --eco node --safe --dry-run
-  devclean clean --eco node --force`,
+  devclean clean --eco node --force
+  devclean clean --eco xcode --vendor-cleanup --yes  # also runs 'xcrun simctl delete unavailable'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			results, err := runScanPipeline(ScanPipelineOptions{
 				Path:     scanPath,
@@ -43,6 +47,9 @@ func newCleanCmd() *cobra.Command {
 
 			if len(results) == 0 {
 				fmt.Println("No items to clean.")
+				if vendorCleanup {
+					runVendorCleanups(ecos, dryRun)
+				}
 				return nil
 			}
 
@@ -67,6 +74,9 @@ func newCleanCmd() *cobra.Command {
 
 			if len(toClean) == 0 {
 				fmt.Println("No items selected.")
+				if vendorCleanup {
+					runVendorCleanups(ecos, dryRun)
+				}
 				return nil
 			}
 
@@ -93,6 +103,9 @@ func newCleanCmd() *cobra.Command {
 						}
 						fmt.Printf("    %s %s (%s)\n", ui.DimStyle.Render("•"), relPath, ui.DimStyle.Render(model.HumanSize(r.Size)))
 					}
+				}
+				if vendorCleanup {
+					runVendorCleanups(ecos, dryRun)
 				}
 				return nil
 			}
@@ -154,6 +167,10 @@ func newCleanCmd() *cobra.Command {
 				fmt.Printf("%s\n", ui.ErrStyle.Render(fmt.Sprintf("%d items failed", failed)))
 			}
 
+			if vendorCleanup {
+				runVendorCleanups(ecos, dryRun)
+			}
+
 			return nil
 		},
 	}
@@ -165,6 +182,58 @@ func newCleanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&force, "force", false, "permanent delete (skip Trash)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview without deleting")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip confirmation and interactive selection")
+	cmd.Flags().BoolVar(&vendorCleanup, "vendor-cleanup", false, "also run ecosystem-native cleanup commands (e.g. 'xcrun simctl delete unavailable' for xcode)")
 
 	return cmd
+}
+
+// runVendorCleanups executes vendor-native cleanup actions for the selected
+// ecosystems. In dry-run mode it prints what would run without executing.
+func runVendorCleanups(ecos []string, dryRun bool) {
+	reg := scanner.DefaultRegistry()
+
+	var scanners []scanner.Scanner
+	if len(ecos) > 0 {
+		var ecosystems []model.Ecosystem
+		for _, e := range ecos {
+			ecosystems = append(ecosystems, model.Ecosystem(e))
+		}
+		scanners = reg.ForEcosystems(ecosystems)
+	} else {
+		scanners = reg.All()
+	}
+
+	type pending struct {
+		eco    string
+		action scanner.VendorCleanup
+	}
+	var actions []pending
+	for _, s := range scanners {
+		vc, ok := s.(scanner.VendorCleaner)
+		if !ok {
+			continue
+		}
+		for _, a := range vc.VendorCleanups() {
+			actions = append(actions, pending{eco: s.Name(), action: a})
+		}
+	}
+
+	if len(actions) == 0 {
+		return
+	}
+
+	fmt.Printf("\n%s\n", ui.ProjectStyle.Render("Vendor cleanup:"))
+	for _, p := range actions {
+		header := fmt.Sprintf("  [%s] %s", p.eco, p.action.Description)
+		fmt.Println(ui.DimStyle.Render("    " + p.action.Command))
+		if dryRun {
+			fmt.Printf("%s %s\n", header, ui.DimStyle.Render("(dry-run)"))
+			continue
+		}
+		if err := p.action.Run(context.Background()); err != nil {
+			fmt.Printf("%s — %s\n", header, ui.ErrStyle.Render(err.Error()))
+			continue
+		}
+		fmt.Printf("%s %s\n", header, ui.SafeStyle.Render("✔"))
+	}
 }

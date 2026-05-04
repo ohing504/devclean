@@ -63,7 +63,23 @@ devclean clean --eco node --dry-run --yes
 
 # Force permanent delete (skip Trash)
 devclean clean --eco node --force --yes
+
+# Also run ecosystem-native cleanup commands (e.g. xcrun simctl delete unavailable)
+devclean clean --eco xcode --vendor-cleanup --yes
 ```
+
+### Vendor Cleanups
+
+Some ecosystems ship official cleanup commands that are stricter or safer than
+deleting paths directly (they keep the vendor's internal state consistent).
+The `--vendor-cleanup` flag runs them in addition to the path-based cleanup.
+
+| Ecosystem | Command | What it does |
+|-----------|---------|--------------|
+| xcode | `xcrun simctl delete unavailable` | Removes simulator devices whose iOS/watchOS/tvOS runtime was uninstalled. |
+
+`--dry-run` prints the commands without executing. `--vendor-cleanup` is
+additive — combine with `--safe`, `--status`, `--yes` as usual.
 
 ### Interactive Tree Selector
 
