@@ -47,6 +47,17 @@ type Scanner interface {
 
 Scanners report progress via context-attached callbacks for real-time UI updates. Size calculated using `du -sk` for accurate disk usage.
 
+#### Variations on the declarative pattern
+
+A few ecosystems need slight twists on the marker-adjacent matching used by Node, Rust, and Ruby:
+
+- **Project-rooted recursive matching (Python)**: artifacts like `__pycache__` live at every package depth, not just next to the marker. The Python scanner first records every directory containing a marker (`pyproject.toml`, `setup.py`, …) as a project root, then matches artifact directory names anywhere underneath, attributing each match to its **deepest** containing root (so monorepo sub-packages with their own `pyproject.toml` win over the parent).
+- **Multi-segment relative artifacts (Node React Native)**: when a Node project carries `ios/Podfile` or `metro.config.{js,ts,cjs,mjs}`, the scanner additionally `os.Stat`s a fixed list of multi-segment paths (`ios/Pods`, `android/.gradle`, …) directly under the project root, sidestepping the WalkDir for those subtrees so the scanner doesn't recurse into thousands of CocoaPods files.
+
+### Display Units
+
+`model.HumanSize` formats sizes with **decimal SI units** (1 KB = 1000 B). The CLI's `--min-size` flag uses the same convention by default (humanize.ParseBytes), so the threshold a user types and the size they see in output agree on the same arithmetic. Internally, `du -sk` returns binary kilobytes, but the formatting layer is decimal — so a 1 GiB directory renders as `1.1 GB` and `--min-size 1GB` will include it. Binary suffixes (`KiB`, `MiB`, `GiB`) are still accepted by `--min-size` for users who want explicit binary thresholds.
+
 ### Metadata Enrichment
 
 `ScanResult` carries two optional display fields populated by scanners after detection:

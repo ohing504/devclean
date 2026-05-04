@@ -17,24 +17,29 @@ Developer disk cleanup CLI — scan and clean build artifacts, caches, dependenc
 | Ecosystem | Detection | Artifacts | Status |
 |-----------|-----------|-----------|--------|
 | **Node.js** | `package.json` | `node_modules`, `.next`, `.nuxt`, `dist`, `.turbo`, `.parcel-cache`, `.svelte-kit`, `coverage` | ✅ |
+| **Node.js + React Native / Expo** | `ios/Podfile` or `metro.config.{js,ts,cjs,mjs}` | adds `ios/Pods`, `ios/build`, `ios/DerivedData`, `android/build`, `android/.gradle`, `.expo`, `.metro` | ✅ |
 | **Rust** | `Cargo.toml` | `target` | ✅ |
 | **Ruby** | `Gemfile` | `vendor/bundle`, `.bundle`, `tmp`, `log`, `coverage`, `.ruby-lsp` | ✅ |
-| Python | | | planned |
-| iOS/Xcode | | | planned |
+| **Python** | `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, `Pipfile`, `uv.lock` | `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.nox`, `.ipynb_checkpoints`, `__pypackages__`, `*.egg-info`, `.venv` / `venv` (caution) | ✅ |
+| **Go** | `go.mod` | `vendor` (caution; per-project only — global caches handled by upcoming `global` scanner) | ✅ |
+| **iOS/Xcode** (macOS only) | fixed `~/Library/Developer/...` paths | `DerivedData`, `Archives`, `iOS/watchOS/tvOS DeviceSupport`, `CoreSimulator/Devices`, simulator runtimes | ✅ |
 | Android | | | planned |
 | Flutter | | | planned |
 | Docker | | | planned |
+| Global caches | | | planned |
 
 See [Ecosystems](docs/ecosystems.md) for full detection and safety details.
 
 ## Features
 
-- Scan for reclaimable disk space across Node.js, Rust, Ruby, and more
+- Scan for reclaimable disk space across Node.js (incl. React Native / Expo), Rust, Ruby, Python, Go, iOS/Xcode, and more
 - Monorepo support — artifacts grouped by git root with sub-package breakdown
 - Activity classification — active, recent, stale, dormant (based on git + filesystem)
 - Gitignore-aware protection — only git-tracked artifacts are protected
+- `--min-size` filter to suppress small artifacts and focus on real targets
 - Interactive tree selector for clean — select by project or individual artifact
 - Soft delete (Trash) by default, with force delete option
+- Vendor-native cleanup hooks (`xcrun simctl delete unavailable`, etc.) via `--vendor-cleanup`
 - JSON output for scripting and AI agent integration
 - Colored terminal output with ecosystem grouping
 
