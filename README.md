@@ -86,3 +86,12 @@ devclean list
 - [CLI Commands](docs/commands.md) — full command reference with examples
 - [Ecosystems](docs/ecosystems.md) — supported ecosystems, detection patterns, and safety levels
 - [Configuration](docs/configuration.md) — settings file spec and options
+
+## Contributing
+
+PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for build, test, and PR
+guidelines, plus a walkthrough for adding a new ecosystem scanner.
+
+## License
+
+[MIT](LICENSE) — © 2026 Youngsup Oh
