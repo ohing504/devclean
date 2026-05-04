@@ -22,6 +22,25 @@ var nodeArtifacts = []model.ArtifactDef{
 	{Pattern: ".svelte-kit", Category: model.CatBuild, Description: "SvelteKit cache", AlwaysSafe: true},
 }
 
+// React Native artifacts live at multi-segment paths inside the project root.
+// Discovered only when the project is detected as React Native (Podfile / metro.config).
+var reactNativeArtifacts = []model.ArtifactDef{
+	{Pattern: "ios/Pods", Category: model.CatDeps, Description: "CocoaPods dependencies (React Native)", AlwaysSafe: true},
+	{Pattern: "ios/build", Category: model.CatBuild, Description: "iOS build output (React Native)", AlwaysSafe: true},
+	{Pattern: "ios/DerivedData", Category: model.CatBuild, Description: "iOS DerivedData (React Native)", AlwaysSafe: true},
+	{Pattern: "android/build", Category: model.CatBuild, Description: "Android build output (React Native)", AlwaysSafe: true},
+	{Pattern: "android/.gradle", Category: model.CatCache, Description: "Android Gradle cache (React Native)", AlwaysSafe: true},
+	{Pattern: ".expo", Category: model.CatCache, Description: "Expo cache", AlwaysSafe: true},
+	{Pattern: ".metro", Category: model.CatCache, Description: "Metro bundler cache", AlwaysSafe: true},
+}
+
+var reactNativeMarkers = []string{
+	"metro.config.js",
+	"metro.config.ts",
+	"metro.config.cjs",
+	"metro.config.mjs",
+}
+
 // NodeScanner scans for Node.js project artifacts.
 type NodeScanner struct{}
 
@@ -40,6 +59,7 @@ func (s *NodeScanner) Scan(ctx context.Context, root string) ([]model.ScanResult
 	}
 
 	skipPaths := make(map[string]bool)
+	rnChecked := make(map[string]bool)
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -56,10 +76,35 @@ func (s *NodeScanner) Scan(ctx context.Context, root string) ([]model.ScanResult
 			return nil
 		}
 
-		// Skip already-found artifact subtrees
+		// Skip already-found artifact subtrees (and the artifact dir itself when revisited).
 		for skip := range skipPaths {
-			if strings.HasPrefix(path, skip+string(os.PathSeparator)) {
+			if path == skip || strings.HasPrefix(path, skip+string(os.PathSeparator)) {
 				return fs.SkipDir
+			}
+		}
+
+		// On first visit to a Node project directory, check if it's React Native and
+		// register multi-segment artifacts (ios/Pods, android/build, etc.) directly.
+		if !rnChecked[path] && hasFile(path, "package.json") {
+			rnChecked[path] = true
+			if isReactNativeProject(path) {
+				for _, art := range reactNativeArtifacts {
+					full := filepath.Join(path, art.Pattern)
+					info, statErr := os.Stat(full)
+					if statErr != nil || !info.IsDir() {
+						continue
+					}
+					results = append(results, model.ScanResult{
+						Path:      full,
+						Ecosystem: model.EcoNode,
+						Category:  art.Category,
+						Size:      DirSize(full),
+						LastMod:   ModTime(full),
+						Safety:    safetyFromDef(art),
+					})
+					ReportProgress(ctx, len(results))
+					skipPaths[full] = true
+				}
 			}
 		}
 
@@ -92,6 +137,18 @@ func (s *NodeScanner) Scan(ctx context.Context, root string) ([]model.ScanResult
 	})
 
 	return results, err
+}
+
+func isReactNativeProject(dir string) bool {
+	if hasFile(filepath.Join(dir, "ios"), "Podfile") {
+		return true
+	}
+	for _, marker := range reactNativeMarkers {
+		if hasFile(dir, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasFile(dir, name string) bool {

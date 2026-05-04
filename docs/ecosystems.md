@@ -34,6 +34,18 @@
 
 **Monorepo support**: artifacts in sub-packages (apps/, packages/) are grouped under the git root project. Sub-packages are displayed with headers showing their path and total size.
 
+**React Native / Expo**: when a Node project also has `ios/Podfile` or `metro.config.{js,ts,cjs,mjs}`, the scanner additionally collects RN-specific artifacts at multi-segment paths under the project root.
+
+| Pattern | Category | Safety | Description |
+|---------|----------|--------|-------------|
+| `ios/Pods` | deps | safe | CocoaPods dependencies (restored by `pod install`) |
+| `ios/build` | build | safe | iOS build output |
+| `ios/DerivedData` | build | safe | Workspace-local DerivedData (rare) |
+| `android/build` | build | safe | Android build output |
+| `android/.gradle` | cache | safe | Project-local Gradle cache |
+| `.expo` | cache | safe | Expo cache |
+| `.metro` | cache | safe | Metro bundler cache |
+
 ## Rust
 
 **Detection**: `Cargo.toml` in parent directory
