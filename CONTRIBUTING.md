@@ -98,8 +98,9 @@ Keep the subject under ~70 chars. Use the body to explain the **why** (constrain
 1. **One change, one PR.** A scanner addition + a flag refactor are two PRs.
 2. **Keep tests + docs + code in the same PR** as the change.
 3. **CI must be green** — same checks as `go test -race -count=1 ./... && golangci-lint run ./...`.
-4. **Branch name**: any descriptive slug (`add-python-scanner`, `fix-min-size-decimal`, etc.).
-5. The maintainer may rebase your branch onto main and use a single squash merge to keep history linear — write your subject line so it works as the merged commit subject.
+4. **Add a CHANGELOG entry** under `[Unreleased]` for any user-visible change. Group under Added / Changed / Deprecated / Removed / Fixed / Security.
+5. **Branch name**: any descriptive slug (`add-python-scanner`, `fix-min-size-decimal`, etc.).
+6. The maintainer may rebase your branch onto main and use a single squash merge to keep history linear — write your subject line so it works as the merged commit subject.
 
 ## Reporting bugs
 

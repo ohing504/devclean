@@ -86,6 +86,7 @@ devclean list
 - [CLI Commands](docs/commands.md) — full command reference with examples
 - [Ecosystems](docs/ecosystems.md) — supported ecosystems, detection patterns, and safety levels
 - [Configuration](docs/configuration.md) — settings file spec and options
+- [Changelog](CHANGELOG.md) — release notes and version history
 
 ## Contributing
 
