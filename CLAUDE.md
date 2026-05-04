@@ -48,6 +48,8 @@ Pipeline: **Scan → Classify → Filter/Sort → Output/Clean**
 - **Output sorting**: ecosystems grouped by total size desc, projects by size desc, sub-packages by size desc
 - **Clean flow**: scan → interactive multiselect (protected hidden) → trash/force choice → per-artifact results
 - **AI agent friendly**: all interactions via CLI flags (`--yes`, `--json`), no interactive prompts required
+- **Metadata enrichment**: scanners populate `ScanResult.Label` / `Recommendation` so users can decide without decoding paths (UUID → "iPhone 17 Pro · iOS 26.3", "superseded by newer build", "runtime unavailable"). First applied in xcode; reusable for any ecosystem with opaque identifiers
+- **Vendor cleanup**: scanners may implement the optional `VendorCleaner` interface to register ecosystem-native cleanup commands (e.g. `xcrun simctl delete unavailable`). `devclean clean --vendor-cleanup` runs them alongside path-based deletion so vendor internal state stays consistent — natural fit for Docker (`system prune`), Homebrew (`cleanup`), Gradle, etc.
 
 ## Documentation Rules
 

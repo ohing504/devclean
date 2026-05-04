@@ -47,6 +47,41 @@ type Scanner interface {
 
 Scanners report progress via context-attached callbacks for real-time UI updates. Size calculated using `du -sk` for accurate disk usage.
 
+### Metadata Enrichment
+
+`ScanResult` carries two optional display fields populated by scanners after detection:
+
+- `Label` — human-readable display name when the path basename is opaque (e.g. simulator UUID `027AEA9C-...` → `iPhone 17 Pro · iOS 26.3`). Output renders Label in place of basename when present.
+- `Recommendation` — actionable hint shown as a trailing tag (e.g. `superseded by newer build`, `runtime unavailable — safe to remove`). Lets the user decide what to delete without external lookup.
+
+Scanners derive these from peer comparison (DeviceSupport build ages), vendor APIs (`xcrun simctl list devices --json` for simulator names), or known-name maps (DerivedData shared subdirectories). Enrichment is best-effort — if the vendor command fails or returns malformed data, the scan still works with raw basenames.
+
+Use this pattern when a single ecosystem produces directories whose names alone don't tell the user what they are.
+
+### Vendor Cleanup
+
+Scanners may opt into an additional interface to register ecosystem-native cleanup commands:
+
+```go
+type VendorCleaner interface {
+    VendorCleanups() []VendorCleanup
+}
+
+type VendorCleanup struct {
+    ID          string
+    Description string
+    Command     string                          // for dry-run display
+    Run         func(ctx context.Context) error // executes the command
+}
+```
+
+`devclean clean --vendor-cleanup` collects cleanups from selected ecosystems and runs them alongside path-based deletion. Vendor commands keep the ecosystem's internal state consistent (e.g. `xcrun simctl delete unavailable` removes simulator devices and updates CoreSimulator's database in one step). Dry-run prints the command without executing.
+
+Current implementations:
+- `xcode`: `xcrun simctl delete unavailable`
+
+Natural future fits: Docker `system prune`, Homebrew `cleanup`, Gradle `--stop`, pip cache purge.
+
 ## Safety Model
 
 Three levels with gitignore-aware protection:
