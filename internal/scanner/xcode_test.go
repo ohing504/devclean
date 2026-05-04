@@ -4,8 +4,11 @@ package scanner_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ohing504/devclean/internal/model"
 	"github.com/ohing504/devclean/internal/scanner"
@@ -27,7 +30,6 @@ func TestXcodeScanner_FindsAllArtifacts(t *testing.T) {
 
 	// Non-expanding artifacts: directory itself becomes one result.
 	flatPaths := []string{
-		"Library/Developer/Xcode/DerivedData",
 		"Library/Developer/Xcode/Archives",
 		"Library/Developer/CoreSimulator/Caches",
 		"Library/Logs/CoreSimulator",
@@ -40,6 +42,7 @@ func TestXcodeScanner_FindsAllArtifacts(t *testing.T) {
 
 	// Expanding artifacts: each child directory becomes its own result.
 	expandPaths := map[string][]string{
+		"Library/Developer/Xcode/DerivedData":           {"Runner-abcdef", "ModuleCache.noindex"},
 		"Library/Developer/Xcode/iOS DeviceSupport":     {"16.4 (20E247)", "17.2 (21C62)"},
 		"Library/Developer/Xcode/watchOS DeviceSupport": {"10.4 (21S365)"},
 		"Library/Developer/Xcode/tvOS DeviceSupport":    {"17.2 (21K364)"},
@@ -111,6 +114,58 @@ func TestXcodeScanner_ExpandsDeviceSupportPerVersion(t *testing.T) {
 	}
 }
 
+func TestXcodeScanner_FlagsOldDeviceSupportBuilds(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	parent := filepath.Join(home, "Library/Developer/Xcode/iOS DeviceSupport")
+
+	// Same device+version with three different builds; older mtimes should be flagged.
+	type build struct {
+		dir   string
+		mtime time.Time
+	}
+	builds := []build{
+		{"iPhone13,3 26.5 (23F5043k)", time.Now().Add(-30 * 24 * time.Hour)},
+		{"iPhone13,3 26.5 (23F5059e)", time.Now().Add(-15 * 24 * time.Hour)},
+		{"iPhone13,3 26.5 (23F5069b)", time.Now().Add(-1 * 24 * time.Hour)}, // newest
+		// Different device — should not be compared with the iPhone13,3 group.
+		{"iPad11,1 26.3 (23D5114d)", time.Now().Add(-40 * 24 * time.Hour)},
+	}
+	for _, b := range builds {
+		dir := filepath.Join(parent, b.dir)
+		mustMkdir(t, dir)
+		mustWriteFile(t, filepath.Join(dir, "Symbols.bin"), make([]byte, 4096))
+		if err := os.Chtimes(dir, b.mtime, b.mtime); err != nil {
+			t.Fatalf("chtimes %s: %v", dir, err)
+		}
+	}
+
+	s := scanner.NewXcodeScanner()
+	results, err := s.Scan(context.Background(), home)
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+
+	recs := make(map[string]string)
+	for _, r := range results {
+		recs[filepath.Base(r.Path)] = r.Recommendation
+	}
+
+	if recs["iPhone13,3 26.5 (23F5069b)"] != "" {
+		t.Errorf("newest build should not be flagged, got %q", recs["iPhone13,3 26.5 (23F5069b)"])
+	}
+	for _, old := range []string{"iPhone13,3 26.5 (23F5043k)", "iPhone13,3 26.5 (23F5059e)"} {
+		if !strings.Contains(recs[old], "superseded") {
+			t.Errorf("expected %s to be flagged as superseded, got %q", old, recs[old])
+		}
+	}
+	// Lone iPad entry has no peer, should not be flagged.
+	if recs["iPad11,1 26.3 (23D5114d)"] != "" {
+		t.Errorf("solo build should not be flagged, got %q", recs["iPad11,1 26.3 (23D5114d)"])
+	}
+}
+
 func TestXcodeScanner_ExpandsSimulatorDevices(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -139,6 +194,40 @@ func TestXcodeScanner_ExpandsSimulatorDevices(t *testing.T) {
 	}
 }
 
+func TestXcodeScanner_LabelsKnownDerivedDataChildren(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	parent := filepath.Join(home, "Library/Developer/Xcode/DerivedData")
+	children := []string{"Runner-abc123", "ModuleCache.noindex", "SymbolCache.noindex"}
+	for _, c := range children {
+		dir := filepath.Join(parent, c)
+		mustMkdir(t, dir)
+		mustWriteFile(t, filepath.Join(dir, "f"), []byte("x"))
+	}
+
+	s := scanner.NewXcodeScanner()
+	results, err := s.Scan(context.Background(), home)
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+
+	labels := make(map[string]string)
+	for _, r := range results {
+		labels[filepath.Base(r.Path)] = r.Label
+	}
+
+	if !strings.Contains(labels["ModuleCache.noindex"], "module cache") {
+		t.Errorf("expected ModuleCache.noindex label to mention module cache, got %q", labels["ModuleCache.noindex"])
+	}
+	if !strings.Contains(labels["SymbolCache.noindex"], "Symbol cache") {
+		t.Errorf("expected SymbolCache.noindex label to mention Symbol cache, got %q", labels["SymbolCache.noindex"])
+	}
+	if labels["Runner-abc123"] != "" {
+		t.Errorf("Runner-abc123 should have no label, got %q", labels["Runner-abc123"])
+	}
+}
+
 func TestXcodeScanner_EmptyExpandableYieldsNoResults(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -160,10 +249,10 @@ func TestXcodeScanner_SkipsMissingPaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Only DerivedData exists.
-	dd := filepath.Join(home, "Library/Developer/Xcode/DerivedData")
-	mustMkdir(t, dd)
-	mustWriteFile(t, filepath.Join(dd, "build.bin"), make([]byte, 2048))
+	// Only Archives exists (a flat artifact).
+	dir := filepath.Join(home, "Library/Developer/Xcode/Archives")
+	mustMkdir(t, dir)
+	mustWriteFile(t, filepath.Join(dir, "build.bin"), make([]byte, 2048))
 
 	s := scanner.NewXcodeScanner()
 	results, err := s.Scan(context.Background(), home)
@@ -173,8 +262,8 @@ func TestXcodeScanner_SkipsMissingPaths(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
-	if filepath.Base(results[0].Path) != "DerivedData" {
-		t.Errorf("expected DerivedData, got %s", results[0].Path)
+	if filepath.Base(results[0].Path) != "Archives" {
+		t.Errorf("expected Archives, got %s", results[0].Path)
 	}
 	if results[0].Category != model.CatBuild {
 		t.Errorf("expected category=build, got %s", results[0].Category)
@@ -191,7 +280,6 @@ func TestXcodeScanner_CategoryAndSafety(t *testing.T) {
 		category model.Category
 		safety   model.SafetyLevel
 	}{
-		"Library/Developer/Xcode/DerivedData":    {model.CatBuild, model.SafetySafe},
 		"Library/Developer/Xcode/Archives":       {model.CatBuild, model.SafetyCaution},
 		"Library/Developer/CoreSimulator/Caches": {model.CatCache, model.SafetySafe},
 		"Library/Logs/CoreSimulator":             {model.CatCache, model.SafetySafe},
@@ -232,7 +320,7 @@ func TestXcodeScanner_FiltersByRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	dd := filepath.Join(home, "Library/Developer/Xcode/DerivedData")
+	dd := filepath.Join(home, "Library/Developer/Xcode/Archives")
 	mustMkdir(t, dd)
 	mustWriteFile(t, filepath.Join(dd, "f"), []byte("x"))
 

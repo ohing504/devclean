@@ -316,12 +316,14 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 		// Artifacts in this sub-package
 		for _, r := range sp.items {
 			icon := safetyIcon(r.Safety)
-			name := filepath.Base(r.Path)
+			name := artifactDisplayName(r)
 			cat := ui.DimStyle.Render("(" + string(r.Category) + ")")
-			fmt.Fprintf(w, "      %s %-24s %10s\n",
+			rec := recommendationTag(r)
+			fmt.Fprintf(w, "      %s %-24s %10s%s\n",
 				icon,
 				name+" "+cat,
 				ui.InfoStyle.Render(model.HumanSize(r.Size)),
+				rec,
 			)
 		}
 	}
@@ -345,12 +347,14 @@ func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot stri
 		}
 
 		icon := safetyIcon(r.Safety)
-		relPath := artifactRelPath(r.Path, projectRoot)
+		name := artifactDisplayNameOr(r, artifactRelPath(r.Path, projectRoot))
 		cat := ui.DimStyle.Render("(" + string(r.Category) + ")")
-		fmt.Fprintf(w, "    %s %-30s %10s\n",
+		rec := recommendationTag(r)
+		fmt.Fprintf(w, "    %s %-30s %10s%s\n",
 			icon,
-			relPath+" "+cat,
+			name+" "+cat,
 			ui.InfoStyle.Render(model.HumanSize(r.Size)),
+			rec,
 		)
 	}
 
@@ -359,6 +363,31 @@ func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot stri
 			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more (%s)", collapsed, model.HumanSize(collapsedSize))),
 		)
 	}
+}
+
+// artifactDisplayName picks the best human-readable name for an artifact:
+// Label if set, else basename.
+func artifactDisplayName(r model.ScanResult) string {
+	if r.Label != "" {
+		return r.Label
+	}
+	return filepath.Base(r.Path)
+}
+
+// artifactDisplayNameOr uses Label if set, else the supplied fallback (typically a relative path).
+func artifactDisplayNameOr(r model.ScanResult, fallback string) string {
+	if r.Label != "" {
+		return r.Label
+	}
+	return fallback
+}
+
+// recommendationTag formats r.Recommendation as a styled trailing tag, or "" if empty.
+func recommendationTag(r model.ScanResult) string {
+	if r.Recommendation == "" {
+		return ""
+	}
+	return "  " + ui.RecommendStyle.Render("← "+r.Recommendation)
 }
 
 // artifactRelPath returns the path of an artifact relative to its project root.

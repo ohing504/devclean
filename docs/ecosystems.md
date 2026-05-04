@@ -82,7 +82,17 @@
 | `Library/Developer/CoreSimulator/Caches` | cache | safe | Simulator runtime caches |
 | `Library/Logs/CoreSimulator` | cache | safe | Simulator logs |
 
-**Per-version / per-device expansion**: `iOS / watchOS / tvOS DeviceSupport` and `CoreSimulator/Devices` are reported as one result *per child directory* (per iOS version, per simulator device) instead of one big lump. This lets you reclaim a single old iOS runtime (e.g. `iPhone13,3 26.3`) without nuking active versions. Children share the parent path as `ProjectRoot` so they group together in output.
+**Expansion**: `DerivedData`, `iOS / watchOS / tvOS DeviceSupport`, and `CoreSimulator/Devices` are reported as one result *per child directory* (per project, per iOS version, per simulator device) instead of one big lump. Children share the parent path as `ProjectRoot` so they group together in output.
+
+**Metadata enrichment** (populates `Label` and `Recommendation` on `ScanResult`):
+
+| Source | Label | Recommendation |
+|--------|-------|----------------|
+| `CoreSimulator/Devices` (`xcrun simctl list devices --json`) | `iPhone 17 Pro · iOS 26.3` | `runtime unavailable — safe to remove` when Apple removed the runtime |
+| `iOS DeviceSupport` (peer comparison by `mtime`) | (none) | `superseded by newer build` for older builds when the same `<model> <version>` group has multiple build IDs |
+| `DerivedData` (well-known children) | `ModuleCache.noindex — Swift module cache (shared)` etc. | (none) |
+
+`xcrun simctl` is best-effort — if Xcode CLI tools are not installed, simulator devices fall back to UUID display with no label/recommendation, but the rest of the scan still works.
 
 **Notes**:
 - `Archives` is `caution` because losing an archive means losing the ability to symbolicate crash reports for that release.

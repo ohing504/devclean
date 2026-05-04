@@ -74,16 +74,18 @@ type ArtifactDef struct {
 
 // ScanResult represents a single scannable item on disk.
 type ScanResult struct {
-	Path        string         `json:"path"`
-	Ecosystem   Ecosystem      `json:"ecosystem"`
-	Category    Category       `json:"category"`
-	Size        int64          `json:"size"`
-	LastMod     time.Time      `json:"last_modified"`
-	Activity    ActivityStatus `json:"activity"`
-	Safety      SafetyLevel    `json:"safety"`
-	Protected   bool           `json:"protected"`
-	Reason      string         `json:"reason,omitempty"`
-	ProjectRoot string         `json:"project_root,omitempty"`
+	Path           string         `json:"path"`
+	Ecosystem      Ecosystem      `json:"ecosystem"`
+	Category       Category       `json:"category"`
+	Size           int64          `json:"size"`
+	LastMod        time.Time      `json:"last_modified"`
+	Activity       ActivityStatus `json:"activity"`
+	Safety         SafetyLevel    `json:"safety"`
+	Protected      bool           `json:"protected"`
+	Reason         string         `json:"reason,omitempty"`
+	ProjectRoot    string         `json:"project_root,omitempty"`
+	Label          string         `json:"label,omitempty"`          // human-readable display name (e.g. "iPhone 17 Pro · iOS 26.3")
+	Recommendation string         `json:"recommendation,omitempty"` // hint for the user (e.g. "old build", "unavailable runtime")
 }
 
 // HumanSize returns a human-readable size string.

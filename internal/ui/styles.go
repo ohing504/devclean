@@ -16,4 +16,5 @@ var (
 	TotalStyle     = lipgloss.NewStyle().Bold(true)
 	HeaderStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
 	ErrStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	RecommendStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Bold(true)
 )
