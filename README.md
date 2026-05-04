@@ -46,12 +46,17 @@ See [Ecosystems](docs/ecosystems.md) for full detection and safety details.
 ## Install
 
 ```bash
-# Homebrew
-brew install devclean
-
-# Go
+# Go (recommended for now — Go 1.26+)
 go install github.com/ohing504/devclean/cmd/devclean@latest
+
+# From source
+git clone https://github.com/ohing504/devclean.git
+cd devclean
+go build -o devclean ./cmd/devclean
 ```
+
+> Pre-built binaries (macOS / Linux) and a Homebrew formula are planned for the
+> first tagged release. Until then, please use `go install` or build from source.
 
 ## Usage
 
