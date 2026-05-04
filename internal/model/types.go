@@ -94,15 +94,23 @@ func (r ScanResult) HumanSize() string {
 	return HumanSize(r.Size)
 }
 
-// HumanSize formats bytes into a human-readable string.
+// HumanSize formats bytes into a human-readable string using decimal SI
+// units (1 KB = 1000 B). This matches the macOS Finder convention and keeps
+// the display aligned with the `--min-size` parser, which treats "MB" as
+// 10^6 per humanize/SI convention. Internally we still derive sizes from
+// `du -sk` (binary kilobytes), but the formatting layer is decimal so the
+// number a user types and the number they see agree on the same threshold.
 func HumanSize(size int64) string {
 	const (
-		KB = 1024
-		MB = KB * 1024
-		GB = MB * 1024
+		KB = 1000
+		MB = KB * 1000
+		GB = MB * 1000
+		TB = GB * 1000
 	)
 
 	switch {
+	case size >= TB:
+		return fmt.Sprintf("%.1f TB", float64(size)/float64(TB))
 	case size >= GB:
 		return fmt.Sprintf("%.1f GB", float64(size)/float64(GB))
 	case size >= MB:

@@ -61,18 +61,22 @@ func TestAllCategories(t *testing.T) {
 }
 
 func TestHumanSize(t *testing.T) {
+	// HumanSize uses decimal SI (1 KB = 1000 B) to match macOS Finder
+	// convention and the `--min-size` parser default.
 	tests := []struct {
 		size int64
 		want string
 	}{
 		{0, "0 B"},
 		{500, "500 B"},
-		{1023, "1023 B"},
-		{1024, "1.0 KB"},
-		{1536, "1.5 KB"},
-		{1048576, "1.0 MB"},
-		{1073741824, "1.0 GB"},
-		{5368709120, "5.0 GB"},
+		{999, "999 B"},
+		{1000, "1.0 KB"},
+		{1500, "1.5 KB"},
+		{1024, "1.0 KB"},       // binary KiB still rounds to 1.0 KB
+		{1048576, "1.0 MB"},    // 1 MiB ≈ 1.05 MB → "1.0 MB" rounded
+		{1073741824, "1.1 GB"}, // 1 GiB ≈ 1.07 GB → "1.1 GB" rounded
+		{5368709120, "5.4 GB"}, // 5 GiB ≈ 5.37 GB → "5.4 GB"
+		{1_000_000_000_000, "1.0 TB"},
 	}
 	for _, tt := range tests {
 		got := model.HumanSize(tt.size)
