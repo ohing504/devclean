@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: devclean
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: devclean
+    main: ./cmd/devclean
+    binary: devclean
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.CommitDate}}
+
+archives:
+  - id: default
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: Bug fixes
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: Other
+      order: 999
+
+release:
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## devclean {{ .Tag }}
+
+    Install:
+    ```bash
+    go install github.com/ohing504/devclean/cmd/devclean@{{ .Tag }}
+    ```
+    Or download a pre-built binary from the assets below and put it on your PATH.
+  footer: |
+    **Full Changelog**: https://github.com/ohing504/devclean/compare/{{ .PreviousTag }}...{{ .Tag }}

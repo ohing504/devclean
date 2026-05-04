@@ -26,6 +26,7 @@ the `[0.1.0]` entry.
 - `scan` — discover reclaimable disk space. Filters: `--eco`, `--category`, `--status`, `--min-size`. Sorting: `--sort size|time|name` with `--asc`. `-n / --top` for top-N projects. `--json` for scripting and AI agents. `-v / --verbose` to expand small artifacts.
 - `clean` — remove discovered artifacts. Interactive tree selector by default; `--yes` for non-interactive. `--safe` skips caution/protected items. `--dry-run` previews. `--force` permanently deletes (default sends to Trash on macOS/Linux).
 - `list` — print supported ecosystems, categories, activity statuses, and safety levels.
+- `--version` — print the build version, commit, and date. Populated at build time via goreleaser ldflags; falls back to `dev` for local `go build` invocations.
 
 #### Cross-cutting features
 - **Activity classification** — every artifact tagged `active` (<7d), `recent` (7-30d), `stale` (30-90d), or `dormant` (90+d) using the most recent of artifact mtime, last git commit, and project directory mtime.
