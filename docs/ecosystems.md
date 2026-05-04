@@ -9,6 +9,7 @@
 | `ruby` | Ruby | implemented |
 | `xcode` | iOS/Xcode (macOS only) | implemented |
 | `python` | Python | implemented |
+| `go` | Go | implemented (per-project only) |
 | `android` | Android | planned |
 | `flutter` | Flutter/Dart | planned |
 | `docker` | Docker | planned |
@@ -97,6 +98,20 @@
 **Notes**:
 - `dist`/`build` are intentionally **not** Python artifacts: those names collide with Node and would double-count for mixed projects. Users who need them deleted can do it manually or rely on the Node scanner.
 - Nested projects (e.g. monorepo with sub-packages each having `pyproject.toml`) attribute artifacts to the **deepest** matching project root.
+
+## Go
+
+**Detection**: `go.mod` in parent directory.
+
+**Artifacts**:
+
+| Pattern | Category | Safety | Description |
+|---------|----------|--------|-------------|
+| `vendor` | deps | **caution** | Vendored modules (regenerate with `go mod vendor`) |
+
+**Notes**:
+- `vendor/` is `caution` because `go mod vendor` is an opt-in choice — devs who vendor often do so for offline builds, reproducibility, or supply-chain pinning. Regeneration requires network access plus the original `go.sum`.
+- Go's two big disk hogs — `~/.cache/go-build` (build cache) and `~/go/pkg/mod` (module cache) — are global, not per-project. They will be handled by the Global Caches scanner so they aren't double-attributed to every Go project on the machine.
 
 ## Xcode (macOS only)
 

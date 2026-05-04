@@ -7,6 +7,7 @@ func DefaultRegistry() *Registry {
 	reg.Register(NewRustScanner())
 	reg.Register(NewRubyScanner())
 	reg.Register(NewPythonScanner())
+	reg.Register(NewGoScanner())
 	reg.Register(NewXcodeScanner())
 	return reg
 }
