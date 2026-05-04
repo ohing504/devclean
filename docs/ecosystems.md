@@ -8,7 +8,7 @@
 | `rust` | Rust | implemented |
 | `ruby` | Ruby | implemented |
 | `xcode` | iOS/Xcode (macOS only) | implemented |
-| `python` | Python | planned |
+| `python` | Python | implemented |
 | `android` | Android | planned |
 | `flutter` | Flutter/Dart | planned |
 | `docker` | Docker | planned |
@@ -74,6 +74,29 @@
 | `.ruby-lsp` | cache | safe | Ruby LSP editor cache |
 
 **Note**: `node_modules` in Rails projects using jsbundling/cssbundling is detected by the Node.js scanner via `package.json`.
+
+## Python
+
+**Detection**: any of `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, `Pipfile`, `uv.lock` in a directory marks it as a Python project root. Artifacts are matched anywhere under that root (Python's `__pycache__` lives at every package depth, unlike `node_modules`).
+
+**Artifacts**:
+
+| Pattern | Category | Safety | Description |
+|---------|----------|--------|-------------|
+| `__pycache__` | build | safe | Python bytecode cache (recursive — every package level) |
+| `.pytest_cache` | cache | safe | pytest cache |
+| `.mypy_cache` | cache | safe | mypy type-checker cache |
+| `.ruff_cache` | cache | safe | ruff linter cache |
+| `.tox` | build | safe | tox testing environments |
+| `.nox` | build | safe | nox testing environments |
+| `.ipynb_checkpoints` | cache | safe | Jupyter checkpoint files |
+| `__pypackages__` | deps | safe | PEP 582 local dependencies |
+| `*.egg-info` | build | safe | Packaging metadata (suffix match) |
+| `.venv`, `venv` | deps | **caution** | Virtual environments — often hand-curated; not auto-deletable. See kondo PR #182 |
+
+**Notes**:
+- `dist`/`build` are intentionally **not** Python artifacts: those names collide with Node and would double-count for mixed projects. Users who need them deleted can do it manually or rely on the Node scanner.
+- Nested projects (e.g. monorepo with sub-packages each having `pyproject.toml`) attribute artifacts to the **deepest** matching project root.
 
 ## Xcode (macOS only)
 
