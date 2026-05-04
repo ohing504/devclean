@@ -38,6 +38,7 @@ Pipeline: **Scan → Classify → Filter/Sort → Output/Clean**
 - `internal/output/` — JSON formatter + lipgloss colored table (ecosystem → project → sub-package)
 - `internal/cli/` — cobra commands (scan, clean, list)
 - `internal/ui/` — terminal spinner, interactive tree selector (bubbletea), shared styles
+- `internal/pathutil/` — shared path helpers (`CachedHomeDir`, etc.)
 
 ## Key Design Decisions
 
