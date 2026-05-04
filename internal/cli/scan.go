@@ -15,6 +15,7 @@ func newScanCmd() *cobra.Command {
 		ecos       []string
 		category   string
 		status     string
+		minSizeStr string
 		sortBy     string
 		reverse    bool
 		top        int
@@ -30,11 +31,16 @@ func newScanCmd() *cobra.Command {
   devclean scan --sort time --asc
   devclean scan --eco node --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			minSize, err := parseMinSize(minSizeStr)
+			if err != nil {
+				return err
+			}
 			results, err := runScanPipeline(ScanPipelineOptions{
 				Path:     scanPath,
 				Ecos:     ecos,
 				Status:   status,
 				Category: category,
+				MinSize:  minSize,
 				Quiet:    jsonOutput,
 			})
 			if err != nil {
@@ -60,6 +66,7 @@ func newScanCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&ecos, "eco", nil, "ecosystems to scan, e.g. node,python,xcode")
 	cmd.Flags().StringVar(&category, "category", "", "filter by category: cache, build, runtime, deps")
 	cmd.Flags().StringVar(&status, "status", "", "filter by status: active, recent, stale, dormant")
+	cmd.Flags().StringVar(&minSizeStr, "min-size", "", "skip artifacts smaller than this (e.g. 1MB, 500KB)")
 	cmd.Flags().StringVar(&sortBy, "sort", "size", "sort by: size, time, name")
 	cmd.Flags().BoolVar(&reverse, "asc", false, "sort ascending instead of descending")
 	cmd.Flags().IntVarP(&top, "top", "n", 0, "show only top N projects (0 = all)")

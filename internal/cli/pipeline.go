@@ -18,7 +18,8 @@ type ScanPipelineOptions struct {
 	Status   string
 	Category string
 	SafeOnly bool
-	Quiet    bool // skip spinner (for JSON output)
+	MinSize  int64 // drop artifacts smaller than this many bytes (0 = no filter)
+	Quiet    bool  // skip spinner (for JSON output)
 }
 
 // runScanPipeline scans, classifies, and filters results according to opts.
@@ -91,6 +92,11 @@ func runScanPipeline(opts ScanPipelineOptions) ([]model.ScanResult, error) {
 	if opts.SafeOnly {
 		results = model.FilterResults(results, func(r model.ScanResult) bool {
 			return r.Safety == model.SafetySafe
+		})
+	}
+	if opts.MinSize > 0 {
+		results = model.FilterResults(results, func(r model.ScanResult) bool {
+			return r.Size >= opts.MinSize
 		})
 	}
 

@@ -19,6 +19,7 @@ func newCleanCmd() *cobra.Command {
 		scanPath      string
 		ecos          []string
 		status        string
+		minSizeStr    string
 		safeOnly      bool
 		force         bool
 		dryRun        bool
@@ -35,11 +36,16 @@ func newCleanCmd() *cobra.Command {
   devclean clean --eco node --force
   devclean clean --eco xcode --vendor-cleanup --yes  # also runs 'xcrun simctl delete unavailable'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			minSize, err := parseMinSize(minSizeStr)
+			if err != nil {
+				return err
+			}
 			results, err := runScanPipeline(ScanPipelineOptions{
 				Path:     scanPath,
 				Ecos:     ecos,
 				Status:   status,
 				SafeOnly: safeOnly,
+				MinSize:  minSize,
 			})
 			if err != nil {
 				return err
@@ -178,6 +184,7 @@ func newCleanCmd() *cobra.Command {
 	cmd.Flags().StringVar(&scanPath, "path", "", "path to scan (default: ~)")
 	cmd.Flags().StringSliceVar(&ecos, "eco", nil, "ecosystems to clean, e.g. node,python")
 	cmd.Flags().StringVar(&status, "status", "", "filter by status: active, recent, stale, dormant")
+	cmd.Flags().StringVar(&minSizeStr, "min-size", "", "skip artifacts smaller than this (e.g. 1MB, 500KB)")
 	cmd.Flags().BoolVar(&safeOnly, "safe", false, "clean only safe items (skip caution/protected)")
 	cmd.Flags().BoolVar(&force, "force", false, "permanent delete (skip Trash)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview without deleting")

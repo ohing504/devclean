@@ -16,6 +16,9 @@ devclean scan --status dormant -n 10
 # Sort by last activity
 devclean scan --sort time
 
+# Skip noise — only artifacts ≥ 100 MB
+devclean scan --min-size 100MB
+
 # Verbose: show all sub-packages and artifacts
 devclean scan --path ~/workspace --eco node -v
 
@@ -64,9 +67,24 @@ devclean clean --eco node --dry-run --yes
 # Force permanent delete (skip Trash)
 devclean clean --eco node --force --yes
 
+# Skip artifacts smaller than 50 MB
+devclean clean --eco node --min-size 50MB
+
 # Also run ecosystem-native cleanup commands (e.g. xcrun simctl delete unavailable)
 devclean clean --eco xcode --vendor-cleanup --yes
 ```
+
+### `--min-size`
+
+Both `scan` and `clean` accept `--min-size <size>` to drop artifacts below the
+threshold. Useful when scanning a noisy workspace where lots of sub-MB
+artifacts crowd out the real targets. Sizes use SI/IEC suffixes:
+
+- Decimal: `KB`, `MB`, `GB` (1 KB = 1000 bytes)
+- Binary: `KiB`, `MiB`, `GiB` (1 KiB = 1024 bytes)
+- Plain integer = bytes
+
+`devclean scan --min-size 100MB` keeps only artifacts ≥ 100 MB.
 
 ### Vendor Cleanups
 
