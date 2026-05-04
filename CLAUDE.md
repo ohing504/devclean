@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-devclean is a Go CLI tool that scans developer environments for reclaimable disk space (build artifacts, caches, dependencies, runtimes) and provides safe cleanup. Currently supports Node.js, Rust, Ruby with more ecosystems planned (Python, Xcode, Android, Flutter, Docker).
+devclean is a Go CLI tool that scans developer environments for reclaimable disk space (build artifacts, caches, dependencies, runtimes) and provides safe cleanup. Currently supports Node.js, Rust, Ruby, and Xcode (macOS) with more ecosystems planned (Python, Android, Flutter, Docker).
 
 ## Commands
 
