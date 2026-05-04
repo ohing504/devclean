@@ -1,0 +1,48 @@
+name: Feature request
+description: Propose a new ecosystem, command, flag, or behavior change.
+title: "[feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please describe the **problem** first, then the **proposed solution** — that helps us evaluate alternatives.
+
+        **For new ecosystem support**, see the walkthrough in [CONTRIBUTING.md](https://github.com/ohing504/devclean/blob/main/CONTRIBUTING.md#adding-a-new-ecosystem). PRs are very welcome.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What can't you do today? Whose workflow is hurting?
+      placeholder: |
+        I have ~3 GB of Flutter `.dart_tool/` directories scattered across old client projects. devclean doesn't know about them, so I have to find them manually with `find`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        Concrete behavior. For an ecosystem: marker file, list of artifacts, safety levels, anything tricky about it. For a flag: command, name, semantics, default.
+      placeholder: |
+        Add a Flutter scanner. Marker: `pubspec.yaml` with a `flutter:` section (or just `pubspec.yaml` since detecting the section is messy). Artifacts: `.dart_tool` (cache, safe), `build` (build, safe), `.flutter-plugins-dependencies` (cache, safe).
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you've used, other tool designs you've seen, why those aren't enough.
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Links to similar projects, references, examples.
+    validations:
+      required: false

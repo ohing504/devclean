@@ -1,0 +1,83 @@
+name: Bug report
+description: Report something that misbehaves — crash, wrong scan results, accidental deletion, etc.
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. The more specific you are, the faster we can fix it.
+
+        **If a scan is reporting wrong results or `clean` is deleting (or sparing) the wrong artifact, please include the project layout** — `tree -L 2 <project>` is usually enough.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug. What did you run, what did you see, what did you expect?
+      placeholder: |
+        I ran `devclean scan --eco python` against my uv project and `.venv` showed up as "safe" instead of "caution".
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact command(s) you ran
+      render: bash
+      placeholder: |
+        devclean scan --path ~/projects/my-app --eco python --json
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output (paste full output, or relevant `--json` snippet)
+      render: text
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: devclean version / commit
+      description: Output of `devclean --version` once releases exist, or `git rev-parse HEAD` from the source tree you built.
+      placeholder: "080cfde"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / arch
+      placeholder: "macOS 14.5 (arm64) · Ubuntu 22.04 (x86_64)"
+    validations:
+      required: true
+
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version
+      description: Output of `go version` (only if you built from source).
+      placeholder: "go version go1.26.1 darwin/arm64"
+    validations:
+      required: false
+
+  - type: textarea
+    id: project-layout
+    attributes:
+      label: Project layout (for scanner bugs)
+      description: |
+        For false-positive / false-negative scanner reports, include `tree -L 2 <project>` (or `find <project> -maxdepth 2 -type d` if `tree` isn't installed). Redact any private path names.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Logs, screenshots, hypothesis about the cause, etc.
+    validations:
+      required: false
