@@ -10,10 +10,10 @@
 | `xcode` | iOS/Xcode (macOS only) | implemented |
 | `python` | Python | implemented |
 | `go` | Go | implemented (per-project only) |
+| `global` | Global Caches | implemented |
 | `android` | Android | planned |
 | `flutter` | Flutter/Dart | planned |
 | `docker` | Docker | planned |
-| `global` | Global Caches | planned |
 
 ## Node.js
 
@@ -147,6 +147,27 @@
 **Notes**:
 - `Archives` is `caution` because losing an archive means losing the ability to symbolicate crash reports for that release.
 - `CoreSimulator/Devices` is `caution` because it contains app installs, settings, and user data inside simulators currently in use.
+
+## Global Caches
+
+Shared, home-rooted developer caches that are not tied to any single project. Unlike the per-project scanners, paths are fixed (home-relative) and span package managers and dev tools across ecosystems. Paths owned by a dedicated scanner (Xcode's DerivedData, DeviceSupport, Archives, CoreSimulator) are intentionally excluded to avoid double-counting.
+
+Each entry that is `caution` carries a consequence-of-deletion note in `recommendation` (e.g. "every project re-downloads dependencies on next install") so a user — or an AI agent reading `--json` — can decide without external knowledge. Missing paths are skipped, so macOS (`~/Library/Caches/*`, `~/Library/pnpm/store`) and Linux (`~/.cache/*`) variants coexist in the catalog.
+
+| Path | Category | Safety |
+|------|----------|--------|
+| `~/.npm` | cache | safe |
+| `~/.bun/install/cache` | cache | safe |
+| `~/Library/Caches/{Yarn,pnpm,pip,Homebrew,CocoaPods,go-build,electron,node-gyp,typescript}` | cache | safe |
+| `~/.cache/{go-build,pip,node-gyp,yarn,pnpm,electron}` | cache | safe |
+| `~/Library/pnpm/store` | cache | caution (hard-linked store) |
+| `~/.gradle/caches`, `~/.gradle/wrapper/dists` | cache | caution |
+| `~/.cargo/registry` | cache | caution |
+| `~/go/pkg/mod` | deps | caution (read-only files) |
+| `~/Library/Caches/ms-playwright`, `~/.cache/ms-playwright` | cache | caution |
+| `~/.android/avd` | runtime | caution (emulator user data lost) |
+| `~/Library/Android/sdk/system-images` | runtime | caution |
+| `~/Library/Android/sdk/ndk` | deps | caution |
 
 ## Categories
 
