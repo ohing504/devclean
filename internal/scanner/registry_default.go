@@ -9,5 +9,6 @@ func DefaultRegistry() *Registry {
 	reg.Register(NewPythonScanner())
 	reg.Register(NewGoScanner())
 	reg.Register(NewXcodeScanner())
+	reg.Register(NewGlobalScanner())
 	return reg
 }
