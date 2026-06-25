@@ -57,6 +57,32 @@ func TestGlobalScanner_DetectsCaches(t *testing.T) {
 	}
 }
 
+// TestGlobalScanner_ScopedRootExcludesHomeCaches documents the intended scoping:
+// home-global caches are reported only when the scan root contains them (the
+// default --path is ~). Scanning a subdirectory excludes them — same behavior
+// as the xcode scanner's isUnderRoot guard.
+func TestGlobalScanner_ScopedRootExcludesHomeCaches(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	npm := filepath.Join(home, ".npm")
+	mustMkdir(t, npm)
+	mustWriteFile(t, filepath.Join(npm, "cache.json"), make([]byte, 2048))
+
+	// Scan a subdirectory of home, not home itself.
+	projects := filepath.Join(home, "projects")
+	mustMkdir(t, projects)
+
+	s := scanner.NewGlobalScanner()
+	results, err := s.Scan(context.Background(), projects)
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results when scanning a subdir of home, got %d", len(results))
+	}
+}
+
 // TestGlobalScanner_SkipsMissingPaths ensures absent caches yield no results
 // (an empty home produces nothing rather than phantom entries).
 func TestGlobalScanner_SkipsMissingPaths(t *testing.T) {

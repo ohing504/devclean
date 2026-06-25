@@ -37,7 +37,7 @@ var globalCaches = []globalCache{
 	{".gradle/caches", model.CatCache, model.SafetyCaution, "Gradle dependency & build cache", "Gradle re-downloads dependencies and rebuilds on next run"},
 	{".gradle/wrapper/dists", model.CatCache, model.SafetyCaution, "Gradle wrapper distributions", "Gradle re-downloads its distribution on next run"},
 	{".cargo/registry", model.CatCache, model.SafetyCaution, "Cargo registry cache", "Cargo re-downloads crate sources on next build"},
-	{"go/pkg/mod", model.CatDeps, model.SafetyCaution, "Go module cache", "Go re-downloads all modules on next build (files are read-only)"},
+	{"go/pkg/mod", model.CatDeps, model.SafetyCaution, "Go module cache", "use 'go clean -modcache' — read-only files make --force fail; Go re-downloads on next build"},
 
 	// --- Package managers / dev tools (macOS) ---
 	{"Library/Caches/Yarn", model.CatCache, model.SafetySafe, "Yarn cache", ""},
