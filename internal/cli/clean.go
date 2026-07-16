@@ -54,7 +54,7 @@ func newCleanCmd() *cobra.Command {
 			if len(results) == 0 {
 				fmt.Println("No items to clean.")
 				if vendorCleanup {
-					runVendorCleanups(ecos, dryRun)
+					runVendorCleanups(vendorEcos(ecos, nil), dryRun)
 				}
 				return nil
 			}
@@ -81,7 +81,7 @@ func newCleanCmd() *cobra.Command {
 			if len(toClean) == 0 {
 				fmt.Println("No items selected.")
 				if vendorCleanup {
-					runVendorCleanups(ecos, dryRun)
+					runVendorCleanups(vendorEcos(ecos, toClean), dryRun)
 				}
 				return nil
 			}
@@ -93,7 +93,8 @@ func newCleanCmd() *cobra.Command {
 			}
 
 			if dryRun {
-				fmt.Printf("\n%s %d items (%s)\n\n",
+				fmt.Printf(
+					"\n%s %d items (%s)\n\n",
 					ui.ProjectStyle.Render("Would clean:"),
 					len(toClean), model.HumanSize(totalSize),
 				)
@@ -111,7 +112,7 @@ func newCleanCmd() *cobra.Command {
 					}
 				}
 				if vendorCleanup {
-					runVendorCleanups(ecos, dryRun)
+					runVendorCleanups(vendorEcos(ecos, toClean), dryRun)
 				}
 				return nil
 			}
@@ -166,7 +167,8 @@ func newCleanCmd() *cobra.Command {
 				}
 			}
 
-			fmt.Printf("\n%s\n",
+			fmt.Printf(
+				"\n%s\n",
 				ui.SafeStyle.Render(fmt.Sprintf("Cleaned %d items (%s freed)", cleaned, model.HumanSize(freedSize))),
 			)
 			if failed > 0 {
@@ -174,7 +176,7 @@ func newCleanCmd() *cobra.Command {
 			}
 
 			if vendorCleanup {
-				runVendorCleanups(ecos, dryRun)
+				runVendorCleanups(vendorEcos(ecos, toClean), dryRun)
 			}
 
 			return nil
@@ -194,21 +196,33 @@ func newCleanCmd() *cobra.Command {
 	return cmd
 }
 
-// runVendorCleanups executes vendor-native cleanup actions for the selected
-// ecosystems. In dry-run mode it prints what would run without executing.
-func runVendorCleanups(ecos []string, dryRun bool) {
-	reg := scanner.DefaultRegistry()
-
-	var scanners []scanner.Scanner
+// vendorEcos resolves the vendor-cleanup scope: the explicit --eco selection,
+// or else the ecosystems of the artifacts actually being cleaned. Without
+// --eco we must not fall back to the whole registry — that would run vendor
+// commands (e.g. simctl delete) for ecosystems the user never targeted.
+func vendorEcos(ecos []string, toClean []model.ScanResult) []model.Ecosystem {
 	if len(ecos) > 0 {
-		var ecosystems []model.Ecosystem
-		for _, e := range ecos {
-			ecosystems = append(ecosystems, model.Ecosystem(e))
-		}
-		scanners = reg.ForEcosystems(ecosystems)
-	} else {
-		scanners = reg.All()
+		return toEcosystems(ecos)
 	}
+	seen := make(map[model.Ecosystem]bool)
+	var out []model.Ecosystem
+	for _, r := range toClean {
+		if !seen[r.Ecosystem] {
+			seen[r.Ecosystem] = true
+			out = append(out, r.Ecosystem)
+		}
+	}
+	return out
+}
+
+// runVendorCleanups executes vendor-native cleanup actions for the given
+// ecosystems (none = nothing to run). In dry-run mode it prints what would
+// run without executing.
+func runVendorCleanups(ecosystems []model.Ecosystem, dryRun bool) {
+	if len(ecosystems) == 0 {
+		return
+	}
+	scanners := scanner.DefaultRegistry().ForEcosystems(ecosystems)
 
 	type pending struct {
 		eco    string

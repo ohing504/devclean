@@ -4,12 +4,32 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/ohing504/devclean/internal/classifier"
 	"github.com/ohing504/devclean/internal/model"
 	"github.com/ohing504/devclean/internal/scanner"
 	"github.com/ohing504/devclean/internal/ui"
 )
+
+// toEcosystems converts CLI ecosystem names to model values.
+func toEcosystems(names []string) []model.Ecosystem {
+	ecosystems := make([]model.Ecosystem, 0, len(names))
+	for _, n := range names {
+		ecosystems = append(ecosystems, model.Ecosystem(n))
+	}
+	return ecosystems
+}
+
+// selectScanners returns the scanners for the given ecosystems, or all
+// registered scanners when none are specified.
+func selectScanners(reg *scanner.Registry, ecosystems []model.Ecosystem) []scanner.Scanner {
+	if len(ecosystems) == 0 {
+		return reg.All()
+	}
+	return reg.ForEcosystems(ecosystems)
+}
 
 // ScanPipelineOptions configures the shared scan pipeline.
 type ScanPipelineOptions struct {
@@ -34,19 +54,12 @@ func runScanPipeline(opts ScanPipelineOptions) ([]model.ScanResult, error) {
 	}
 
 	reg := scanner.DefaultRegistry()
+	scanners := selectScanners(reg, toEcosystems(opts.Ecos))
 
-	var scanners []scanner.Scanner
-	if len(opts.Ecos) > 0 {
-		var ecosystems []model.Ecosystem
-		for _, e := range opts.Ecos {
-			ecosystems = append(ecosystems, model.Ecosystem(e))
-		}
-		scanners = reg.ForEcosystems(ecosystems)
-	} else {
-		scanners = reg.All()
-	}
-
-	ctx := context.Background()
+	// Ctrl-C / SIGTERM cancels the context so scanners' ctx.Done() checks
+	// actually abort the walk instead of being dead code.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	var sp *ui.Spinner
 	if !opts.Quiet {

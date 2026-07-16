@@ -50,7 +50,8 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 
 		projects := model.GroupByProject(eg.items)
 
-		fmt.Fprintf(w, "\n%s %s\n",
+		fmt.Fprintf(
+			w, "\n%s %s\n",
 			ui.HeaderStyle.Render(fmt.Sprintf("● %s", eg.ecosystem)),
 			ui.DimStyle.Render(fmt.Sprintf("%d projects · %s", len(projects), model.HumanSize(eg.totalSize))),
 		)
@@ -63,7 +64,8 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 				protectedBadge = " " + ui.ProtectedStyle.Render("Protected")
 			}
 
-			fmt.Fprintf(w, "  %s%s %s %s\n",
+			fmt.Fprintf(
+				w, "  %s%s %s %s\n",
 				ui.ProjectStyle.Render(p.Name),
 				protectedBadge,
 				badge,
@@ -86,17 +88,20 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 		}
 	}
 
-	fmt.Fprintf(w, "\n%s\n",
+	fmt.Fprintf(
+		w, "\n%s\n",
 		ui.TotalStyle.Render(fmt.Sprintf("Total: %s (%d items)", model.HumanSize(grandTotal), grandCount)),
 	)
 	if safeTotal > 0 {
-		fmt.Fprintf(w, "%s\n",
+		fmt.Fprintf(
+			w, "%s\n",
 			ui.SafeStyle.Render(fmt.Sprintf("Safe to clean: %s", model.HumanSize(safeTotal))),
 		)
 	}
 
 	// Legend
-	fmt.Fprintf(w, "\n%s  %s safe  %s caution  %s protected   %s Active  %s Recent  %s Stale  %s Dormant\n",
+	fmt.Fprintf(
+		w, "\n%s  %s safe  %s caution  %s protected   %s Active  %s Recent  %s Stale  %s Dormant\n",
 		ui.DimStyle.Render("Legend:"),
 		ui.SafeStyle.Render("✔"), ui.CautionStyle.Render("⚠"), ui.ProtectedStyle.Render("✖"),
 		ui.ActiveStyle.Render("●"), ui.RecentStyle.Render("●"), ui.StaleStyle.Render("●"), ui.DormantStyle.Render("●"),
@@ -256,9 +261,6 @@ func groupBySubPackage(items []model.ScanResult, projectRoot string) []subPackag
 	for _, r := range items {
 		rel := artifactRelPath(r.Path, projectRoot)
 		dir := filepath.Dir(rel)
-		if dir == "." {
-			dir = "."
-		}
 
 		sp, ok := m[dir]
 		if !ok {
@@ -308,7 +310,8 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 		if displayName == "." {
 			displayName = ". (root)"
 		}
-		fmt.Fprintf(w, "    %s %s\n",
+		fmt.Fprintf(
+			w, "    %s %s\n",
 			ui.ProjectStyle.Render(displayName),
 			ui.DimStyle.Render(fmt.Sprintf("(%s)", model.HumanSize(sp.totalSize))),
 		)
@@ -319,7 +322,8 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 			name := artifactDisplayName(r)
 			cat := ui.DimStyle.Render("(" + string(r.Category) + ")")
 			rec := recommendationTag(r)
-			fmt.Fprintf(w, "      %s %-24s %10s%s\n",
+			fmt.Fprintf(
+				w, "      %s %-24s %10s%s\n",
 				icon,
 				name+" "+cat,
 				ui.InfoStyle.Render(model.HumanSize(r.Size)),
@@ -329,7 +333,8 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 	}
 
 	if collapsedPkgs > 0 {
-		fmt.Fprintf(w, "    %s\n",
+		fmt.Fprintf(
+			w, "    %s\n",
 			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more packages (%s)", collapsedPkgs, model.HumanSize(collapsedPkgSize))),
 		)
 	}
@@ -350,7 +355,8 @@ func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot stri
 		name := artifactDisplayNameOr(r, artifactRelPath(r.Path, projectRoot))
 		cat := ui.DimStyle.Render("(" + string(r.Category) + ")")
 		rec := recommendationTag(r)
-		fmt.Fprintf(w, "    %s %-30s %10s%s\n",
+		fmt.Fprintf(
+			w, "    %s %-30s %10s%s\n",
 			icon,
 			name+" "+cat,
 			ui.InfoStyle.Render(model.HumanSize(r.Size)),
@@ -359,7 +365,8 @@ func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot stri
 	}
 
 	if collapsed > 0 {
-		fmt.Fprintf(w, "    %s\n",
+		fmt.Fprintf(
+			w, "    %s\n",
 			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more (%s)", collapsed, model.HumanSize(collapsedSize))),
 		)
 	}
