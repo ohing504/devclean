@@ -317,5 +317,5 @@ func isUnderRoot(path, root string) bool {
 	if err != nil {
 		return false
 	}
-	return rel == "." || !strings.HasPrefix(rel, "..")
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
