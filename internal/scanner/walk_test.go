@@ -22,6 +22,56 @@ func (s *stubScanner) Scan(_ context.Context, _ string) ([]model.ScanResult, err
 	return s.results, nil
 }
 
+// TestWalkScan_DedupCoverage pins the double-count fix for artifacts listed
+// by several ecosystems: a directory matching rules of multiple active
+// ecosystems is emitted once, attributed to the first table in order. With a
+// subset of ecosystems active, attribution follows the first active table.
+func TestWalkScan_DedupCoverage(t *testing.T) {
+	root := t.TempDir()
+
+	// A project that is both a Node and a Ruby project, with a coverage/
+	// directory that node and ruby tables both list.
+	proj := filepath.Join(root, "dualapp")
+	if err := os.MkdirAll(filepath.Join(proj, "coverage"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, f := range []string{"package.json", "Gemfile", filepath.Join("coverage", "index.html")} {
+		if err := os.WriteFile(filepath.Join(proj, f), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", f, err)
+		}
+	}
+
+	// node + ruby active: exactly one result, attributed to node (table order).
+	results, err := WalkScan(context.Background(), root, model.EcoNode, model.EcoRuby)
+	if err != nil {
+		t.Fatalf("WalkScan error: %v", err)
+	}
+	if len(results) != 1 {
+		for _, r := range results {
+			t.Logf("  %s %s", r.Ecosystem, r.Path)
+		}
+		t.Fatalf("expected exactly 1 result for node+ruby, got %d", len(results))
+	}
+	if results[0].Path != filepath.Join(proj, "coverage") {
+		t.Errorf("unexpected path: %s", results[0].Path)
+	}
+	if results[0].Ecosystem != model.EcoNode {
+		t.Errorf("expected node attribution (first table), got %s", results[0].Ecosystem)
+	}
+
+	// ruby alone: the same directory is attributed to ruby.
+	results, err = WalkScan(context.Background(), root, model.EcoRuby)
+	if err != nil {
+		t.Fatalf("WalkScan error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected exactly 1 result for ruby alone, got %d", len(results))
+	}
+	if results[0].Ecosystem != model.EcoRuby {
+		t.Errorf("expected ruby attribution, got %s", results[0].Ecosystem)
+	}
+}
+
 // TestScanWithProgress_MixedPartition pins the partition behavior: walk
 // adapters are batched into a single walk that runs first (reported under the
 // "projects" label), remaining scanners run sequentially after it, and batch

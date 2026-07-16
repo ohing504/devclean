@@ -18,8 +18,7 @@ func TestRustScanner_FindsTarget(t *testing.T) {
 	mustWriteFile(t, filepath.Join(targetDir, "myproject"), make([]byte, 8192))
 	mustWriteFile(t, filepath.Join(projDir, "Cargo.toml"), []byte("[package]"))
 
-	s := scanner.NewRustScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoRust)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -47,8 +46,7 @@ func TestRustScanner_IgnoresWithoutCargoToml(t *testing.T) {
 	targetDir := filepath.Join(root, "random", "target")
 	mustMkdir(t, targetDir)
 
-	s := scanner.NewRustScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoRust)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -58,13 +56,16 @@ func TestRustScanner_IgnoresWithoutCargoToml(t *testing.T) {
 }
 
 func TestRustScanner_NameAndEcosystem(t *testing.T) {
-	s := scanner.NewRustScanner()
-	if s.Name() != "rust" {
-		t.Errorf("expected name=rust, got %s", s.Name())
+	for _, s := range scanner.DefaultRegistry().All() {
+		if s.Name() != "rust" {
+			continue
+		}
+		if s.Ecosystem() != model.EcoRust {
+			t.Errorf("expected ecosystem=rust, got %s", s.Ecosystem())
+		}
+		return
 	}
-	if s.Ecosystem() != model.EcoRust {
-		t.Errorf("expected ecosystem=rust, got %s", s.Ecosystem())
-	}
+	t.Error(`expected a registered scanner named "rust"`)
 }
 
 func TestRustScanner_Workspace(t *testing.T) {
@@ -78,8 +79,7 @@ func TestRustScanner_Workspace(t *testing.T) {
 	mustMkdir(t, filepath.Join(projDir, "crates", "core"))
 	mustWriteFile(t, filepath.Join(projDir, "crates", "core", "Cargo.toml"), []byte("[package]"))
 
-	s := scanner.NewRustScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoRust)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}

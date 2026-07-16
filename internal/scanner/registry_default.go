@@ -4,10 +4,10 @@ package scanner
 func DefaultRegistry() *Registry {
 	reg := NewRegistry()
 	reg.Register(newWalkScanner(nodeWalkEcosystem))
-	reg.Register(NewRustScanner())
-	reg.Register(NewRubyScanner())
+	reg.Register(newWalkScanner(rustWalkEcosystem))
+	reg.Register(newWalkScanner(rubyWalkEcosystem))
 	reg.Register(NewPythonScanner())
-	reg.Register(NewGoScanner())
+	reg.Register(newWalkScanner(goWalkEcosystem))
 	reg.Register(NewXcodeScanner())
 	reg.Register(NewGlobalScanner())
 	reg.Register(NewLLMScanner())
