@@ -24,6 +24,7 @@ Developer disk cleanup CLI — scan and clean build artifacts, caches, dependenc
 | **Go** | `go.mod` | `vendor` (caution; per-project only — global caches handled by the `global` scanner) | ✅ |
 | **iOS/Xcode** (macOS only) | fixed `~/Library/Developer/...` paths | `DerivedData`, `Archives`, `iOS/watchOS/tvOS DeviceSupport`, `CoreSimulator/Devices`, simulator runtimes | ✅ |
 | **Global caches** | fixed home paths | `~/.npm`, pnpm store & cache, Yarn, bun, pip, uv, Homebrew, CocoaPods, Gradle, Go build/module caches, cargo registry, Playwright, Electron, node-gyp, TypeScript, AI tool caches (Claude Code, Codex, Gemini, Cursor), Android AVD/NDK/system-images | ✅ |
+| **LLM model stores** | fixed home paths | LM Studio and Hugging Face hub models (per model), Ollama and llamafile stores — with a "last used" hint | ✅ |
 | Android | | | planned |
 | Flutter | | | planned |
 | Docker | | | planned |

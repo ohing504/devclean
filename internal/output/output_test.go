@@ -119,6 +119,28 @@ func TestWriteTableEmpty(t *testing.T) {
 	}
 }
 
+func TestWriteTable_LastUsedTag(t *testing.T) {
+	// Artifacts with a non-zero LastUsedAt get a "last used …" tag; artifacts
+	// without one render exactly as before (no tag).
+	fixedTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	results := []model.ScanResult{
+		{Path: "/home/.lmstudio/models/org/model", Ecosystem: model.EcoLLM, Category: model.CatCache, Size: 500000000, LastMod: fixedTime, Safety: model.SafetySafe, LastUsedAt: fixedTime},
+		{Path: "/home/.npm", Ecosystem: model.EcoGlobal, Category: model.CatCache, Size: 300000000, LastMod: fixedTime, Safety: model.SafetySafe},
+	}
+
+	var buf bytes.Buffer
+	output.WriteTable(&buf, results)
+	out := buf.String()
+
+	if !strings.Contains(out, "last used") {
+		t.Errorf("expected 'last used' tag for non-zero LastUsedAt:\n%s", out)
+	}
+	// Only the LLM artifact carries the tag — the zero-value one must not.
+	if strings.Count(out, "last used") != 1 {
+		t.Errorf("expected exactly 1 'last used' tag (zero LastUsedAt renders nothing):\n%s", out)
+	}
+}
+
 func TestWriteTable_TopNByProject(t *testing.T) {
 	// --top should limit by project count, not individual artifact count.
 	// A project with 2 artifacts should count as 1 project.

@@ -323,10 +323,11 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 			cat := ui.DimStyle.Render("(" + string(r.Category) + ")")
 			rec := recommendationTag(r)
 			fmt.Fprintf(
-				w, "      %s %-24s %10s%s\n",
+				w, "      %s %-24s %10s%s%s\n",
 				icon,
 				name+" "+cat,
 				ui.InfoStyle.Render(model.HumanSize(r.Size)),
+				lastUsedTag(r),
 				rec,
 			)
 		}
@@ -356,10 +357,11 @@ func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot stri
 		cat := ui.DimStyle.Render("(" + string(r.Category) + ")")
 		rec := recommendationTag(r)
 		fmt.Fprintf(
-			w, "    %s %-30s %10s%s\n",
+			w, "    %s %-30s %10s%s%s\n",
 			icon,
 			name+" "+cat,
 			ui.InfoStyle.Render(model.HumanSize(r.Size)),
+			lastUsedTag(r),
 			rec,
 		)
 	}
@@ -395,6 +397,16 @@ func recommendationTag(r model.ScanResult) string {
 		return ""
 	}
 	return "  " + ui.RecommendStyle.Render("← "+r.Recommendation)
+}
+
+// lastUsedTag formats r.LastUsedAt as a dim trailing tag, or "" when the
+// scanner did not populate it (zero time renders nothing so existing output
+// stays byte-identical).
+func lastUsedTag(r model.ScanResult) string {
+	if r.LastUsedAt.IsZero() {
+		return ""
+	}
+	return " " + ui.DimStyle.Render("· last used "+relativeTime(r.LastUsedAt))
 }
 
 // artifactRelPath returns the path of an artifact relative to its project root.

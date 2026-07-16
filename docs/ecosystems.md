@@ -11,6 +11,7 @@
 | `python` | Python | implemented |
 | `go` | Go | implemented (per-project only) |
 | `global` | Global Caches | implemented |
+| `llm` | LLM Model Stores | implemented |
 | `android` | Android | planned |
 | `flutter` | Flutter/Dart | planned |
 | `docker` | Docker | planned |
@@ -183,6 +184,23 @@ Each entry that is `caution` carries a consequence-of-deletion note in `recommen
 | `/private/var/folders/*/*/X/*.code_sign_clone` | cache | safe / caution (macOS only — Browser Temp, see below) |
 
 **Browser Temp (macOS)**: Chromium-family browsers (Chrome, Brave, Edge, Arc, Vivaldi, …) copy their own bundle to `/private/var/folders/<xx>/<yyy>/X/<bundle-id>.code_sign_clone/` on launch to verify their code signature and remove the copy on normal exit. Force-killed processes — typically headless automation like lighthouse or puppeteer — leave zombie copies that accumulate (observed: 92 copies / 156 GB). Matching uses a single `*.code_sign_clone` glob rather than a per-browser catalog; the label carries the browser name (derived from the bundle ID) and the copy count. Safety follows run state: `safe` when the browser is not running (true zombies), `caution` while it runs (checked via `pgrep`, once per browser — the newest copy may be in use) or when the bundle ID is unrecognized (run state unknowable). Because the path lies outside home, it is reported only when the scan root covers the home directory — a `--path` scan of a home subdirectory never surfaces system temp. Reported size may overstate real usage when the copies are APFS clones of the installed app.
+
+## LLM Model Stores
+
+Local LLM model stores at fixed home paths. Model weights dominate these directories (often tens of GB per model) and are always re-downloadable, so every entry is `safe` with a re-download note in `recommendation`. Missing paths are skipped.
+
+| Path | Unit | Label |
+|------|------|-------|
+| `~/.lmstudio/models/<org>/<model>/` | one result per model directory | `<org>/<model>` |
+| `~/.cache/huggingface/hub/models--<org>--<name>/` | one result per model directory | decoded to `<org>/<name>` |
+| `~/.ollama/models` | store as a whole | `Ollama model store` |
+| `~/.llamafile` | store as a whole | `llamafile store` |
+
+LM Studio and Hugging Face hub lay each model out as its own directory, so they are reported per model — delete only the models you no longer use. Ollama stores weights as content-addressed blobs shared across models, so it is reported as one entry; to remove individual models, prefer `ollama rm <model>` (noted in `recommendation`).
+
+**Last used**: each result carries `last_used_at` (JSON) / a dim "last used …" hint (table), derived from the model directory's mtime (store mtime for Ollama/llamafile) — a rough signal for spotting models that haven't been touched in months. Log-based usage analysis is a possible future refinement.
+
+Like the global caches, stores are home-rooted and reported only when the scan root contains them — a `--path` scan of a home subdirectory excludes them.
 
 ## Categories
 
