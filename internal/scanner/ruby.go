@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -54,8 +53,6 @@ func (s *RubyScanner) Scan(ctx context.Context, root string) ([]model.ScanResult
 		}
 	}
 
-	skipPaths := make(map[string]bool)
-
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -69,13 +66,6 @@ func (s *RubyScanner) Scan(ctx context.Context, root string) ([]model.ScanResult
 
 		if !d.IsDir() {
 			return nil
-		}
-
-		// Skip already-found artifact subtrees
-		for skip := range skipPaths {
-			if strings.HasPrefix(path, skip+string(os.PathSeparator)) {
-				return fs.SkipDir
-			}
 		}
 
 		// Skip hidden dirs that aren't artifacts we care about
@@ -99,7 +89,6 @@ func (s *RubyScanner) Scan(ctx context.Context, root string) ([]model.ScanResult
 						Safety:    safetyFromDef(ca.def),
 					})
 					ReportProgress(ctx, len(results))
-					skipPaths[path] = true
 					return fs.SkipDir
 				}
 			}
@@ -119,7 +108,6 @@ func (s *RubyScanner) Scan(ctx context.Context, root string) ([]model.ScanResult
 					Safety:    safetyFromDef(art),
 				})
 				ReportProgress(ctx, len(results))
-				skipPaths[path] = true
 				return fs.SkipDir
 			}
 		}

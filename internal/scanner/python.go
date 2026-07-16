@@ -56,7 +56,6 @@ func (s *PythonScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 
 	// Project roots discovered while walking; used as ancestor predicate for artifact matches.
 	projectRoots := []string{}
-	skipPaths := make(map[string]bool)
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -71,12 +70,6 @@ func (s *PythonScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 
 		if !d.IsDir() {
 			return nil
-		}
-
-		for skip := range skipPaths {
-			if path == skip || strings.HasPrefix(path, skip+string(os.PathSeparator)) {
-				return fs.SkipDir
-			}
 		}
 
 		// Register project root if any marker is present.
@@ -111,7 +104,6 @@ func (s *PythonScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 				ProjectRoot: owner,
 			})
 			ReportProgress(ctx, len(results))
-			skipPaths[path] = true
 			return fs.SkipDir
 		}
 
@@ -127,7 +119,6 @@ func (s *PythonScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 				ProjectRoot: owner,
 			})
 			ReportProgress(ctx, len(results))
-			skipPaths[path] = true
 			return fs.SkipDir
 		}
 
