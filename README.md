@@ -21,12 +21,12 @@ Developer disk cleanup CLI — scan and clean build artifacts, caches, dependenc
 | **Rust** | `Cargo.toml` | `target` | ✅ |
 | **Ruby** | `Gemfile` | `vendor/bundle`, `.bundle`, `tmp`, `log`, `coverage`, `.ruby-lsp` | ✅ |
 | **Python** | `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, `Pipfile`, `uv.lock` | `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.nox`, `.ipynb_checkpoints`, `__pypackages__`, `*.egg-info`, `.venv` / `venv` (caution) | ✅ |
-| **Go** | `go.mod` | `vendor` (caution; per-project only — global caches handled by upcoming `global` scanner) | ✅ |
+| **Go** | `go.mod` | `vendor` (caution; per-project only — global caches handled by the `global` scanner) | ✅ |
 | **iOS/Xcode** (macOS only) | fixed `~/Library/Developer/...` paths | `DerivedData`, `Archives`, `iOS/watchOS/tvOS DeviceSupport`, `CoreSimulator/Devices`, simulator runtimes | ✅ |
+| **Global caches** | fixed home paths | `~/.npm`, pnpm store & cache, Yarn, bun, pip, Homebrew, CocoaPods, Gradle, Go build/module caches, cargo registry, Playwright, Electron, node-gyp, TypeScript, Android AVD/NDK/system-images | ✅ |
 | Android | | | planned |
 | Flutter | | | planned |
 | Docker | | | planned |
-| Global caches | | | planned |
 
 See [Ecosystems](docs/ecosystems.md) for full detection and safety details.
 

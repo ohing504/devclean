@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No changes yet._
+### Added
+
+#### Ecosystem scanners
+- **Global Caches** scanner (`global`) covering 27 shared caches at fixed home paths: package managers (npm, pnpm store & cache, Yarn, bun, pip, Homebrew, CocoaPods, Gradle caches & wrapper dists, cargo registry, Go build & module caches), dev tools (Playwright, Electron, node-gyp, TypeScript), and Android SDK (AVD, NDK, system images). macOS paths with Linux `~/.cache` fallbacks. Shared caches whose deletion forces re-downloads are marked `caution` with a consequence note.
 
 ## [0.1.0] - 2026-05-04
 
