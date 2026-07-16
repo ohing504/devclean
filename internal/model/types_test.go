@@ -31,8 +31,8 @@ func TestEcosystemValues(t *testing.T) {
 
 func TestAllEcosystems(t *testing.T) {
 	ecos := model.AllEcosystems()
-	if len(ecos) != 10 {
-		t.Errorf("expected 10 ecosystems, got %d", len(ecos))
+	if len(ecos) != 11 {
+		t.Errorf("expected 11 ecosystems, got %d", len(ecos))
 	}
 }
 

@@ -21,13 +21,14 @@ const (
 	EcoRuby    Ecosystem = "ruby"
 	EcoGo      Ecosystem = "go"
 	EcoGlobal  Ecosystem = "global"
+	EcoLLM     Ecosystem = "llm"
 )
 
 // AllEcosystems returns all supported ecosystems in display order.
 func AllEcosystems() []Ecosystem {
 	return []Ecosystem{
 		EcoXcode, EcoAndroid, EcoFlutter,
-		EcoNode, EcoDocker, EcoPython, EcoRust, EcoRuby, EcoGo, EcoGlobal,
+		EcoNode, EcoDocker, EcoPython, EcoRust, EcoRuby, EcoGo, EcoGlobal, EcoLLM,
 	}
 }
 
@@ -87,6 +88,7 @@ type ScanResult struct {
 	ProjectRoot    string         `json:"project_root,omitempty"`
 	Label          string         `json:"label,omitempty"`          // human-readable display name (e.g. "iPhone 17 Pro · iOS 26.3")
 	Recommendation string         `json:"recommendation,omitempty"` // hint for the user (e.g. "old build", "unavailable runtime")
+	LastUsedAt     time.Time      `json:"last_used_at,omitzero"`    // when the item itself was last used, if the scanner can tell (omitzero: zero time is dropped from JSON)
 }
 
 // HumanSize returns a human-readable size string.

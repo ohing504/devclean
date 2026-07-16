@@ -23,7 +23,8 @@ Developer disk cleanup CLI — scan and clean build artifacts, caches, dependenc
 | **Python** | `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, `Pipfile`, `uv.lock` | `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.nox`, `.ipynb_checkpoints`, `__pypackages__`, `*.egg-info`, `.venv` / `venv` (caution) | ✅ |
 | **Go** | `go.mod` | `vendor` (caution; per-project only — global caches handled by the `global` scanner) | ✅ |
 | **iOS/Xcode** (macOS only) | fixed `~/Library/Developer/...` paths | `DerivedData`, `Archives`, `iOS/watchOS/tvOS DeviceSupport`, `CoreSimulator/Devices`, simulator runtimes | ✅ |
-| **Global caches** | fixed home paths | `~/.npm`, pnpm store & cache, Yarn, bun, pip, Homebrew, CocoaPods, Gradle, Go build/module caches, cargo registry, Playwright, Electron, node-gyp, TypeScript, Android AVD/NDK/system-images | ✅ |
+| **Global caches** | fixed home paths | `~/.npm`, pnpm store & cache, Yarn, bun, pip, uv, Homebrew, CocoaPods, Gradle, Go build/module caches, cargo registry, Playwright, Electron, node-gyp, TypeScript, AI tool caches (Claude Code, Codex, Gemini, Cursor), Android AVD/NDK/system-images | ✅ |
+| **LLM model stores** | fixed home paths | LM Studio and Hugging Face hub models (per model), Ollama and llamafile stores — with a "last used" hint | ✅ |
 | Android | | | planned |
 | Flutter | | | planned |
 | Docker | | | planned |
