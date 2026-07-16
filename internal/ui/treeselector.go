@@ -42,11 +42,9 @@ type TreeSelectorResult struct {
 
 // treeModel is the bubbletea model for tree selection.
 type treeModel struct {
-	items       []TreeItem
-	cursor      int
-	done        bool
-	aborted     bool
-	windowWidth int
+	items   []TreeItem
+	cursor  int
+	aborted bool
 }
 
 // BuildTreeItems constructs the flat item list from grouped scan results.
@@ -180,36 +178,34 @@ func (m treeModel) Init() tea.Cmd {
 }
 
 func (m treeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "up", "k":
-			m.moveCursor(-1)
-		case "down", "j":
-			m.moveCursor(1)
-		case "left", "h":
-			m.jumpProject(-1)
-		case "right", "l":
-			m.jumpProject(1)
-		case " ":
-			m.toggleCurrent()
-		case "enter":
-			m.done = true
-			return m, tea.Quit
-		case "q", "esc", "ctrl+c":
-			m.aborted = true
-			return m, tea.Quit
-		case "a":
-			m.selectAll()
-		case "n":
-			m.selectNone()
-		case "s":
-			m.selectBySafety(model.SafetySafe)
-		case "d":
-			m.selectByActivity(model.StatusDormant)
-		}
-	case tea.WindowSizeMsg:
-		m.windowWidth = msg.Width
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch key.String() {
+	case "up", "k":
+		m.moveCursor(-1)
+	case "down", "j":
+		m.moveCursor(1)
+	case "left", "h":
+		m.jumpProject(-1)
+	case "right", "l":
+		m.jumpProject(1)
+	case " ":
+		m.toggleCurrent()
+	case "enter":
+		return m, tea.Quit
+	case "q", "esc", "ctrl+c":
+		m.aborted = true
+		return m, tea.Quit
+	case "a":
+		m.selectAll()
+	case "n":
+		m.selectNone()
+	case "s":
+		m.selectBySafety(model.SafetySafe)
+	case "d":
+		m.selectByActivity(model.StatusDormant)
 	}
 	return m, nil
 }
@@ -275,16 +271,13 @@ func (m *treeModel) toggleCurrent() {
 func (m *treeModel) updateProjectState(projectIdx int) {
 	project := &m.items[projectIdx]
 	allSelected := true
-	anySelected := false
 	for _, ci := range project.Children {
-		if m.items[ci].Selected {
-			anySelected = true
-		} else {
+		if !m.items[ci].Selected {
 			allSelected = false
+			break
 		}
 	}
 	project.Selected = allSelected
-	_ = anySelected // used for partial state rendering
 }
 
 func (m *treeModel) isPartiallySelected(projectIdx int) bool {
@@ -302,9 +295,17 @@ func (m *treeModel) isPartiallySelected(projectIdx int) bool {
 }
 
 func (m *treeModel) selectAll() {
+	// Artifact rows never carry Protected themselves — protection lives on the
+	// parent project, so check it there (same pattern as selectBySafety).
 	for i := range m.items {
-		if !m.items[i].Protected {
+		if m.items[i].Type == ItemArtifact && !m.items[m.items[i].Parent].Protected {
 			m.items[i].Selected = true
+		}
+	}
+	// Update project states
+	for i := range m.items {
+		if m.items[i].Type == ItemProject {
+			m.updateProjectState(i)
 		}
 	}
 }
