@@ -91,6 +91,8 @@ artifacts crowd out the real targets. Sizes use SI/IEC suffixes:
 Some ecosystems ship official cleanup commands that are stricter or safer than
 deleting paths directly (they keep the vendor's internal state consistent).
 The `--vendor-cleanup` flag runs them in addition to the path-based cleanup.
+They are scoped to the ecosystems you target: the `--eco` selection, or — when
+`--eco` is omitted — the ecosystems of the artifacts actually being cleaned.
 
 | Ecosystem | Command | What it does |
 |-----------|---------|--------------|
