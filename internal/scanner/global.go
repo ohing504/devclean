@@ -221,6 +221,7 @@ var codeSignCloneBrowsers = map[string]codeSignCloneBrowser{
 	"company.thebrowser.Browser": {"Arc", "Arc"},
 	"com.vivaldi.Vivaldi":        {"Vivaldi", "Vivaldi"},
 	"org.chromium.Chromium":      {"Chromium", "Chromium"},
+	"com.naver.Whale":            {"Whale", "Whale"},
 }
 
 // scanCodeSignClones finds leftover browser code-sign clones under the
