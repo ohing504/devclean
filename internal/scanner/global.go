@@ -37,7 +37,20 @@ var globalCaches = []globalCache{
 	{".gradle/caches", model.CatCache, model.SafetyCaution, "Gradle dependency & build cache", "Gradle re-downloads dependencies and rebuilds on next run"},
 	{".gradle/wrapper/dists", model.CatCache, model.SafetyCaution, "Gradle wrapper distributions", "Gradle re-downloads its distribution on next run"},
 	{".cargo/registry", model.CatCache, model.SafetyCaution, "Cargo registry cache", "Cargo re-downloads crate sources on next build"},
+	{".cargo/git", model.CatCache, model.SafetyCaution, "Cargo git dependency cache", "Cargo re-clones git dependencies on next build"},
 	{"go/pkg/mod", model.CatDeps, model.SafetyCaution, "Go module cache", "use 'go clean -modcache' — read-only files make --force fail; Go re-downloads on next build"},
+	{".rustup/toolchains", model.CatRuntime, model.SafetyCaution, "Rust toolchains", "installed toolchains must be reinstalled with 'rustup toolchain install'"},
+	{".nvm/versions", model.CatRuntime, model.SafetyCaution, "nvm-installed Node.js runtimes", "deletes installed Node.js versions, not a cache — reinstall with 'nvm install'"},
+	{".pyenv/versions", model.CatRuntime, model.SafetyCaution, "pyenv-installed Python runtimes", "deletes installed Python versions, not a cache — reinstall with 'pyenv install'"},
+	{".rbenv/versions", model.CatRuntime, model.SafetyCaution, "rbenv-installed Ruby runtimes", "deletes installed Ruby versions, not a cache — reinstall with 'rbenv install'"},
+	{".local/pipx", model.CatDeps, model.SafetyCaution, "pipx-installed CLI tools", "deletes the installed CLI tools themselves — each must be reinstalled with 'pipx install'"},
+	{".m2/repository", model.CatDeps, model.SafetyCaution, "Maven local repository", "shared by every Maven project; dependencies re-download on next build"},
+	{".gem", model.CatCache, model.SafetySafe, "RubyGems cache", ""},
+	{".cocoapods", model.CatCache, model.SafetySafe, "CocoaPods spec repos", ""},
+	// uv and Puppeteer (v19+) use the XDG ~/.cache path on macOS too, so these
+	// live here rather than in the Linux section.
+	{".cache/uv", model.CatCache, model.SafetySafe, "uv package cache", ""},
+	{".cache/puppeteer", model.CatCache, model.SafetySafe, "Puppeteer browser cache", ""},
 
 	// --- Package managers / dev tools (macOS) ---
 	{"Library/Caches/Yarn", model.CatCache, model.SafetySafe, "Yarn cache", ""},
@@ -51,6 +64,10 @@ var globalCaches = []globalCache{
 	{"Library/Caches/electron", model.CatCache, model.SafetySafe, "Electron binary cache", ""},
 	{"Library/Caches/node-gyp", model.CatCache, model.SafetySafe, "node-gyp header cache", ""},
 	{"Library/Caches/typescript", model.CatCache, model.SafetySafe, "TypeScript installer cache", ""},
+	{"Library/Caches/uv", model.CatCache, model.SafetySafe, "uv package cache", ""},
+	{"Library/Caches/Cypress", model.CatCache, model.SafetySafe, "Cypress binary cache", ""},
+	{"Library/Caches/deno", model.CatCache, model.SafetySafe, "Deno cache", ""},
+	{"Library/Caches/pypoetry", model.CatCache, model.SafetySafe, "Poetry cache", ""},
 
 	// --- Dev tools (Linux ~/.cache equivalents) ---
 	{".cache/go-build", model.CatCache, model.SafetySafe, "Go build cache", ""},
@@ -60,11 +77,29 @@ var globalCaches = []globalCache{
 	{".cache/yarn", model.CatCache, model.SafetySafe, "Yarn cache", ""},
 	{".cache/pnpm", model.CatCache, model.SafetySafe, "pnpm download cache", ""},
 	{".cache/electron", model.CatCache, model.SafetySafe, "Electron binary cache", ""},
+	{".cache/Cypress", model.CatCache, model.SafetySafe, "Cypress binary cache", ""},
+	{".cache/deno", model.CatCache, model.SafetySafe, "Deno cache", ""},
+	{".cache/pypoetry", model.CatCache, model.SafetySafe, "Poetry cache", ""},
 
 	// --- Android SDK (home-rooted, large; no dedicated scanner yet) ---
 	{".android/avd", model.CatRuntime, model.SafetyCaution, "Android Virtual Devices", "emulator AVDs and their user data must be recreated"},
 	{"Library/Android/sdk/system-images", model.CatRuntime, model.SafetyCaution, "Android emulator system images", "emulators won't start until images are re-downloaded"},
 	{"Library/Android/sdk/ndk", model.CatDeps, model.SafetyCaution, "Android NDK installations", "NDK is re-downloaded on next native build"},
+	{"Library/Android/sdk/build-tools", model.CatRuntime, model.SafetyCaution, "Android SDK build tools", "builds fail until build-tools are re-downloaded via the SDK manager"},
+
+	// --- AI tools ---
+	{".claude/projects", model.CatCache, model.SafetyCaution, "Claude Code session history & project memory", "Claude Code session history/memory — deleting breaks --resume and project memory"},
+	{".claude/plugins/cache", model.CatCache, model.SafetySafe, "Claude Code plugin cache", ""},
+	{".claude/shell-snapshots", model.CatCache, model.SafetySafe, "Claude Code shell snapshots", ""},
+	{"Library/Caches/claude-cli-nodejs", model.CatCache, model.SafetySafe, "Claude Code CLI cache", ""},
+	{".codex", model.CatCache, model.SafetyCaution, "Codex CLI data", "contains session history, not just caches"},
+	{".gemini", model.CatCache, model.SafetyCaution, "Gemini CLI data", "contains session history, not just caches"},
+	{".cursor", model.CatCache, model.SafetyCaution, "Cursor extensions & settings", "contains installed extensions and settings — Cursor must reinstall them"},
+	// Only Cursor's cache subdirectories — Application Support/Cursor itself
+	// holds settings and must never be offered for deletion.
+	{"Library/Application Support/Cursor/Cache", model.CatCache, model.SafetySafe, "Cursor cache", ""},
+	{"Library/Application Support/Cursor/CachedData", model.CatCache, model.SafetySafe, "Cursor cached data", ""},
+	{"Library/Application Support/Cursor/Code Cache", model.CatCache, model.SafetySafe, "Cursor code cache", ""},
 }
 
 // GlobalScanner scans for shared, home-rooted developer caches that are not

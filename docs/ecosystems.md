@@ -158,16 +158,28 @@ Each entry that is `caution` carries a consequence-of-deletion note in `recommen
 |------|----------|--------|
 | `~/.npm` | cache | safe |
 | `~/.bun/install/cache` | cache | safe |
-| `~/Library/Caches/{Yarn,pnpm,pip,Homebrew,CocoaPods,go-build,electron,node-gyp,typescript}` | cache | safe |
-| `~/.cache/{go-build,pip,node-gyp,yarn,pnpm,electron}` | cache | safe |
+| `~/.gem`, `~/.cocoapods` | cache | safe |
+| `~/.cache/uv`, `~/.cache/puppeteer` | cache | safe (XDG paths, used on macOS too) |
+| `~/Library/Caches/{Yarn,pnpm,pip,Homebrew,CocoaPods,go-build,electron,node-gyp,typescript,uv,Cypress,deno,pypoetry}` | cache | safe |
+| `~/.cache/{go-build,pip,node-gyp,yarn,pnpm,electron,Cypress,deno,pypoetry}` | cache | safe |
 | `~/Library/pnpm/store` | cache | caution (hard-linked store) |
 | `~/.gradle/caches`, `~/.gradle/wrapper/dists` | cache | caution |
-| `~/.cargo/registry` | cache | caution |
+| `~/.cargo/registry`, `~/.cargo/git` | cache | caution |
 | `~/go/pkg/mod` | deps | caution (read-only files) |
 | `~/Library/Caches/ms-playwright`, `~/.cache/ms-playwright` | cache | caution |
+| `~/.rustup/toolchains` | runtime | caution (toolchains must be reinstalled) |
+| `~/.nvm/versions`, `~/.pyenv/versions`, `~/.rbenv/versions` | runtime | caution (installed runtimes deleted, not caches) |
+| `~/.local/pipx` | deps | caution (installed CLI tools deleted) |
+| `~/.m2/repository` | deps | caution (shared by all Maven projects) |
 | `~/.android/avd` | runtime | caution (emulator user data lost) |
 | `~/Library/Android/sdk/system-images` | runtime | caution |
 | `~/Library/Android/sdk/ndk` | deps | caution |
+| `~/Library/Android/sdk/build-tools` | runtime | caution |
+| `~/.claude/projects` | cache | caution (session history/memory — deleting breaks `--resume`) |
+| `~/.claude/plugins/cache`, `~/.claude/shell-snapshots`, `~/Library/Caches/claude-cli-nodejs` | cache | safe |
+| `~/.codex`, `~/.gemini` | cache | caution (contain session history) |
+| `~/.cursor` | cache | caution (extensions & settings) |
+| `~/Library/Application Support/Cursor/{Cache,CachedData,Code Cache}` | cache | safe (cache subdirs only — settings live alongside) |
 
 ## Categories
 

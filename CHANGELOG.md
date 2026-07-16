@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Ecosystem scanners
 - **Global Caches** scanner (`global`) covering 27 shared caches at fixed home paths: package managers (npm, pnpm store & cache, Yarn, bun, pip, Homebrew, CocoaPods, Gradle caches & wrapper dists, cargo registry, Go build & module caches), dev tools (Playwright, Electron, node-gyp, TypeScript), and Android SDK (AVD, NDK, system images). macOS paths with Linux `~/.cache` fallbacks. Shared caches whose deletion forces re-downloads are marked `caution` with a consequence note.
+- **Global Caches** catalog expanded from 27 to 56 entries: uv (XDG `~/.cache/uv` + macOS `~/Library/Caches/uv`), AI tools (Claude Code, Codex, Gemini, Cursor — only Cursor's cache subdirs, never its settings), Puppeteer, Cypress, Deno, Poetry, pipx, Maven repository, rustup toolchains, cargo git cache, nvm/pyenv/rbenv runtimes, RubyGems, CocoaPods spec repos, and Android SDK build-tools. Entries that delete installed runtimes/tools or session history are `caution` with consequence notes.
 
 ### Fixed
 
