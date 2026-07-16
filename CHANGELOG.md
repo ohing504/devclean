@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Ecosystem scanners
 - **Global Caches** scanner (`global`) covering 27 shared caches at fixed home paths: package managers (npm, pnpm store & cache, Yarn, bun, pip, Homebrew, CocoaPods, Gradle caches & wrapper dists, cargo registry, Go build & module caches), dev tools (Playwright, Electron, node-gyp, TypeScript), and Android SDK (AVD, NDK, system images). macOS paths with Linux `~/.cache` fallbacks. Shared caches whose deletion forces re-downloads are marked `caution` with a consequence note.
 
+### Fixed
+
+- Tree selector: `a` (select all) no longer selects artifacts under protected projects, matching the other bulk-select keys and the ✗ rendering (deletion was already blocked by the cleaner guard).
+- `clean --vendor-cleanup` without `--eco` ran vendor commands for every registered ecosystem (e.g. `xcrun simctl delete unavailable` when nothing Xcode-related was cleaned); it is now scoped to the targeted ecosystems.
+- Ctrl-C / SIGTERM now cancels an in-progress scan instead of being ignored until the walk finishes.
+
 ## [0.1.0] - 2026-05-04
 
 First tagged release. Entries are grouped by capability rather than commit.
