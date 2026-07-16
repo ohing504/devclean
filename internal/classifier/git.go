@@ -102,9 +102,16 @@ func ApplyGitInfo(results []model.ScanResult) {
 
 	// First pass: resolve git roots and build cache
 	roots := make([]string, len(results))
+	// FindGitRoot forks `git rev-parse`; artifacts sharing a parent dir would
+	// otherwise fork once each. Negative results ("") are cached too.
+	rootByDir := make(map[string]string)
 	for i := range results {
 		projectDir := filepath.Dir(results[i].Path)
-		gitRoot := FindGitRoot(projectDir)
+		gitRoot, cached := rootByDir[projectDir]
+		if !cached {
+			gitRoot = FindGitRoot(projectDir)
+			rootByDir[projectDir] = gitRoot
+		}
 		// Fallback: if git root not found, walk up for topmost package.json
 		if gitRoot == "" {
 			gitRoot = findProjectRoot(projectDir)
