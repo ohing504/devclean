@@ -71,10 +71,3 @@ func hasFile(dir, name string) bool {
 	_, err := os.Stat(filepath.Join(dir, name))
 	return err == nil
 }
-
-func safetyFromDef(a model.ArtifactDef) model.SafetyLevel {
-	if a.AlwaysSafe {
-		return model.SafetySafe
-	}
-	return model.SafetyCaution
-}

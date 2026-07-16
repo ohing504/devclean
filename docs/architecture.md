@@ -10,7 +10,7 @@ devclean is a monolithic Go CLI binary. All ecosystem scanners are built into a 
 Scan → Classify → Filter/Sort → Output/Clean
 ```
 
-1. **Scan**: Registry iterates ecosystem scanners sequentially, each walks the filesystem for artifacts. Real-time progress via spinner.
+1. **Scan**: Registry batches all project (walk-based) scanners into a single filesystem pass, then runs stat scanners (fixed paths) sequentially. Real-time progress via spinner.
 2. **Classify**: Activity status (time-based, using most recent of artifact mtime / git commit / project dir mtime) + git protection (gitignore-aware)
 3. **Filter/Sort**: CLI flags filter by ecosystem, category, status; sort by size/time/name; top N projects
 4. **Output**: Colored table with sub-package grouping (default) or JSON (`--json`)
@@ -32,10 +32,10 @@ internal/
 
 ## Scanner Design
 
-Hybrid pattern:
+Two scanner families share the `Scanner` interface:
 
-- **Declarative**: most ecosystems define `ArtifactDef` structs (pattern, category, safety) and use filesystem walking to detect artifacts near marker files (e.g., `package.json`)
-- **Custom**: complex ecosystems (Xcode fixed paths, Docker CLI) implement the `Scanner` interface directly
+- **Walk ecosystems** (Node, Rust, Ruby, Python, Go): declarative rule tables (`walkEcosystem` in `internal/scanner/walk.go`) executed by a single-pass walk engine. The registry partitions walk-based scanners out of every scan and batches them into **one** `filepath.WalkDir` traversal, dispatching each directory against all active tables — one pass regardless of how many project ecosystems are active.
+- **Stat scanners** (Xcode, Global Caches, LLM Model Stores): implement `Scanner` directly and check fixed, known paths instead of walking a tree.
 
 ```go
 type Scanner interface {
@@ -45,14 +45,28 @@ type Scanner interface {
 }
 ```
 
-Scanners report progress via context-attached callbacks for real-time UI updates. Size calculated using `du -sk` for accurate disk usage.
+Scanners report progress via context-attached callbacks for real-time UI updates; the walk batch reports under a single "projects" label, stat scanners under their own names. Size calculated using `du -sk` for accurate disk usage.
 
-#### Variations on the declarative pattern
+### Walk engine
 
-A few ecosystems need slight twists on the marker-adjacent matching used by Node, Rust, and Ruby:
+A `walkEcosystem` table declares how one ecosystem participates in the shared walk: marker file names that identify a project root (`package.json`, `Cargo.toml`, any of six Python markers, …) and artifact rules that apply beneath those roots. Rules come in three match forms, each carrying its own category and safety:
 
-- **Project-rooted recursive matching (Python)**: artifacts like `__pycache__` live at every package depth, not just next to the marker. The Python scanner first records every directory containing a marker (`pyproject.toml`, `setup.py`, …) as a project root, then matches artifact directory names anywhere underneath, attributing each match to its **deepest** containing root (so monorepo sub-packages with their own `pyproject.toml` win over the parent).
-- **Multi-segment relative artifacts (Node React Native)**: when a Node project carries `ios/Podfile` or `metro.config.{js,ts,cjs,mjs}`, the scanner additionally `os.Stat`s a fixed list of multi-segment paths (`ios/Pods`, `android/.gradle`, …) directly under the project root, sidestepping the WalkDir for those subtrees so the scanner doesn't recurse into thousands of CocoaPods files.
+| Form | Example | Semantics |
+|------|---------|-----------|
+| exact relative path | `node_modules`, `vendor/bundle`, `ios/Pods` | matches exactly that path under the nearest project root |
+| any-depth name | `__pycache__`, `.venv` | matches the directory name anywhere under the nearest project root |
+| any-depth suffix | `*.egg-info` | matches a directory-name suffix anywhere under the nearest project root |
+
+Per directory, the engine pops project contexts whose subtree it has left, matches artifact rules against the **nearest** enclosing project root of each active ecosystem (table order, first match wins), emits the artifact and skips its subtree on a match, and otherwise takes one `os.ReadDir` snapshot to detect new project roots before descending. Artifact matching runs **before** the hidden-directory check so compound rules ending in a hidden segment (`android/.gradle`) still match; unmatched hidden directories are descended into only when an active ecosystem lists the name as an artifact.
+
+Tables can also:
+
+- contribute **per-project extra rules** on root detection — the Node table adds React Native compound artifacts (`ios/Pods`, `android/.gradle`, …) when the project carries `ios/Podfile` or `metro.config.{js,ts,cjs,mjs}`;
+- opt into **`ScanResult.ProjectRoot` attribution** — the Python table sets the matched root on every result because its artifacts sit at arbitrary depth and output grouping needs explicit attribution (nested project roots win over parents).
+
+**Deduplication**: a directory matching rules of several active ecosystems is reported once, attributed to the first table in order (node → rust → ruby → python → go), and no scanner descends into another's matched artifact (`__pycache__` inside `node_modules` is not reported separately). Attribution can therefore differ between a full scan and an `--eco` subset scan — a shared `coverage/` goes to node in a full scan, to ruby under `--eco ruby`.
+
+Results are sorted by (table order, path) before returning, keeping output order stable.
 
 ### Display Units
 
@@ -99,8 +113,8 @@ Three levels with gitignore-aware protection:
 
 | Level | Meaning | Determined by |
 |-------|---------|---------------|
-| `safe` | freely deletable, auto-regenerated | `ArtifactDef.AlwaysSafe` |
-| `caution` | deletable but may need rebuild | `ArtifactDef.AlwaysSafe = false` |
+| `safe` | freely deletable, auto-regenerated | declared per artifact rule / catalog entry |
+| `caution` | deletable but may need rebuild | declared per artifact rule / catalog entry |
 | `protected` | should not be deleted | tracked by git (not in .gitignore) + uncommitted changes |
 
 Gitignored artifacts (node_modules, .next, etc.) are always deletable even in repos with uncommitted changes. Only tracked artifacts are protected.

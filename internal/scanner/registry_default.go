@@ -6,7 +6,7 @@ func DefaultRegistry() *Registry {
 	reg.Register(newWalkScanner(nodeWalkEcosystem))
 	reg.Register(newWalkScanner(rustWalkEcosystem))
 	reg.Register(newWalkScanner(rubyWalkEcosystem))
-	reg.Register(NewPythonScanner())
+	reg.Register(newWalkScanner(pythonWalkEcosystem))
 	reg.Register(newWalkScanner(goWalkEcosystem))
 	reg.Register(NewXcodeScanner())
 	reg.Register(NewGlobalScanner())

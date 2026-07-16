@@ -16,6 +16,8 @@
 | `flutter` | Flutter/Dart | planned |
 | `docker` | Docker | planned |
 
+**Dedup attribution**: project ecosystems (node, rust, ruby, python, go) share a single-pass scan — a directory matching artifact rules of several active ecosystems is reported once, attributed to the first in scanner order (node → rust → ruby → python → go), so `--eco` subsets can shift attribution (a shared `coverage/` goes to node in a full scan, to ruby under `--eco ruby`).
+
 ## Node.js
 
 **Detection**: `package.json` in parent directory

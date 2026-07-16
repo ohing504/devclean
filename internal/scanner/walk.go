@@ -12,13 +12,35 @@ import (
 )
 
 // artifactRule describes one cleanable artifact matched by the walk engine.
-// RelPath is the exact, "/"-separated path of the artifact relative to the
-// nearest enclosing project root of its ecosystem: "node_modules" matches a
-// direct child of a project root, "ios/Pods" matches one level deeper.
+// Exactly one of the match fields is set:
+//
+//   - RelPath: exact, "/"-separated path relative to the nearest enclosing
+//     project root of the rule's ecosystem — "node_modules" matches a direct
+//     child of a project root, "ios/Pods" matches one level deeper.
+//   - Name: directory name matched at any depth under the nearest enclosing
+//     project root (Python __pycache__ lives at every package level).
+//   - Suffix: directory-name suffix matched at any depth (Python *.egg-info).
 type artifactRule struct {
 	RelPath  string
+	Name     string
+	Suffix   string
 	Category model.Category
 	Safety   model.SafetyLevel
+}
+
+// matches reports whether a directory matches this rule. rel is the
+// "/"-separated path from the nearest project root of the rule's ecosystem,
+// name is the directory's base name.
+func (r artifactRule) matches(rel, name string) bool {
+	switch {
+	case r.RelPath != "":
+		return rel == r.RelPath
+	case r.Name != "":
+		return name == r.Name
+	case r.Suffix != "":
+		return strings.HasSuffix(name, r.Suffix)
+	}
+	return false
 }
 
 // walkEcosystem describes how one ecosystem participates in the single-pass
@@ -33,13 +55,18 @@ type walkEcosystem struct {
 	// project, decided when its root is detected (e.g. React Native compound
 	// artifacts). entryNames holds the names of the root's direct entries.
 	ExtraRules func(projectRoot string, entryNames map[string]bool) []artifactRule
+	// SetProjectRoot populates ScanResult.ProjectRoot with the root of the
+	// matched project context. Used by ecosystems whose artifacts sit at
+	// arbitrary depth (python), where output grouping needs explicit
+	// attribution.
+	SetProjectRoot bool
 }
 
 // walkEcosystemTable is the canonical, ordered table of walk-based
 // ecosystems. The order decides attribution when a directory matches rules
 // of several ecosystems (first match wins) and the result ordering; it
 // mirrors the registry order.
-var walkEcosystemTable = []walkEcosystem{nodeWalkEcosystem, rustWalkEcosystem, rubyWalkEcosystem, goWalkEcosystem}
+var walkEcosystemTable = []walkEcosystem{nodeWalkEcosystem, rustWalkEcosystem, rubyWalkEcosystem, pythonWalkEcosystem, goWalkEcosystem}
 
 // WalkScan runs the single-pass walk engine over root with the tables of the
 // given ecosystems activated. Ecosystems without a walk table are ignored.
@@ -92,13 +119,16 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 	}
 
 	// Hidden directories are only descended into when an active ecosystem
-	// lists the name as a single-segment artifact (e.g. ".next"). Artifact
-	// matching happens before this check, so compound rules ending in a
-	// hidden segment (android/.gradle) are unaffected.
+	// lists the name as a single-segment or any-depth artifact (e.g. ".next",
+	// ".venv"). Artifact matching happens before this check, so compound
+	// rules ending in a hidden segment (android/.gradle) are unaffected.
 	hiddenDescend := make(map[string]bool)
 	for _, t := range tables {
 		for _, r := range t.Rules {
-			if !strings.Contains(r.RelPath, "/") {
+			switch {
+			case r.Name != "":
+				hiddenDescend[r.Name] = true
+			case r.RelPath != "" && !strings.Contains(r.RelPath, "/"):
 				hiddenDescend[r.RelPath] = true
 			}
 		}
@@ -127,15 +157,19 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		}
 
 		// Artifact match first, before the hidden-dir check.
-		if rule, tableIdx, ok := matchArtifact(stack, path, len(tables)); ok {
-			results = append(results, model.ScanResult{
+		if rule, tableIdx, projRoot, ok := matchArtifact(stack, path, d.Name(), len(tables)); ok {
+			result := model.ScanResult{
 				Path:      path,
 				Ecosystem: tables[tableIdx].Eco,
 				Category:  rule.Category,
 				Size:      DirSize(path),
 				LastMod:   ModTime(path),
 				Safety:    rule.Safety,
-			})
+			}
+			if tables[tableIdx].SetProjectRoot {
+				result.ProjectRoot = projRoot
+			}
+			results = append(results, result)
 			ReportProgress(ctx, len(results))
 			return fs.SkipDir
 		}
@@ -197,11 +231,12 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 	return results, err
 }
 
-// matchArtifact matches path against the artifact rules of the active
-// project contexts. A rule only matches relative to the nearest (deepest)
-// project root of its own ecosystem; when several ecosystems match the same
-// directory, the first one in table order wins.
-func matchArtifact(stack []projectContext, path string, numTables int) (artifactRule, int, bool) {
+// matchArtifact matches a directory (path, base name) against the artifact
+// rules of the active project contexts. A rule only matches relative to the
+// nearest (deepest) project root of its own ecosystem; when several
+// ecosystems match the same directory, the first one in table order wins.
+// Returns the matched rule, its table index, and the matching project root.
+func matchArtifact(stack []projectContext, path, name string, numTables int) (artifactRule, int, string, bool) {
 	for tableIdx := range numTables {
 		// Nearest (deepest) project root of this ecosystem.
 		for i := len(stack) - 1; i >= 0; i-- {
@@ -215,12 +250,12 @@ func matchArtifact(stack []projectContext, path string, numTables int) (artifact
 			}
 			rel = filepath.ToSlash(rel)
 			for _, rule := range pc.rules {
-				if rule.RelPath == rel {
-					return rule, tableIdx, true
+				if rule.matches(rel, name) {
+					return rule, tableIdx, pc.root, true
 				}
 			}
 			break // only the nearest root of this ecosystem is considered
 		}
 	}
-	return artifactRule{}, 0, false
+	return artifactRule{}, 0, "", false
 }

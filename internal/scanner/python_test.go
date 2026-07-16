@@ -19,8 +19,7 @@ func TestPythonScanner_FindsPycache(t *testing.T) {
 	mustMkdir(t, pyc)
 	mustWriteFile(t, filepath.Join(pyc, "x.cpython-312.pyc"), make([]byte, 1024))
 
-	s := scanner.NewPythonScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -52,8 +51,7 @@ func TestPythonScanner_VenvIsCaution(t *testing.T) {
 	mustMkdir(t, venv)
 	mustWriteFile(t, filepath.Join(venv, "site.py"), make([]byte, 4096))
 
-	s := scanner.NewPythonScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -93,8 +91,7 @@ func TestPythonScanner_DetectsAllMarkers(t *testing.T) {
 			mustMkdir(t, cache)
 			mustWriteFile(t, filepath.Join(cache, "v"), []byte("1"))
 
-			s := scanner.NewPythonScanner()
-			results, err := s.Scan(context.Background(), root)
+			results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
 			if err != nil {
 				t.Fatalf("Scan error: %v", err)
 			}
@@ -112,8 +109,7 @@ func TestPythonScanner_IgnoresWithoutMarker(t *testing.T) {
 	mustMkdir(t, pyc)
 	mustWriteFile(t, filepath.Join(pyc, "f.pyc"), []byte("z"))
 
-	s := scanner.NewPythonScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -132,8 +128,7 @@ func TestPythonScanner_EggInfoSuffix(t *testing.T) {
 	mustMkdir(t, egg)
 	mustWriteFile(t, filepath.Join(egg, "PKG-INFO"), make([]byte, 256))
 
-	s := scanner.NewPythonScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -158,8 +153,7 @@ func TestPythonScanner_NestedProjectsAttributeToClosestRoot(t *testing.T) {
 	mustMkdir(t, pyc)
 	mustWriteFile(t, filepath.Join(pyc, "x.pyc"), []byte("y"))
 
-	s := scanner.NewPythonScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -186,8 +180,7 @@ func TestPythonScanner_MultipleArtifactsInOneProject(t *testing.T) {
 	mustMkdir(t, filepath.Join(projDir, ".ruff_cache"))
 	mustMkdir(t, filepath.Join(projDir, "__pycache__"))
 
-	s := scanner.NewPythonScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -200,11 +193,14 @@ func TestPythonScanner_MultipleArtifactsInOneProject(t *testing.T) {
 }
 
 func TestPythonScanner_NameAndEcosystem(t *testing.T) {
-	s := scanner.NewPythonScanner()
-	if s.Name() != "python" {
-		t.Errorf("expected name=python, got %s", s.Name())
+	for _, s := range scanner.DefaultRegistry().All() {
+		if s.Name() != "python" {
+			continue
+		}
+		if s.Ecosystem() != model.EcoPython {
+			t.Errorf("expected ecosystem=python, got %s", s.Ecosystem())
+		}
+		return
 	}
-	if s.Ecosystem() != model.EcoPython {
-		t.Errorf("expected ecosystem=python, got %s", s.Ecosystem())
-	}
+	t.Error(`expected a registered scanner named "python"`)
 }

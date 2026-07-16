@@ -72,6 +72,86 @@ func TestWalkScan_DedupCoverage(t *testing.T) {
 	}
 }
 
+// TestWalkScan_DedupNodeModulesShieldsPython pins the second double-count
+// fix: a matched artifact is skipped entirely, so no other active ecosystem
+// reports anything inside it. With python alone, node_modules is not an
+// artifact and its contents are scanned as before.
+func TestWalkScan_DedupNodeModulesShieldsPython(t *testing.T) {
+	root := t.TempDir()
+
+	proj := filepath.Join(root, "hybrid")
+	pyc := filepath.Join(proj, "node_modules", "somepkg", "__pycache__")
+	if err := os.MkdirAll(pyc, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, f := range []string{"package.json", "pyproject.toml"} {
+		if err := os.WriteFile(filepath.Join(proj, f), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", f, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(pyc, "x.pyc"), []byte("y"), 0o644); err != nil {
+		t.Fatalf("write pyc: %v", err)
+	}
+
+	// node + python active: node_modules only, nothing inside it.
+	results, err := WalkScan(context.Background(), root, model.EcoNode, model.EcoPython)
+	if err != nil {
+		t.Fatalf("WalkScan error: %v", err)
+	}
+	if len(results) != 1 {
+		for _, r := range results {
+			t.Logf("  %s %s", r.Ecosystem, r.Path)
+		}
+		t.Fatalf("expected exactly 1 result for node+python, got %d", len(results))
+	}
+	if results[0].Path != filepath.Join(proj, "node_modules") || results[0].Ecosystem != model.EcoNode {
+		t.Errorf("expected node_modules attributed to node, got %s (%s)", results[0].Path, results[0].Ecosystem)
+	}
+
+	// python alone: descends into node_modules and finds the __pycache__.
+	results, err = WalkScan(context.Background(), root, model.EcoPython)
+	if err != nil {
+		t.Fatalf("WalkScan error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected exactly 1 result for python alone, got %d", len(results))
+	}
+	if results[0].Path != pyc || results[0].Ecosystem != model.EcoPython {
+		t.Errorf("expected __pycache__ attributed to python, got %s (%s)", results[0].Path, results[0].Ecosystem)
+	}
+}
+
+// TestWalkScan_HiddenVenvSkippedInRustOnlyScan pins the hidden-dir union
+// rule: hidden directories are descended into only when an active ecosystem
+// lists the name as an artifact, so a rust-only scan behaves like the legacy
+// rust scanner and skips every hidden directory.
+func TestWalkScan_HiddenVenvSkippedInRustOnlyScan(t *testing.T) {
+	root := t.TempDir()
+
+	proj := filepath.Join(root, "pyapp")
+	venv := filepath.Join(proj, ".venv", "lib")
+	if err := os.MkdirAll(venv, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "pyproject.toml"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(venv, "site.py"), []byte("y"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	results, err := WalkScan(context.Background(), root, model.EcoRust)
+	if err != nil {
+		t.Fatalf("WalkScan error: %v", err)
+	}
+	if len(results) != 0 {
+		for _, r := range results {
+			t.Logf("  %s %s", r.Ecosystem, r.Path)
+		}
+		t.Errorf("expected 0 results for rust-only scan, got %d", len(results))
+	}
+}
+
 // TestScanWithProgress_MixedPartition pins the partition behavior: walk
 // adapters are batched into a single walk that runs first (reported under the
 // "projects" label), remaining scanners run sequentially after it, and batch
