@@ -180,6 +180,9 @@ Each entry that is `caution` carries a consequence-of-deletion note in `recommen
 | `~/.codex`, `~/.gemini` | cache | caution (contain session history) |
 | `~/.cursor` | cache | caution (extensions & settings) |
 | `~/Library/Application Support/Cursor/{Cache,CachedData,Code Cache}` | cache | safe (cache subdirs only — settings live alongside) |
+| `/private/var/folders/*/*/X/*.code_sign_clone` | cache | safe / caution (macOS only — Browser Temp, see below) |
+
+**Browser Temp (macOS)**: Chromium-family browsers (Chrome, Brave, Edge, Arc, Vivaldi, …) copy their own bundle to `/private/var/folders/<xx>/<yyy>/X/<bundle-id>.code_sign_clone/` on launch to verify their code signature and remove the copy on normal exit. Force-killed processes — typically headless automation like lighthouse or puppeteer — leave zombie copies that accumulate (observed: 92 copies / 156 GB). Matching uses a single `*.code_sign_clone` glob rather than a per-browser catalog; the label carries the browser name (derived from the bundle ID) and the copy count. Safety follows run state: `safe` when the browser is not running (true zombies), `caution` while it runs (checked via `pgrep`, once per browser — the newest copy may be in use) or when the bundle ID is unrecognized (run state unknowable). Because the path lies outside home, it is reported only when the scan root covers the home directory — a `--path` scan of a home subdirectory never surfaces system temp. Reported size may overstate real usage when the copies are APFS clones of the installed app.
 
 ## Categories
 
