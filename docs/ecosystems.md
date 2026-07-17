@@ -161,7 +161,7 @@ Each entry that is `caution` carries a consequence-of-deletion note in `recommen
 |------|----------|--------|
 | `~/.npm` | cache | safe |
 | `~/.bun/install/cache` | cache | safe |
-| `~/.gem`, `~/.cocoapods` | cache | safe |
+| `~/.cocoapods` | cache | safe |
 | `~/.cache/uv`, `~/.cache/puppeteer` | cache | safe (XDG paths, used on macOS too) |
 | `~/Library/Caches/{Yarn,pnpm,pip,Homebrew,CocoaPods,go-build,electron,node-gyp,typescript,uv,Cypress,deno,pypoetry}` | cache | safe |
 | `~/.cache/{go-build,pip,node-gyp,yarn,pnpm,electron,Cypress,deno,pypoetry}` | cache | safe |
@@ -174,7 +174,6 @@ Each entry that is `caution` carries a consequence-of-deletion note in `recommen
 | `~/.nvm/versions`, `~/.pyenv/versions`, `~/.rbenv/versions` | runtime | caution (installed runtimes deleted, not caches) |
 | `~/.local/pipx` | deps | caution (installed CLI tools deleted) |
 | `~/.m2/repository` | deps | caution (shared by all Maven projects) |
-| `~/.android/avd` | runtime | caution (emulator user data lost) |
 | `~/Library/Android/sdk/system-images` | runtime | caution |
 | `~/Library/Android/sdk/ndk` | deps | caution |
 | `~/Library/Android/sdk/build-tools` | runtime | caution |
