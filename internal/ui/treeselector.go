@@ -395,13 +395,13 @@ func (m treeModel) renderItem(idx int, item TreeItem, isCursor bool) string {
 
 	case ItemProject:
 		checkbox := m.projectCheckbox(idx, item)
-		badge := statusBadge(item.Activity)
+		badge := StatusBadge(item.Activity)
 		protectedBadge := ""
 		if item.Protected {
 			protectedBadge = " " + ProtectedStyle.Render("Protected")
 		}
 		name := ProjectStyle.Render(item.Label)
-		info := InfoStyle.Render(fmt.Sprintf("%s · %s", model.HumanSize(item.Size), relativeTime(item.LastMod)))
+		info := InfoStyle.Render(fmt.Sprintf("%s · %s", model.HumanSize(item.Size), RelativeTime(item.LastMod)))
 		path := DimStyle.Render(item.Path)
 		return fmt.Sprintf("%s%s %s%s %s %s\n%s    %s",
 			cursor, checkbox, name, protectedBadge, badge, info,
@@ -416,7 +416,7 @@ func (m treeModel) renderItem(idx int, item TreeItem, isCursor bool) string {
 		if parent.Protected {
 			checkbox = ProtectedStyle.Render("[✖]")
 		}
-		safetyIcon := safetyIndicator(item.Result.Safety)
+		safetyIcon := SafetyIcon(item.Result.Safety)
 		cat := DimStyle.Render("(" + string(item.Result.Category) + ")")
 		size := DimStyle.Render(model.HumanSize(item.Size))
 		return fmt.Sprintf("%s    %s %s %s %s  %s", cursor, checkbox, safetyIcon, item.Label, cat, size)
@@ -436,67 +436,4 @@ func (m treeModel) projectCheckbox(idx int, item TreeItem) string {
 		return CautionStyle.Render("[-]")
 	}
 	return "[ ]"
-}
-
-func relativeTime(t time.Time) string {
-	if t.IsZero() {
-		return "unknown"
-	}
-	d := time.Since(t)
-	switch {
-	case d < time.Hour:
-		return "just now"
-	case d < 24*time.Hour:
-		h := int(d.Hours())
-		if h == 1 {
-			return "1 hour ago"
-		}
-		return fmt.Sprintf("%d hours ago", h)
-	case d < 30*24*time.Hour:
-		days := int(d.Hours() / 24)
-		if days == 1 {
-			return "1 day ago"
-		}
-		return fmt.Sprintf("%d days ago", days)
-	case d < 365*24*time.Hour:
-		months := int(d.Hours() / 24 / 30)
-		if months <= 1 {
-			return "1 month ago"
-		}
-		return fmt.Sprintf("%d months ago", months)
-	default:
-		years := int(d.Hours() / 24 / 365)
-		if years == 1 {
-			return "1 year ago"
-		}
-		return fmt.Sprintf("%d years ago", years)
-	}
-}
-
-func safetyIndicator(s model.SafetyLevel) string {
-	switch s {
-	case model.SafetySafe:
-		return SafeStyle.Render("✔")
-	case model.SafetyCaution:
-		return CautionStyle.Render("⚠")
-	case model.SafetyProtected:
-		return ProtectedStyle.Render("✖")
-	default:
-		return " "
-	}
-}
-
-func statusBadge(s model.ActivityStatus) string {
-	switch s {
-	case model.StatusActive:
-		return ActiveStyle.Render("Active")
-	case model.StatusRecent:
-		return RecentStyle.Render("Recent")
-	case model.StatusStale:
-		return StaleStyle.Render("Stale")
-	case model.StatusDormant:
-		return DormantStyle.Render("Dormant")
-	default:
-		return ""
-	}
 }

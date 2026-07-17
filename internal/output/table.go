@@ -5,7 +5,6 @@ import (
 	"io"
 	"path/filepath"
 	"sort"
-	"time"
 
 	"github.com/ohing504/devclean/internal/model"
 	"github.com/ohing504/devclean/internal/pathutil"
@@ -58,7 +57,7 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 
 		for _, p := range projects {
 			// Project header: name + status badge + size + relative time
-			badge := statusBadge(p.Activity)
+			badge := ui.StatusBadge(p.Activity)
 			protectedBadge := ""
 			if p.Protected {
 				protectedBadge = " " + ui.ProtectedStyle.Render("Protected")
@@ -69,7 +68,7 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 				ui.ProjectStyle.Render(p.Name),
 				protectedBadge,
 				badge,
-				ui.InfoStyle.Render(fmt.Sprintf("%s · %s", model.HumanSize(p.TotalSize), relativeTime(p.LastMod))),
+				ui.InfoStyle.Render(fmt.Sprintf("%s · %s", model.HumanSize(p.TotalSize), ui.RelativeTime(p.LastMod))),
 			)
 
 			// Project path
@@ -181,72 +180,6 @@ func sortGroupsBySize(groups []ecoGroup) {
 	})
 }
 
-// --- Formatting helpers ---
-
-func statusBadge(s model.ActivityStatus) string {
-	switch s {
-	case model.StatusActive:
-		return ui.ActiveStyle.Render("Active")
-	case model.StatusRecent:
-		return ui.RecentStyle.Render("Recent")
-	case model.StatusStale:
-		return ui.StaleStyle.Render("Stale")
-	case model.StatusDormant:
-		return ui.DormantStyle.Render("Dormant")
-	default:
-		return ""
-	}
-}
-
-func safetyIcon(s model.SafetyLevel) string {
-	switch s {
-	case model.SafetySafe:
-		return ui.SafeStyle.Render("✔")
-	case model.SafetyCaution:
-		return ui.CautionStyle.Render("⚠")
-	case model.SafetyProtected:
-		return ui.ProtectedStyle.Render("✖")
-	default:
-		return " "
-	}
-}
-
-func relativeTime(t time.Time) string {
-	if t.IsZero() {
-		return "unknown"
-	}
-
-	d := time.Since(t)
-	switch {
-	case d < time.Hour:
-		return "just now"
-	case d < 24*time.Hour:
-		h := int(d.Hours())
-		if h == 1 {
-			return "1 hour ago"
-		}
-		return fmt.Sprintf("%d hours ago", h)
-	case d < 30*24*time.Hour:
-		days := int(d.Hours() / 24)
-		if days == 1 {
-			return "1 day ago"
-		}
-		return fmt.Sprintf("%d days ago", days)
-	case d < 365*24*time.Hour:
-		months := int(d.Hours() / 24 / 30)
-		if months <= 1 {
-			return "1 month ago"
-		}
-		return fmt.Sprintf("%d months ago", months)
-	default:
-		years := int(d.Hours() / 24 / 365)
-		if years == 1 {
-			return "1 year ago"
-		}
-		return fmt.Sprintf("%d years ago", years)
-	}
-}
-
 // --- Sub-package grouping ---
 
 type subPackage struct {
@@ -318,7 +251,7 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 
 		// Artifacts in this sub-package
 		for _, r := range sp.items {
-			icon := safetyIcon(r.Safety)
+			icon := ui.SafetyIcon(r.Safety)
 			name := artifactDisplayName(r)
 			cat := ui.DimStyle.Render("(" + string(r.Category) + ")")
 			rec := recommendationTag(r)
@@ -352,7 +285,7 @@ func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot stri
 			continue
 		}
 
-		icon := safetyIcon(r.Safety)
+		icon := ui.SafetyIcon(r.Safety)
 		name := artifactDisplayNameOr(r, artifactRelPath(r.Path, projectRoot))
 		cat := ui.DimStyle.Render("(" + string(r.Category) + ")")
 		rec := recommendationTag(r)
@@ -406,7 +339,7 @@ func lastUsedTag(r model.ScanResult) string {
 	if r.LastUsedAt.IsZero() {
 		return ""
 	}
-	return " " + ui.DimStyle.Render("· last used "+relativeTime(r.LastUsedAt))
+	return " " + ui.DimStyle.Render("· last used "+ui.RelativeTime(r.LastUsedAt))
 }
 
 // artifactRelPath returns the path of an artifact relative to its project root.

@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The project walk now sizes matched artifacts concurrently (bounded worker pool) instead of one `du` call at a time — up to ~4× faster warm-cache sizing on a many-artifact tree, with cold-scan and few-large-artifact gains varying; disk-usage numbers are unchanged.
 - The walk engine now reads each directory once and reuses those entries for both project-marker detection and recursion, instead of reading every directory twice (a `filepath.WalkDir` read plus a second `os.ReadDir`). Directory traversal — the dominant cost of scanning a large tree — is roughly 1.8× faster (~29% faster end-to-end on a workspace with tens of thousands of directories); scan results are unchanged.
 - Git classification now forks `git` across a bounded worker pool (`min(NumCPU, 8)`) instead of one repo at a time — root resolution, `status`/`log`, and `check-ignore` all run concurrently across repos. On a workspace spanning dozens of repos this cut the classify phase roughly in half (~1.24s → ~0.54s warm cache, ~19% faster end-to-end); protection and activity results are unchanged.
+- The status-badge, safety-icon, and relative-time display formatters, previously duplicated between the table output and the interactive tree selector, are now single shared functions in `internal/ui` (`StatusBadge`, `SafetyIcon`, `RelativeTime`). Table and selector rendering are unchanged; the formatters gained direct unit tests.
 
 ### Fixed
 

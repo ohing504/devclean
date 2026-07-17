@@ -27,7 +27,7 @@ internal/
   cleaner/             → trash (macOS/Linux) + force delete, dry-run, protection enforcement
   output/              → JSON formatter, lipgloss colored table (ecosystem → project → sub-package → artifact)
   cli/                 → cobra commands (scan, clean, list)
-  ui/                  → terminal spinner, tree selector (bubbletea), shared styles
+  ui/                  → terminal spinner, tree selector (bubbletea), shared styles + display formatters (StatusBadge, SafetyIcon, RelativeTime) reused by output/
 ```
 
 ## Scanner Design
