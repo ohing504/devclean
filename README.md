@@ -38,10 +38,11 @@ See [Ecosystems](docs/ecosystems.md) for full detection and safety details.
 - Activity classification — active, recent, stale, dormant (based on git + filesystem)
 - Gitignore-aware protection — only git-tracked artifacts are protected
 - `--min-size` filter to suppress small artifacts and focus on real targets
+- Accurate sizing — sparse-aware (a 460 GB `Docker.raw` using 8.6 GB shows as such) and hard-link-aware (shared blocks counted once)
 - Interactive tree selector for clean — select by project or individual artifact
 - Soft delete (Trash) by default, with force delete option
 - Vendor-native cleanup hooks (`xcrun simctl delete unavailable`, etc.) via `--vendor-cleanup`
-- JSON output for scripting and AI agent integration
+- JSON output (`--json`) for scripting and AI agents, with `apparent_size` and a deduped `total_size`
 - Colored terminal output with ecosystem grouping
 
 ## Install
