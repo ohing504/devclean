@@ -89,6 +89,14 @@ func TestGlobalScanner_DetectsExpandedCatalog(t *testing.T) {
 	geminiDir := filepath.Join(home, ".gemini")
 	mustMkdir(t, geminiDir)
 	mustWriteFile(t, filepath.Join(geminiDir, "history.jsonl"), make([]byte, 1024))
+	// The whole ~/.claude tree is user state, not a deletion target — even its
+	// "caches" (plugin cache, shell snapshots) must not be reported.
+	claudePluginCache := filepath.Join(home, ".claude", "plugins", "cache")
+	mustMkdir(t, claudePluginCache)
+	mustWriteFile(t, filepath.Join(claudePluginCache, "blob"), make([]byte, 512))
+	claudeCliCache := filepath.Join(home, "Library", "Caches", "claude-cli-nodejs")
+	mustMkdir(t, claudeCliCache)
+	mustWriteFile(t, filepath.Join(claudeCliCache, "log"), make([]byte, 512))
 
 	cursorRoot := filepath.Join(home, "Library", "Application Support", "Cursor")
 	cursorCache := filepath.Join(cursorRoot, "Cache")
@@ -129,6 +137,12 @@ func TestGlobalScanner_DetectsExpandedCatalog(t *testing.T) {
 	}
 	if _, ok := byPath[geminiDir]; ok {
 		t.Errorf("~/.gemini (session history) must never be offered for deletion")
+	}
+	if _, ok := byPath[claudePluginCache]; ok {
+		t.Errorf("~/.claude/** (user state) must never be offered for deletion, incl. its caches")
+	}
+	if _, ok := byPath[claudeCliCache]; ok {
+		t.Errorf("~/Library/Caches/claude-cli-nodejs (Claude Code state) must never be offered for deletion")
 	}
 
 	if _, ok := byPath[cursorCache]; !ok {

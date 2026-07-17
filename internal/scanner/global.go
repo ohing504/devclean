@@ -95,16 +95,13 @@ var globalCaches = []globalCache{
 	{"Library/Android/sdk/build-tools", model.CatRuntime, model.SafetyCaution, "Android SDK build tools", "builds fail until build-tools are re-downloaded via the SDK manager"},
 
 	// --- AI tools ---
-	// NOTE: irreplaceable session history and project memory are deliberately
-	// NOT in this catalog. `~/.claude/projects` (Claude Code session transcripts
-	// + project memory), `~/.codex`, and `~/.gemini` hold conversation history
-	// that cannot be regenerated — deleting it is unrecoverable data loss, not
-	// reclaimed cache. They must never be offered for deletion, so they are
-	// excluded entirely rather than listed as `caution`. Only genuinely
-	// regenerable caches below are eligible.
-	{".claude/plugins/cache", model.CatCache, model.SafetySafe, "Claude Code plugin cache", ""},
-	{".claude/shell-snapshots", model.CatCache, model.SafetySafe, "Claude Code shell snapshots", ""},
-	{"Library/Caches/claude-cli-nodejs", model.CatCache, model.SafetySafe, "Claude Code CLI cache", ""},
+	// NOTE: AI coding-tool home directories are deliberately NOT in this
+	// catalog. The whole `~/.claude` tree (session transcripts, project memory,
+	// agents, skills, plugins, todos), plus `~/.codex` and `~/.gemini`, is user
+	// state — deleting any of it is unrecoverable loss, and the "caches" inside
+	// (plugin cache, shell snapshots, CLI logs) only reappear as install-time
+	// scaffolding, so reclaiming them is worthless against that risk. These
+	// tools are excluded entirely rather than listed with per-subdir caches.
 	{".cursor", model.CatCache, model.SafetyCaution, "Cursor extensions & settings", "contains installed extensions and settings — Cursor must reinstall them"},
 	// Only Cursor's cache subdirectories — Application Support/Cursor itself
 	// holds settings and must never be offered for deletion.
