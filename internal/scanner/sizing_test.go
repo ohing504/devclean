@@ -67,6 +67,44 @@ func TestSizePendingEmpty(t *testing.T) {
 	}
 }
 
+// TestDirSizeReflectsContents checks DirSize actually measures bytes, not just
+// returns a positive number: the reported size must cover the logical content
+// (du rounds up to block boundaries, so it is a lower bound) and must grow when
+// more data is added. The golden test zeroes Size out for portability, so this
+// is where the sizing arithmetic itself is pinned.
+func TestDirSizeReflectsContents(t *testing.T) {
+	dir := t.TempDir()
+
+	empty := DirSize(dir)
+
+	const fileSize = 100_000
+	for _, name := range []string{"a", "b", "c"} {
+		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, fileSize), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	withThree := DirSize(dir)
+	if withThree < 3*fileSize {
+		t.Errorf("DirSize with 300KB of files = %d, want >= %d", withThree, 3*fileSize)
+	}
+	if withThree <= empty {
+		t.Errorf("DirSize did not grow after adding files: empty=%d, withThree=%d", empty, withThree)
+	}
+
+	// Adding a nested file must increase the measured size further.
+	sub := filepath.Join(dir, "nested")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "d"), make([]byte, fileSize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withFour := DirSize(dir)
+	if withFour <= withThree {
+		t.Errorf("DirSize did not grow after adding a nested file: withThree=%d, withFour=%d", withThree, withFour)
+	}
+}
+
 // TestDirSizeMissingPath locks the deferred-sizing TOCTOU contract: an artifact
 // deleted between walk discovery and sizing must yield 0, not a panic. The
 // walk→size gap widened when sizing moved to a post-walk phase.
