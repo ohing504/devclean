@@ -13,6 +13,7 @@ type Spinner struct {
 	mu      sync.Mutex
 	message string
 	done    chan struct{}
+	wg      sync.WaitGroup
 	stopped bool
 }
 
@@ -22,6 +23,7 @@ func NewSpinner(message string) *Spinner {
 		message: message,
 		done:    make(chan struct{}),
 	}
+	s.wg.Add(1)
 	go s.run()
 	return s
 }
@@ -43,11 +45,14 @@ func (s *Spinner) Stop() {
 	s.stopped = true
 	s.mu.Unlock()
 	close(s.done)
-	// Clear the spinner line
+	// Wait for run() to return before clearing, so no late frame reprints
+	// over the cleared line and leaves a stale spinner artifact.
+	s.wg.Wait()
 	fmt.Print("\r\033[K")
 }
 
 func (s *Spinner) run() {
+	defer s.wg.Done()
 	ticker := time.NewTicker(80 * time.Millisecond)
 	defer ticker.Stop()
 

@@ -166,6 +166,57 @@ func TestXcodeScanner_FlagsOldDeviceSupportBuilds(t *testing.T) {
 	}
 }
 
+// Older Xcode names DeviceSupport folders without a model ("16.4 (build)").
+// Such a version-only key must group builds within its own platform but never
+// collide across platforms.
+func TestXcodeScanner_DeviceSupportKeyIsPlatformScoped(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	type entry struct {
+		platform string
+		dir      string
+		mtime    time.Time
+	}
+	entries := []entry{
+		// iOS: two builds of the same version — older is superseded.
+		{"iOS DeviceSupport", "16.4 (20E247)", time.Now().Add(-20 * 24 * time.Hour)},
+		{"iOS DeviceSupport", "16.4 (20E252)", time.Now().Add(-1 * 24 * time.Hour)}, // newest
+		// tvOS: same version-only name, different platform — must not be flagged.
+		{"tvOS DeviceSupport", "16.4 (20K672)", time.Now().Add(-40 * 24 * time.Hour)},
+	}
+	for _, e := range entries {
+		dir := filepath.Join(home, "Library/Developer/Xcode", e.platform, e.dir)
+		mustMkdir(t, dir)
+		mustWriteFile(t, filepath.Join(dir, "Symbols.bin"), make([]byte, 4096))
+		if err := os.Chtimes(dir, e.mtime, e.mtime); err != nil {
+			t.Fatalf("chtimes %s: %v", dir, err)
+		}
+	}
+
+	s := scanner.NewXcodeScanner()
+	results, err := s.Scan(context.Background(), home)
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+
+	recs := make(map[string]string)
+	for _, r := range results {
+		recs[r.Path] = r.Recommendation
+	}
+	base := filepath.Join(home, "Library/Developer/Xcode")
+
+	if got := recs[filepath.Join(base, "iOS DeviceSupport", "16.4 (20E247)")]; !strings.Contains(got, "superseded") {
+		t.Errorf("older iOS build should be superseded, got %q", got)
+	}
+	if got := recs[filepath.Join(base, "iOS DeviceSupport", "16.4 (20E252)")]; got != "" {
+		t.Errorf("newest iOS build should not be flagged, got %q", got)
+	}
+	if got := recs[filepath.Join(base, "tvOS DeviceSupport", "16.4 (20K672)")]; got != "" {
+		t.Errorf("tvOS build must not collide with iOS key, got %q", got)
+	}
+}
+
 func TestXcodeScanner_ExpandsSimulatorDevices(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

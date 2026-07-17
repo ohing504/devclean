@@ -208,7 +208,10 @@ func enrichDeviceSupport(results []model.ScanResult) {
 			parsedAll[i] = parsed{matched: false}
 			continue
 		}
-		key := m[1] // "<model> <version>"
+		// Scope the key to the parent dir so builds only supersede within the
+		// same DeviceSupport root; otherwise model-less names like "16.4 (…)"
+		// could collide across platforms if slices are ever batched together.
+		key := filepath.Dir(r.Path) + "\x00" + m[1] // parent + "<model> <version>"
 		parsedAll[i] = parsed{key: key, matched: true}
 
 		mt := r.LastMod.Unix()
