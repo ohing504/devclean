@@ -49,7 +49,11 @@ var globalCaches = []globalCache{
 	{".rbenv/versions", model.CatRuntime, model.SafetyCaution, "rbenv-installed Ruby runtimes", "deletes installed Ruby versions, not a cache — reinstall with 'rbenv install'"},
 	{".local/pipx", model.CatDeps, model.SafetyCaution, "pipx-installed CLI tools", "deletes the installed CLI tools themselves — each must be reinstalled with 'pipx install'"},
 	{".m2/repository", model.CatDeps, model.SafetyCaution, "Maven local repository", "shared by every Maven project; dependencies re-download on next build"},
-	{".gem", model.CatCache, model.SafetySafe, "RubyGems cache", ""},
+	// NOTE: `~/.gem` is NOT listed — it is a config root, not a cache. It holds
+	// `~/.gem/credentials` (the RubyGems push API key) alongside installed gems.
+	// Deleting it would leak-by-loss a credential and remove installed gems, so
+	// it must never be a deletion target. (RubyGems' download cache lives under
+	// `~/Library/Caches/CocoaPods`-style OS cache dirs, listed below where safe.)
 	{".cocoapods", model.CatCache, model.SafetySafe, "CocoaPods spec repos", ""},
 	// uv and Puppeteer (v19+) use the XDG ~/.cache path on macOS too, so these
 	// live here rather than in the Linux section.
@@ -86,19 +90,25 @@ var globalCaches = []globalCache{
 	{".cache/pypoetry", model.CatCache, model.SafetySafe, "Poetry cache", ""},
 
 	// --- Android SDK (home-rooted, large; no dedicated scanner yet) ---
-	{".android/avd", model.CatRuntime, model.SafetyCaution, "Android Virtual Devices", "emulator AVDs and their user data must be recreated"},
+	// NOTE: `~/.android/avd` is deliberately excluded. An emulator's virtual disk
+	// can hold user-created state (installed apps, files written inside the
+	// emulated device) that a fresh AVD does not restore — irreplaceable data,
+	// not regenerable cache. Only re-downloadable SDK artifacts are listed below.
 	{"Library/Android/sdk/system-images", model.CatRuntime, model.SafetyCaution, "Android emulator system images", "emulators won't start until images are re-downloaded"},
 	{"Library/Android/sdk/ndk", model.CatDeps, model.SafetyCaution, "Android NDK installations", "NDK is re-downloaded on next native build"},
 	{"Library/Android/sdk/build-tools", model.CatRuntime, model.SafetyCaution, "Android SDK build tools", "builds fail until build-tools are re-downloaded via the SDK manager"},
 
 	// --- AI tools ---
-	{".claude/projects", model.CatCache, model.SafetyCaution, "Claude Code session history & project memory", "Claude Code session history/memory — deleting breaks --resume and project memory"},
-	{".claude/plugins/cache", model.CatCache, model.SafetySafe, "Claude Code plugin cache", ""},
-	{".claude/shell-snapshots", model.CatCache, model.SafetySafe, "Claude Code shell snapshots", ""},
-	{"Library/Caches/claude-cli-nodejs", model.CatCache, model.SafetySafe, "Claude Code CLI cache", ""},
-	{".codex", model.CatCache, model.SafetyCaution, "Codex CLI data", "contains session history, not just caches"},
-	{".gemini", model.CatCache, model.SafetyCaution, "Gemini CLI data", "contains session history, not just caches"},
-	{".cursor", model.CatCache, model.SafetyCaution, "Cursor extensions & settings", "contains installed extensions and settings — Cursor must reinstall them"},
+	// NOTE: AI coding-tool home directories are deliberately NOT in this
+	// catalog. The whole `~/.claude` tree (session transcripts, project memory,
+	// agents, skills, plugins, todos), plus `~/.codex` and `~/.gemini`, is user
+	// state — deleting any of it is unrecoverable loss, and the "caches" inside
+	// (plugin cache, shell snapshots, CLI logs) only reappear as install-time
+	// scaffolding, so reclaiming them is worthless against that risk. These
+	// tools are excluded entirely rather than listed with per-subdir caches.
+	// `~/.cursor` (Cursor extensions & settings — a config root) is excluded for
+	// the same reason. Only Cursor's OS-level cache SUBDIRS below are eligible.
+	//
 	// Only Cursor's cache subdirectories — Application Support/Cursor itself
 	// holds settings and must never be offered for deletion.
 	{"Library/Application Support/Cursor/Cache", model.CatCache, model.SafetySafe, "Cursor cache", ""},

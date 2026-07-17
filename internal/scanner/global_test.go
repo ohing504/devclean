@@ -77,9 +77,34 @@ func TestGlobalScanner_DetectsExpandedCatalog(t *testing.T) {
 	mustMkdir(t, pipx)
 	mustWriteFile(t, filepath.Join(pipx, "venv.cfg"), make([]byte, 512))
 
+	// Session history / project memory must NEVER be offered for deletion:
+	// it is irreplaceable, not reclaimable cache. Seed it and assert below that
+	// the scanner does not report it.
 	claudeProjects := filepath.Join(home, ".claude", "projects")
 	mustMkdir(t, claudeProjects)
 	mustWriteFile(t, filepath.Join(claudeProjects, "session.jsonl"), make([]byte, 1024))
+	codexDir := filepath.Join(home, ".codex")
+	mustMkdir(t, codexDir)
+	mustWriteFile(t, filepath.Join(codexDir, "history.jsonl"), make([]byte, 1024))
+	geminiDir := filepath.Join(home, ".gemini")
+	mustMkdir(t, geminiDir)
+	mustWriteFile(t, filepath.Join(geminiDir, "history.jsonl"), make([]byte, 1024))
+	// The whole ~/.claude tree is user state, not a deletion target — even its
+	// "caches" (plugin cache, shell snapshots) must not be reported.
+	claudePluginCache := filepath.Join(home, ".claude", "plugins", "cache")
+	mustMkdir(t, claudePluginCache)
+	mustWriteFile(t, filepath.Join(claudePluginCache, "blob"), make([]byte, 512))
+	claudeCliCache := filepath.Join(home, "Library", "Caches", "claude-cli-nodejs")
+	mustMkdir(t, claudeCliCache)
+	mustWriteFile(t, filepath.Join(claudeCliCache, "log"), make([]byte, 512))
+	// Config roots must not be deletion targets: ~/.gem holds the RubyGems
+	// credential, ~/.cursor holds extensions & settings.
+	gemDir := filepath.Join(home, ".gem")
+	mustMkdir(t, gemDir)
+	mustWriteFile(t, filepath.Join(gemDir, "credentials"), make([]byte, 128))
+	cursorDir := filepath.Join(home, ".cursor")
+	mustMkdir(t, cursorDir)
+	mustWriteFile(t, filepath.Join(cursorDir, "settings.json"), []byte("{}"))
 
 	cursorRoot := filepath.Join(home, "Library", "Application Support", "Cursor")
 	cursorCache := filepath.Join(cursorRoot, "Cache")
@@ -110,15 +135,28 @@ func TestGlobalScanner_DetectsExpandedCatalog(t *testing.T) {
 		t.Errorf("expected ~/.local/pipx to be detected")
 	}
 
-	if r, ok := byPath[claudeProjects]; !ok {
-		t.Errorf("expected ~/.claude/projects to be detected")
-	} else {
-		if r.Safety != model.SafetyCaution {
-			t.Errorf("~/.claude/projects: expected safety=caution, got %s", r.Safety)
-		}
-		if r.Recommendation == "" {
-			t.Errorf("~/.claude/projects: expected a consequence note in Recommendation, got empty")
-		}
+	// Irreplaceable session history / project memory must never be reported —
+	// deleting it is unrecoverable data loss, not reclaimed cache.
+	if _, ok := byPath[claudeProjects]; ok {
+		t.Errorf("~/.claude/projects (session history/memory) must never be offered for deletion")
+	}
+	if _, ok := byPath[codexDir]; ok {
+		t.Errorf("~/.codex (session history) must never be offered for deletion")
+	}
+	if _, ok := byPath[geminiDir]; ok {
+		t.Errorf("~/.gemini (session history) must never be offered for deletion")
+	}
+	if _, ok := byPath[claudePluginCache]; ok {
+		t.Errorf("~/.claude/** (user state) must never be offered for deletion, incl. its caches")
+	}
+	if _, ok := byPath[claudeCliCache]; ok {
+		t.Errorf("~/Library/Caches/claude-cli-nodejs (Claude Code state) must never be offered for deletion")
+	}
+	if _, ok := byPath[gemDir]; ok {
+		t.Errorf("~/.gem (holds RubyGems credentials) must never be offered for deletion")
+	}
+	if _, ok := byPath[cursorDir]; ok {
+		t.Errorf("~/.cursor (extensions & settings) must never be offered for deletion")
 	}
 
 	if _, ok := byPath[cursorCache]; !ok {
