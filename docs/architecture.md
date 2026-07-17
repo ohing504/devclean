@@ -126,6 +126,8 @@ Uses the most recent of three timestamps:
 2. Git last commit time (`git log -1 --format=%ct`)
 3. Project directory mtime
 
+Classification forks git per repo (`git rev-parse` to resolve roots, `git status` + `git log` for protection and last-commit time, `git check-ignore` per dirty root). These run across a bounded worker pool (`min(NumCPU, 8)`) — root resolution over distinct project dirs, then git info over distinct roots, then check-ignore over dirty roots — instead of serially. As with the walk engine's sizing stage, the win is overlapping the forks, not replacing them; results are applied serially afterwards so output stays deterministic regardless of scheduling.
+
 Thresholds are configurable:
 
 | Status | Default |

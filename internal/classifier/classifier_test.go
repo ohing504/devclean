@@ -240,6 +240,71 @@ func TestApplyGitInfo_TrackedArtifactWithoutGitignore(t *testing.T) {
 	}
 }
 
+// TestApplyGitInfo_MultipleReposParallel exercises the concurrent root
+// resolution and per-root git-info path: several distinct repos in one call,
+// mixing dirty/clean state and two artifacts sharing one root. Each artifact
+// must be attributed to its own repo's git info regardless of scheduling, so a
+// mis-mapping in the parallel map surfaces as wrong protection here. Run under
+// -race, it also guards the distinct-index writes against data races.
+func TestApplyGitInfo_MultipleReposParallel(t *testing.T) {
+	// dirty repo with a tracked artifact → protected
+	dirtyRepo := t.TempDir()
+	gitInit(t, dirtyRepo)
+	dirtyVendor := filepath.Join(dirtyRepo, "vendor")
+	mustMkdir(t, dirtyVendor)
+	mustWriteFile(t, filepath.Join(dirtyVendor, "lib.go"), []byte("package lib"))
+	mustWriteFile(t, filepath.Join(dirtyRepo, "file.txt"), []byte("hello"))
+	gitRun(t, dirtyRepo, "add", ".")
+	gitRun(t, dirtyRepo, "commit", "-m", "init")
+	mustWriteFile(t, filepath.Join(dirtyRepo, "file.txt"), []byte("dirty"))
+
+	// clean repo with two artifacts sharing the same root → never protected
+	cleanRepo := t.TempDir()
+	gitInit(t, cleanRepo)
+	mustWriteFile(t, filepath.Join(cleanRepo, "file.txt"), []byte("hello"))
+	gitRun(t, cleanRepo, "add", ".")
+	gitRun(t, cleanRepo, "commit", "-m", "init")
+	cleanA := filepath.Join(cleanRepo, "node_modules")
+	cleanB := filepath.Join(cleanRepo, "dist")
+	mustMkdir(t, cleanA)
+	mustMkdir(t, cleanB)
+
+	results := []model.ScanResult{
+		{Path: dirtyVendor, Safety: model.SafetyCaution},
+		{Path: cleanA, Safety: model.SafetySafe},
+		{Path: cleanB, Safety: model.SafetySafe},
+	}
+
+	classifier.ApplyGitInfo(results)
+
+	if !results[0].Protected {
+		t.Error("tracked artifact in dirty repo should be protected")
+	}
+	if results[1].Protected || results[2].Protected {
+		t.Error("artifacts in clean repo should not be protected")
+	}
+	// git rev-parse resolves symlinks (macOS /var → /private/var), so compare
+	// against the resolved paths rather than the raw t.TempDir() values.
+	wantClean := evalSymlinks(t, cleanRepo)
+	wantDirty := evalSymlinks(t, dirtyRepo)
+	if results[1].ProjectRoot != wantClean || results[2].ProjectRoot != wantClean {
+		t.Errorf("shared-root artifacts should both map to %s, got %q and %q",
+			wantClean, results[1].ProjectRoot, results[2].ProjectRoot)
+	}
+	if results[0].ProjectRoot != wantDirty {
+		t.Errorf("dirty artifact should map to %s, got %q", wantDirty, results[0].ProjectRoot)
+	}
+}
+
+func evalSymlinks(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("eval symlinks %s: %v", path, err)
+	}
+	return resolved
+}
+
 func mustMkdir(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {

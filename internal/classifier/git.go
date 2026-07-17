@@ -4,8 +4,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -94,43 +96,107 @@ type gitInfo struct {
 	dirMtime   time.Time
 }
 
+// gitWorkerCap bounds concurrent git forks so a scan with many repos does not
+// spawn a subprocess per repo all at once.
+const gitWorkerCap = 8
+
+// distinct returns the input's unique values in first-seen order.
+func distinct(vals []string) []string {
+	seen := make(map[string]bool, len(vals))
+	out := make([]string, 0, len(vals))
+	for _, v := range vals {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// parallelMap applies fn to each key across a bounded worker pool and returns
+// the key→result map. keys must be distinct (one map entry per key); each
+// worker writes a distinct slice index, so no locking is needed. This is the
+// classification hot path: each fn forks git (rev-parse / status / log), and
+// running them serially over dozens of repos dominated warm-cache scan time.
+func parallelMap[T any](keys []string, fn func(string) T) map[string]T {
+	out := make(map[string]T, len(keys))
+	if len(keys) == 0 {
+		return out
+	}
+	workers := runtime.NumCPU()
+	if workers > gitWorkerCap {
+		workers = gitWorkerCap
+	}
+	if workers > len(keys) {
+		workers = len(keys)
+	}
+
+	vals := make([]T, len(keys))
+	idx := make(chan int)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range idx {
+				vals[i] = fn(keys[i])
+			}
+		}()
+	}
+	for i := range keys {
+		idx <- i
+	}
+	close(idx)
+	wg.Wait()
+
+	for i, k := range keys {
+		out[k] = vals[i]
+	}
+	return out
+}
+
 // ApplyGitInfo checks git status and last commit time for each scan result.
 // It marks dirty repos as protected and updates LastMod to the more recent of
 // filesystem mtime vs git commit time (matching cluttered's behavior).
 func ApplyGitInfo(results []model.ScanResult) {
-	cache := make(map[string]*gitInfo)
+	// First pass: resolve the git root of each result's project dir. FindGitRoot
+	// forks `git rev-parse`, so resolve each distinct dir once, concurrently. The
+	// findProjectRoot / projectDir fallbacks are pure functions of the dir, so
+	// folding them in here is equivalent to the previous per-result application.
+	projectDirs := distinct(func() []string {
+		ds := make([]string, len(results))
+		for i := range results {
+			ds[i] = filepath.Dir(results[i].Path)
+		}
+		return ds
+	}())
+	rootByDir := parallelMap(projectDirs, func(dir string) string {
+		gitRoot := FindGitRoot(dir)
+		if gitRoot == "" {
+			gitRoot = findProjectRoot(dir)
+		}
+		if gitRoot == "" {
+			gitRoot = dir
+		}
+		return gitRoot
+	})
 
-	// First pass: resolve git roots and build cache
 	roots := make([]string, len(results))
-	// FindGitRoot forks `git rev-parse`; artifacts sharing a parent dir would
-	// otherwise fork once each. Negative results ("") are cached too.
-	rootByDir := make(map[string]string)
 	for i := range results {
-		projectDir := filepath.Dir(results[i].Path)
-		gitRoot, cached := rootByDir[projectDir]
-		if !cached {
-			gitRoot = FindGitRoot(projectDir)
-			rootByDir[projectDir] = gitRoot
-		}
-		// Fallback: if git root not found, walk up for topmost package.json
-		if gitRoot == "" {
-			gitRoot = findProjectRoot(projectDir)
-		}
-		if gitRoot == "" {
-			gitRoot = projectDir
-		}
-		roots[i] = gitRoot
-
-		if _, ok := cache[gitRoot]; !ok {
-			cache[gitRoot] = &gitInfo{
-				dirty:      HasUncommittedChanges(gitRoot),
-				lastCommit: LastGitCommitTime(gitRoot),
-				dirMtime:   pathutil.ModTime(gitRoot),
-			}
-		}
+		roots[i] = rootByDir[filepath.Dir(results[i].Path)]
 	}
 
-	// Second pass: collect artifact paths per dirty git root for batch check-ignore
+	// Second pass: gather git info per distinct root (status + log forks),
+	// concurrently across roots.
+	cache := parallelMap(distinct(roots), func(gitRoot string) *gitInfo {
+		return &gitInfo{
+			dirty:      HasUncommittedChanges(gitRoot),
+			lastCommit: LastGitCommitTime(gitRoot),
+			dirMtime:   pathutil.ModTime(gitRoot),
+		}
+	})
+
+	// Third pass: collect artifact paths per dirty git root for batch check-ignore
 	dirtyRootPaths := make(map[string][]string)
 	for i := range results {
 		gitRoot := roots[i]
@@ -140,13 +206,16 @@ func ApplyGitInfo(results []model.ScanResult) {
 		}
 	}
 
-	// Batch check-ignore per dirty root
-	ignoredByRoot := make(map[string]map[string]bool)
-	for gitRoot, paths := range dirtyRootPaths {
-		ignoredByRoot[gitRoot] = batchCheckIgnored(gitRoot, paths)
+	// Batch check-ignore per dirty root, concurrently across roots.
+	dirtyRoots := make([]string, 0, len(dirtyRootPaths))
+	for gitRoot := range dirtyRootPaths {
+		dirtyRoots = append(dirtyRoots, gitRoot)
 	}
+	ignoredByRoot := parallelMap(dirtyRoots, func(gitRoot string) map[string]bool {
+		return batchCheckIgnored(gitRoot, dirtyRootPaths[gitRoot])
+	})
 
-	// Third pass: apply git info and protection
+	// Fourth pass: apply git info and protection
 	for i := range results {
 		gitRoot := roots[i]
 		if gitRoot == "" {
