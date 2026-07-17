@@ -95,9 +95,10 @@ func TestWalkScan_ReadsEachDirOnce(t *testing.T) {
 	}
 }
 
-// TestWalkScan_DoesNotFollowSymlinkedArtifact locks the no-follow contract for
-// interior symlinks (now an implicit consequence of e.IsDir()): a symlink named
-// like an artifact is not matched, and a self-referential symlink does not loop.
+// TestWalkScan_DoesNotFollowSymlinkedArtifact locks the explicit no-follow guard
+// (walk.go skips any entry with os.ModeSymlink): a symlink named like an artifact
+// is not matched, the walk never descends *through* a symlinked directory to
+// match an artifact inside it, and a self-referential symlink does not loop.
 func TestWalkScan_DoesNotFollowSymlinkedArtifact(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on windows")
@@ -108,20 +109,33 @@ func TestWalkScan_DoesNotFollowSymlinkedArtifact(t *testing.T) {
 	real := filepath.Join(root, "real")
 	touch(t, filepath.Join(real, "file.js"))
 
+	// A directory reachable only through a symlink (kept outside the scan root so
+	// it is not walked directly), holding a real artifact: it must stay invisible,
+	// proving the walk does not descend through the link.
+	linked := filepath.Join(t.TempDir(), "linked")
+	touch(t, filepath.Join(linked, "package.json"))
+	if err := os.MkdirAll(filepath.Join(linked, "node_modules", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := os.Symlink(real, filepath.Join(proj, "node_modules")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if err := os.Symlink(linked, filepath.Join(proj, "via-link")); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
 	if err := os.Symlink(proj, filepath.Join(proj, "loop")); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
 	}
 
-	// Must terminate (no infinite loop) and not match the symlinked node_modules.
+	// Must terminate (no infinite loop), not match the symlinked node_modules,
+	// and not reach the node_modules inside the symlinked "via-link" dir.
 	results, err := WalkScan(context.Background(), root, model.EcoNode)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(results) != 0 {
-		t.Errorf("got %d results, want 0 (symlinked node_modules not followed): %+v", len(results), paths(results))
+		t.Errorf("got %d results, want 0 (no symlink followed): %+v", len(results), paths(results))
 	}
 }
 

@@ -66,6 +66,8 @@ Tables can also:
 
 **Deduplication**: a directory matching rules of several active ecosystems is reported once, attributed to the first table in order (node → rust → ruby → python → go), and no scanner descends into another's matched artifact (`__pycache__` inside `node_modules` is not reported separately). Attribution can therefore differ between a full scan and an `--eco` subset scan — a shared `coverage/` goes to node in a full scan, to ruby under `--eco ruby`.
 
+**Symlink policy — never follow**: the walk skips any entry that is a symlink (explicit `os.ModeSymlink` check), so a symlink is never descended into and never matched as an artifact, even when it is named like one (a symlinked `node_modules`, as pnpm and some monorepos produce). This is deliberate: a symlink's target is real content that lives on disk elsewhere, so following it would double-count that space and inflate the reported reclaimable total, and deleting a symlinked artifact reclaims only the link (bytes) while risking a target shared by other projects. No-follow also means symlink cycles can never be walked, so no separate cycle guard is needed. The reclaimable content behind these links is surfaced instead by the Global Caches scanner (e.g. the pnpm store) and hardlink-aware sizing, not by following per-project links.
+
 Results are sorted by (table order, path) before returning, keeping output order stable.
 
 ### Display Units
