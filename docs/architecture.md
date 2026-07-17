@@ -74,7 +74,7 @@ Results are sorted by (table order, path) before returning, keeping output order
 
 `model.HumanSize` formats sizes with **decimal SI units** (1 KB = 1000 B). The CLI's `--min-size` flag uses the same convention by default (humanize.ParseBytes), so the threshold a user types and the size they see in output agree on the same arithmetic. Internally sizes come from `st_blocks×512` (binary 512-byte units), but the formatting layer is decimal — so a 1 GiB directory renders as `1.1 GB` and `--min-size 1GB` will include it. Binary suffixes (`KiB`, `MiB`, `GiB`) are still accepted by `--min-size` for users who want explicit binary thresholds.
 
-**Sparse-aware display**: the table shows an artifact's disk size, annotating it with the apparent size when apparent exceeds double the disk figure by more than 1 GiB — e.g. a `Docker.raw` image renders `24.0 GB (apparent 460.0 GB)`. The JSON output always carries `apparent_size` (`omitzero`, so dropped when zero) so agents can detect sparse files. Ordinary directories, where block-rounding leaves apparent ≤ disk, are never annotated.
+**Sparse-aware display**: the table shows an artifact's real on-disk size, annotating it with the larger size the file nominally reports when that apparent size exceeds double the disk figure by more than 1 GiB — e.g. a `Docker.raw` image renders `24.0 GB (appears as 460.0 GB)`, making clear it only uses 24 GB on disk though it presents as 460 GB. The JSON output always carries `apparent_size` (`omitzero`, so dropped when zero) so agents can detect sparse files. Ordinary directories, where block-rounding leaves apparent ≤ disk, are never annotated.
 
 ### Metadata Enrichment
 

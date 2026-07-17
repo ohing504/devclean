@@ -283,14 +283,14 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 // under disk) would produce noise.
 const sparseMinDiff = 1 << 30 // 1 GiB
 
-// sizeCell renders an artifact's disk size, annotating it with the apparent
-// (logical) size when the file is materially sparse — apparent more than double
-// disk and over sparseMinDiff larger. Example: a Docker.raw image shows
-// "24.0 GB (apparent 460.0 GB)" so the on-disk figure and the misleading
-// logical size are both visible.
+// sizeCell renders an artifact's real on-disk size, annotating it with the
+// larger size the file nominally reports when it is materially sparse —
+// nominal more than double disk and over sparseMinDiff larger. Example: a
+// Docker.raw image shows "24.0 GB (appears as 460.0 GB)", making clear it only
+// uses 24 GB on disk though it presents itself as 460 GB.
 func sizeCell(r model.ScanResult) string {
 	if r.ApparentSize > r.Size*2 && r.ApparentSize-r.Size > sparseMinDiff {
-		return fmt.Sprintf("%s (apparent %s)", model.HumanSize(r.Size), model.HumanSize(r.ApparentSize))
+		return fmt.Sprintf("%s (appears as %s)", model.HumanSize(r.Size), model.HumanSize(r.ApparentSize))
 	}
 	return model.HumanSize(r.Size)
 }

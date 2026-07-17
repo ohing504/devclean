@@ -51,8 +51,8 @@ func TestWriteTableSparseAnnotation(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	output.WriteTableWithOptions(&buf, []model.ScanResult{sparse}, output.TableOptions{Verbose: true})
-	if out := buf.String(); !strings.Contains(out, "apparent") {
-		t.Errorf("sparse artifact must show apparent size; got:\n%s", out)
+	if out := buf.String(); !strings.Contains(out, "appears as") {
+		t.Errorf("sparse artifact must show its nominal size; got:\n%s", out)
 	}
 }
 
@@ -72,7 +72,7 @@ func TestWriteTableNoSparseAnnotationForDense(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	output.WriteTableWithOptions(&buf, []model.ScanResult{dense}, output.TableOptions{Verbose: true})
-	if out := buf.String(); strings.Contains(out, "apparent") {
+	if out := buf.String(); strings.Contains(out, "appears as") {
 		t.Errorf("dense artifact must not be annotated; got:\n%s", out)
 	}
 }
