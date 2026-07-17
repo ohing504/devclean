@@ -52,6 +52,22 @@ func setupTestWorkspace(t *testing.T) string {
 	mustWriteFile(t, filepath.Join(rustProject, "target", "debug", "cli-tool"), make([]byte, 8192))
 	mustWriteFile(t, filepath.Join(rustProject, "Cargo.toml"), []byte("[package]"))
 
+	// Python project with __pycache__ and .pytest_cache
+	pyProject := filepath.Join(root, "py-svc")
+	mustMkdir(t, filepath.Join(pyProject, "__pycache__"))
+	mustWriteFile(t, filepath.Join(pyProject, "__pycache__", "mod.cpython-312.pyc"), make([]byte, 1024))
+	mustMkdir(t, filepath.Join(pyProject, ".pytest_cache"))
+	mustWriteFile(t, filepath.Join(pyProject, ".pytest_cache", "lastfailed"), make([]byte, 512))
+	mustWriteFile(t, filepath.Join(pyProject, "pyproject.toml"), []byte("[project]"))
+
+	// Ruby project with vendor/bundle and .bundle
+	rbProject := filepath.Join(root, "rb-app")
+	mustMkdir(t, filepath.Join(rbProject, "vendor", "bundle", "ruby"))
+	mustWriteFile(t, filepath.Join(rbProject, "vendor", "bundle", "ruby", "gem.rb"), make([]byte, 2048))
+	mustMkdir(t, filepath.Join(rbProject, ".bundle"))
+	mustWriteFile(t, filepath.Join(rbProject, ".bundle", "config"), make([]byte, 256))
+	mustWriteFile(t, filepath.Join(rbProject, "Gemfile"), []byte("source 'https://rubygems.org'"))
+
 	return root
 }
 
@@ -85,17 +101,16 @@ func TestIntegration_ScanClassifyPipeline(t *testing.T) {
 	for _, r := range results {
 		ecoFound[r.Ecosystem] = true
 	}
-	if !ecoFound[model.EcoNode] {
-		t.Error("expected Node.js ecosystem in results")
-	}
-	if !ecoFound[model.EcoRust] {
-		t.Error("expected Rust ecosystem in results")
+	for _, eco := range []model.Ecosystem{model.EcoNode, model.EcoRust, model.EcoPython, model.EcoRuby} {
+		if !ecoFound[eco] {
+			t.Errorf("expected %s ecosystem in results", eco)
+		}
 	}
 
 	// 4. Group by project
 	projects := model.GroupByProject(results)
-	if len(projects) < 2 {
-		t.Errorf("expected at least 2 projects (my-app, cli-tool), got %d", len(projects))
+	if len(projects) < 4 {
+		t.Errorf("expected at least 4 projects (my-app, cli-tool, py-svc, rb-app), got %d", len(projects))
 	}
 }
 
@@ -155,6 +170,50 @@ func TestIntegration_FilterByEcosystem(t *testing.T) {
 	}
 }
 
+// TestIntegration_GlobalScannerPipeline drives the Global stat scanner with an
+// injected HOME, then classifies — exercising the full scan→classify path for a
+// fixed-home scanner (the walk fixtures above only cover the tree-walking
+// scanners). The scanner is constructed directly with an isolated TmpRoot and a
+// stubbed process check so it never touches real machine temp state.
+func TestIntegration_GlobalScannerPipeline(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	npm := filepath.Join(home, ".npm")
+	mustMkdir(t, npm)
+	mustWriteFile(t, filepath.Join(npm, "cache.json"), make([]byte, 2048))
+
+	s := &scanner.GlobalScanner{
+		TmpRoot:        t.TempDir(), // isolate from real browser code-sign clones
+		ProcessRunning: func(string) bool { return false },
+	}
+	results, err := s.Scan(context.Background(), home)
+	if err != nil {
+		t.Fatalf("scan error: %v", err)
+	}
+
+	var npmResult *model.ScanResult
+	for i := range results {
+		if results[i].Ecosystem != model.EcoGlobal {
+			t.Errorf("expected only global ecosystem, got %s for %s", results[i].Ecosystem, results[i].Path)
+		}
+		if results[i].Path == npm {
+			npmResult = &results[i]
+		}
+	}
+	if npmResult == nil {
+		t.Fatalf("expected ~/.npm to be detected under injected HOME")
+	}
+	if npmResult.Safety != model.SafetySafe {
+		t.Errorf("~/.npm: expected safety=safe, got %s", npmResult.Safety)
+	}
+
+	classifier.ClassifyResults(results, classifier.DefaultThresholds())
+	if npmResult.Activity == "" {
+		t.Error("classify should assign an activity status to the global cache")
+	}
+}
+
 func TestIntegration_FilterResults(t *testing.T) {
 	root := setupTestWorkspace(t)
 
@@ -201,6 +260,7 @@ func TestGolden_JSONOutput(t *testing.T) {
 		results[i].Path = filepath.Base(results[i].Path)
 		results[i].Size = 0              // du returns block-aligned sizes
 		results[i].LastMod = time.Time{} // zero out to make golden file stable
+		results[i].ProjectRoot = ""      // holds the absolute temp path — machine-specific
 	}
 
 	var buf bytes.Buffer

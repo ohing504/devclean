@@ -1,6 +1,6 @@
 {
   "total_size": 0,
-  "total_count": 3,
+  "total_count": 7,
   "results": [
     {
       "path": ".next",
@@ -25,6 +25,46 @@
     {
       "path": "target",
       "ecosystem": "rust",
+      "category": "build",
+      "size": 0,
+      "last_modified": "0001-01-01T00:00:00Z",
+      "activity": "active",
+      "safety": "safe",
+      "protected": false
+    },
+    {
+      "path": ".bundle",
+      "ecosystem": "ruby",
+      "category": "cache",
+      "size": 0,
+      "last_modified": "0001-01-01T00:00:00Z",
+      "activity": "active",
+      "safety": "safe",
+      "protected": false
+    },
+    {
+      "path": "bundle",
+      "ecosystem": "ruby",
+      "category": "deps",
+      "size": 0,
+      "last_modified": "0001-01-01T00:00:00Z",
+      "activity": "active",
+      "safety": "safe",
+      "protected": false
+    },
+    {
+      "path": ".pytest_cache",
+      "ecosystem": "python",
+      "category": "cache",
+      "size": 0,
+      "last_modified": "0001-01-01T00:00:00Z",
+      "activity": "active",
+      "safety": "safe",
+      "protected": false
+    },
+    {
+      "path": "__pycache__",
+      "ecosystem": "python",
       "category": "build",
       "size": 0,
       "last_modified": "0001-01-01T00:00:00Z",
