@@ -97,6 +97,14 @@ func TestGlobalScanner_DetectsExpandedCatalog(t *testing.T) {
 	claudeCliCache := filepath.Join(home, "Library", "Caches", "claude-cli-nodejs")
 	mustMkdir(t, claudeCliCache)
 	mustWriteFile(t, filepath.Join(claudeCliCache, "log"), make([]byte, 512))
+	// Config roots must not be deletion targets: ~/.gem holds the RubyGems
+	// credential, ~/.cursor holds extensions & settings.
+	gemDir := filepath.Join(home, ".gem")
+	mustMkdir(t, gemDir)
+	mustWriteFile(t, filepath.Join(gemDir, "credentials"), make([]byte, 128))
+	cursorDir := filepath.Join(home, ".cursor")
+	mustMkdir(t, cursorDir)
+	mustWriteFile(t, filepath.Join(cursorDir, "settings.json"), []byte("{}"))
 
 	cursorRoot := filepath.Join(home, "Library", "Application Support", "Cursor")
 	cursorCache := filepath.Join(cursorRoot, "Cache")
@@ -143,6 +151,12 @@ func TestGlobalScanner_DetectsExpandedCatalog(t *testing.T) {
 	}
 	if _, ok := byPath[claudeCliCache]; ok {
 		t.Errorf("~/Library/Caches/claude-cli-nodejs (Claude Code state) must never be offered for deletion")
+	}
+	if _, ok := byPath[gemDir]; ok {
+		t.Errorf("~/.gem (holds RubyGems credentials) must never be offered for deletion")
+	}
+	if _, ok := byPath[cursorDir]; ok {
+		t.Errorf("~/.cursor (extensions & settings) must never be offered for deletion")
 	}
 
 	if _, ok := byPath[cursorCache]; !ok {

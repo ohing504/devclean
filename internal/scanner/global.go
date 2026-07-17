@@ -49,7 +49,11 @@ var globalCaches = []globalCache{
 	{".rbenv/versions", model.CatRuntime, model.SafetyCaution, "rbenv-installed Ruby runtimes", "deletes installed Ruby versions, not a cache — reinstall with 'rbenv install'"},
 	{".local/pipx", model.CatDeps, model.SafetyCaution, "pipx-installed CLI tools", "deletes the installed CLI tools themselves — each must be reinstalled with 'pipx install'"},
 	{".m2/repository", model.CatDeps, model.SafetyCaution, "Maven local repository", "shared by every Maven project; dependencies re-download on next build"},
-	{".gem", model.CatCache, model.SafetySafe, "RubyGems cache", ""},
+	// NOTE: `~/.gem` is NOT listed — it is a config root, not a cache. It holds
+	// `~/.gem/credentials` (the RubyGems push API key) alongside installed gems.
+	// Deleting it would leak-by-loss a credential and remove installed gems, so
+	// it must never be a deletion target. (RubyGems' download cache lives under
+	// `~/Library/Caches/CocoaPods`-style OS cache dirs, listed below where safe.)
 	{".cocoapods", model.CatCache, model.SafetySafe, "CocoaPods spec repos", ""},
 	// uv and Puppeteer (v19+) use the XDG ~/.cache path on macOS too, so these
 	// live here rather than in the Linux section.
@@ -102,7 +106,9 @@ var globalCaches = []globalCache{
 	// (plugin cache, shell snapshots, CLI logs) only reappear as install-time
 	// scaffolding, so reclaiming them is worthless against that risk. These
 	// tools are excluded entirely rather than listed with per-subdir caches.
-	{".cursor", model.CatCache, model.SafetyCaution, "Cursor extensions & settings", "contains installed extensions and settings — Cursor must reinstall them"},
+	// `~/.cursor` (Cursor extensions & settings — a config root) is excluded for
+	// the same reason. Only Cursor's OS-level cache SUBDIRS below are eligible.
+	//
 	// Only Cursor's cache subdirectories — Application Support/Cursor itself
 	// holds settings and must never be offered for deletion.
 	{"Library/Application Support/Cursor/Cache", model.CatCache, model.SafetySafe, "Cursor cache", ""},
