@@ -77,9 +77,18 @@ func TestGlobalScanner_DetectsExpandedCatalog(t *testing.T) {
 	mustMkdir(t, pipx)
 	mustWriteFile(t, filepath.Join(pipx, "venv.cfg"), make([]byte, 512))
 
+	// Session history / project memory must NEVER be offered for deletion:
+	// it is irreplaceable, not reclaimable cache. Seed it and assert below that
+	// the scanner does not report it.
 	claudeProjects := filepath.Join(home, ".claude", "projects")
 	mustMkdir(t, claudeProjects)
 	mustWriteFile(t, filepath.Join(claudeProjects, "session.jsonl"), make([]byte, 1024))
+	codexDir := filepath.Join(home, ".codex")
+	mustMkdir(t, codexDir)
+	mustWriteFile(t, filepath.Join(codexDir, "history.jsonl"), make([]byte, 1024))
+	geminiDir := filepath.Join(home, ".gemini")
+	mustMkdir(t, geminiDir)
+	mustWriteFile(t, filepath.Join(geminiDir, "history.jsonl"), make([]byte, 1024))
 
 	cursorRoot := filepath.Join(home, "Library", "Application Support", "Cursor")
 	cursorCache := filepath.Join(cursorRoot, "Cache")
@@ -110,15 +119,16 @@ func TestGlobalScanner_DetectsExpandedCatalog(t *testing.T) {
 		t.Errorf("expected ~/.local/pipx to be detected")
 	}
 
-	if r, ok := byPath[claudeProjects]; !ok {
-		t.Errorf("expected ~/.claude/projects to be detected")
-	} else {
-		if r.Safety != model.SafetyCaution {
-			t.Errorf("~/.claude/projects: expected safety=caution, got %s", r.Safety)
-		}
-		if r.Recommendation == "" {
-			t.Errorf("~/.claude/projects: expected a consequence note in Recommendation, got empty")
-		}
+	// Irreplaceable session history / project memory must never be reported —
+	// deleting it is unrecoverable data loss, not reclaimed cache.
+	if _, ok := byPath[claudeProjects]; ok {
+		t.Errorf("~/.claude/projects (session history/memory) must never be offered for deletion")
+	}
+	if _, ok := byPath[codexDir]; ok {
+		t.Errorf("~/.codex (session history) must never be offered for deletion")
+	}
+	if _, ok := byPath[geminiDir]; ok {
+		t.Errorf("~/.gemini (session history) must never be offered for deletion")
 	}
 
 	if _, ok := byPath[cursorCache]; !ok {

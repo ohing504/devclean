@@ -16,15 +16,16 @@ import (
 
 func newCleanCmd() *cobra.Command {
 	var (
-		scanPath      string
-		ecos          []string
-		status        string
-		minSizeStr    string
-		safeOnly      bool
-		force         bool
-		dryRun        bool
-		yes           bool
-		vendorCleanup bool
+		scanPath       string
+		ecos           []string
+		status         string
+		minSizeStr     string
+		safeOnly       bool
+		force          bool
+		dryRun         bool
+		yes            bool
+		includeCaution bool
+		vendorCleanup  bool
 	)
 
 	cmd := &cobra.Command{
@@ -62,11 +63,16 @@ func newCleanCmd() *cobra.Command {
 			var toClean []model.ScanResult
 
 			if yes {
-				// Non-interactive: clean all non-protected
-				for _, r := range results {
-					if !r.Protected {
-						toClean = append(toClean, r)
-					}
+				var skippedCaution int
+				toClean, skippedCaution = selectForYes(results, includeCaution)
+				if skippedCaution > 0 {
+					fmt.Printf(
+						"%s\n",
+						ui.DimStyle.Render(fmt.Sprintf(
+							"Skipped %d caution item(s) — pass --include-caution to remove them with --yes.",
+							skippedCaution,
+						)),
+					)
 				}
 			} else {
 				// Interactive tree selection
@@ -190,10 +196,38 @@ func newCleanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&safeOnly, "safe", false, "clean only safe items (skip caution/protected)")
 	cmd.Flags().BoolVar(&force, "force", false, "permanent delete (skip Trash)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview without deleting")
-	cmd.Flags().BoolVar(&yes, "yes", false, "skip confirmation and interactive selection")
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip confirmation and interactive selection (deletes only safe items unless --include-caution)")
+	cmd.Flags().BoolVar(&includeCaution, "include-caution", false, "with --yes, also delete caution items (shared impact or hard to regenerate); protected is still never deleted")
 	cmd.Flags().BoolVar(&vendorCleanup, "vendor-cleanup", false, "also run ecosystem-native cleanup commands (e.g. 'xcrun simctl delete unavailable' for xcode)")
 
 	return cmd
+}
+
+// selectForYes chooses which results a non-interactive (--yes) clean deletes.
+// It deletes only `safe` (auto-regenerated) items by default; `caution` items
+// carry shared impact or hold state that is slow or impossible to regenerate,
+// so removing them without a human looking is opt-in via includeCaution.
+// `protected` items (git-tracked dirty, or protected safety) are never deleted.
+// This keeps a single mis-classified catalog entry from becoming silent data
+// loss under --yes. It returns the items to clean and how many caution items
+// were skipped (for the user-facing notice).
+func selectForYes(results []model.ScanResult, includeCaution bool) (toClean []model.ScanResult, skippedCaution int) {
+	for _, r := range results {
+		if r.Protected {
+			continue
+		}
+		switch r.Safety {
+		case model.SafetySafe:
+			toClean = append(toClean, r)
+		case model.SafetyCaution:
+			if includeCaution {
+				toClean = append(toClean, r)
+			} else {
+				skippedCaution++
+			}
+		}
+	}
+	return toClean, skippedCaution
 }
 
 // vendorEcos resolves the vendor-cleanup scope: the explicit --eco selection,

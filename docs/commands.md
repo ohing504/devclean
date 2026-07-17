@@ -86,6 +86,21 @@ artifacts crowd out the real targets. Sizes use SI/IEC suffixes:
 
 `devclean scan --min-size 100MB` keeps only artifacts ≥ 100 MB.
 
+### Non-interactive safety (`--yes` / `--include-caution`)
+
+`--yes` skips the interactive selector for scripting and AI-agent use. To keep a
+mis-classification from becoming silent data loss, `--yes` deletes only `safe`
+(auto-regenerated) items by default. `caution` items — shared impact, or state
+that is slow or impossible to regenerate — are skipped and reported:
+
+```
+Skipped 3 caution item(s) — pass --include-caution to remove them with --yes.
+```
+
+Add `--include-caution` to also delete `caution` items non-interactively. `protected`
+items are never deleted either way. The interactive selector (no `--yes`) is
+unaffected — you still see and choose caution items yourself.
+
 ### Vendor Cleanups
 
 Some ecosystems ship official cleanup commands that are stricter or safer than

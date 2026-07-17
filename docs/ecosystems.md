@@ -178,12 +178,12 @@ Each entry that is `caution` carries a consequence-of-deletion note in `recommen
 | `~/Library/Android/sdk/system-images` | runtime | caution |
 | `~/Library/Android/sdk/ndk` | deps | caution |
 | `~/Library/Android/sdk/build-tools` | runtime | caution |
-| `~/.claude/projects` | cache | caution (session history/memory — deleting breaks `--resume`) |
 | `~/.claude/plugins/cache`, `~/.claude/shell-snapshots`, `~/Library/Caches/claude-cli-nodejs` | cache | safe |
-| `~/.codex`, `~/.gemini` | cache | caution (contain session history) |
 | `~/.cursor` | cache | caution (extensions & settings) |
 | `~/Library/Application Support/Cursor/{Cache,CachedData,Code Cache}` | cache | safe (cache subdirs only — settings live alongside) |
 | `/private/var/folders/*/*/X/*.code_sign_clone` | cache | safe / caution (macOS only — Browser Temp, see below) |
+
+Irreplaceable AI-tool **session history and project memory** — `~/.claude/projects`, `~/.codex`, `~/.gemini` — is deliberately **excluded** from the catalog: it cannot be regenerated, so deleting it is unrecoverable data loss rather than reclaimed cache. devclean never offers it for deletion. Only genuinely regenerable caches under those tools (plugin cache, shell snapshots, CLI cache) are eligible.
 
 **Browser Temp (macOS)**: Chromium-family browsers (Chrome, Brave, Edge, Arc, Vivaldi, …) copy their own bundle to `/private/var/folders/<xx>/<yyy>/X/<bundle-id>.code_sign_clone/` on launch to verify their code signature and remove the copy on normal exit. Force-killed processes — typically headless automation like lighthouse or puppeteer — leave zombie copies that accumulate (observed: 92 copies / 156 GB). Matching uses a single `*.code_sign_clone` glob rather than a per-browser catalog; the label carries the browser name (derived from the bundle ID) and the copy count. Safety follows run state: `safe` when the browser is not running (true zombies), `caution` while it runs (checked via `pgrep`, once per browser — the newest copy may be in use) or when the bundle ID is unrecognized (run state unknowable). Because the path lies outside home, it is reported only when the scan root covers the home directory — a `--path` scan of a home subdirectory never surfaces system temp. Reported size may overstate real usage when the copies are APFS clones of the installed app.
 

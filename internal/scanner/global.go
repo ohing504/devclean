@@ -86,18 +86,25 @@ var globalCaches = []globalCache{
 	{".cache/pypoetry", model.CatCache, model.SafetySafe, "Poetry cache", ""},
 
 	// --- Android SDK (home-rooted, large; no dedicated scanner yet) ---
-	{".android/avd", model.CatRuntime, model.SafetyCaution, "Android Virtual Devices", "emulator AVDs and their user data must be recreated"},
+	// NOTE: `~/.android/avd` is deliberately excluded. An emulator's virtual disk
+	// can hold user-created state (installed apps, files written inside the
+	// emulated device) that a fresh AVD does not restore — irreplaceable data,
+	// not regenerable cache. Only re-downloadable SDK artifacts are listed below.
 	{"Library/Android/sdk/system-images", model.CatRuntime, model.SafetyCaution, "Android emulator system images", "emulators won't start until images are re-downloaded"},
 	{"Library/Android/sdk/ndk", model.CatDeps, model.SafetyCaution, "Android NDK installations", "NDK is re-downloaded on next native build"},
 	{"Library/Android/sdk/build-tools", model.CatRuntime, model.SafetyCaution, "Android SDK build tools", "builds fail until build-tools are re-downloaded via the SDK manager"},
 
 	// --- AI tools ---
-	{".claude/projects", model.CatCache, model.SafetyCaution, "Claude Code session history & project memory", "Claude Code session history/memory — deleting breaks --resume and project memory"},
+	// NOTE: irreplaceable session history and project memory are deliberately
+	// NOT in this catalog. `~/.claude/projects` (Claude Code session transcripts
+	// + project memory), `~/.codex`, and `~/.gemini` hold conversation history
+	// that cannot be regenerated — deleting it is unrecoverable data loss, not
+	// reclaimed cache. They must never be offered for deletion, so they are
+	// excluded entirely rather than listed as `caution`. Only genuinely
+	// regenerable caches below are eligible.
 	{".claude/plugins/cache", model.CatCache, model.SafetySafe, "Claude Code plugin cache", ""},
 	{".claude/shell-snapshots", model.CatCache, model.SafetySafe, "Claude Code shell snapshots", ""},
 	{"Library/Caches/claude-cli-nodejs", model.CatCache, model.SafetySafe, "Claude Code CLI cache", ""},
-	{".codex", model.CatCache, model.SafetyCaution, "Codex CLI data", "contains session history, not just caches"},
-	{".gemini", model.CatCache, model.SafetyCaution, "Gemini CLI data", "contains session history, not just caches"},
 	{".cursor", model.CatCache, model.SafetyCaution, "Cursor extensions & settings", "contains installed extensions and settings — Cursor must reinstall them"},
 	// Only Cursor's cache subdirectories — Application Support/Cursor itself
 	// holds settings and must never be offered for deletion.

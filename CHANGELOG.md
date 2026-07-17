@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tree selector: `a` (select all) no longer selects artifacts under protected projects, matching the other bulk-select keys and the ✗ rendering (deletion was already blocked by the cleaner guard).
 - `clean --vendor-cleanup` without `--eco` ran vendor commands for every registered ecosystem (e.g. `xcrun simctl delete unavailable` when nothing Xcode-related was cleaned); it is now scoped to the targeted ecosystems.
 - Ctrl-C / SIGTERM now cancels an in-progress scan instead of being ignored until the walk finishes.
+- Irreplaceable data is no longer offered for deletion. AI-tool session history and project memory (`~/.claude/projects`, `~/.codex`, `~/.gemini`) and Android emulator user data (`~/.android/avd`) were previously in the Global Caches catalog as `caution` entries — but they cannot be regenerated, so deleting them (e.g. via `clean --yes`) was unrecoverable data loss, not reclaimed space. They are now excluded from the catalog entirely; only genuinely regenerable caches/artifacts remain eligible.
+- `clean --yes` now deletes only `safe` items by default; `caution` items are skipped and reported. Previously `--yes` deleted every non-protected item — so a single mis-classified `caution` entry could be removed without a human ever seeing it. Pass `--include-caution` to opt back into deleting `caution` items non-interactively. `protected` is never deleted either way; the interactive selector is unchanged.
 
 ## [0.1.0] - 2026-05-04
 
