@@ -39,13 +39,14 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 		ecoGroups = applyTopN(ecoGroups, opts.TopN)
 	}
 
-	var grandTotal int64
+	var naiveTotal int64
 	var grandCount int
-	var safeTotal int64
+	var allItems []model.ScanResult
 
 	for _, eg := range ecoGroups {
-		grandTotal += eg.totalSize
+		naiveTotal += eg.totalSize
 		grandCount += len(eg.items)
+		allItems = append(allItems, eg.items...)
 
 		projects := model.GroupByProject(eg.items)
 
@@ -74,23 +75,26 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 			// Project path
 			fmt.Fprintf(w, "  %s\n", ui.DimStyle.Render(pathutil.ShortenHome(p.Path)))
 
-			// Count safe items
-			for _, r := range p.Items {
-				if r.Safety == model.SafetySafe {
-					safeTotal += r.Size
-				}
-			}
-
 			// Group artifacts by sub-package
 			subPkgs := groupBySubPackage(p.Items, p.Path)
 			renderSubPackages(w, subPkgs, opts)
 		}
 	}
 
-	fmt.Fprintf(
-		w, "\n%s\n",
-		ui.TotalStyle.Render(fmt.Sprintf("Total: %s (%d items)", model.HumanSize(grandTotal), grandCount)),
-	)
+	// Totals dedup blocks shared across artifacts via hard links (e.g. a pnpm
+	// store blob also linked into node_modules), so the figures reflect space
+	// actually freed rather than an inflated sum of overlapping artifacts.
+	grandTotal := model.DedupedTotal(allItems)
+	safeItems := model.FilterResults(allItems, func(r model.ScanResult) bool {
+		return r.Safety == model.SafetySafe
+	})
+	safeTotal := model.DedupedTotal(safeItems)
+
+	fmt.Fprintf(w, "\n%s", ui.TotalStyle.Render(fmt.Sprintf("Total: %s (%d items)", model.HumanSize(grandTotal), grandCount)))
+	if grandTotal < naiveTotal {
+		fmt.Fprintf(w, " %s", ui.DimStyle.Render("(excludes hard-linked blocks shared across items)"))
+	}
+	fmt.Fprintln(w)
 	if safeTotal > 0 {
 		fmt.Fprintf(
 			w, "%s\n",

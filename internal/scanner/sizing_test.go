@@ -195,3 +195,66 @@ func TestMeasureHardlinkIntraDedup(t *testing.T) {
 		}
 	}
 }
+
+// TestDedupedTotalHardlinkAcrossArtifacts is the pnpm case in miniature: one
+// file hard-linked into two separate artifacts (store ↔ consumer) must be
+// counted once in the grand total, not once per artifact.
+func TestDedupedTotalHardlinkAcrossArtifacts(t *testing.T) {
+	base := t.TempDir()
+	store := filepath.Join(base, "store")
+	consumer := filepath.Join(base, "consumer")
+	for _, d := range []string{store, consumer} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const size = 500_000
+	blob := filepath.Join(store, "blob")
+	if err := os.WriteFile(blob, make([]byte, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(blob, filepath.Join(consumer, "blob")); err != nil {
+		t.Fatal(err)
+	}
+
+	a := sized(model.ScanResult{Path: store})
+	b := sized(model.ScanResult{Path: consumer})
+	results := []model.ScanResult{a, b}
+
+	naive := a.Size + b.Size
+	total := model.DedupedTotal(results)
+	if total >= naive {
+		t.Errorf("DedupedTotal = %d, want < naive sum %d (shared blob counted once)", total, naive)
+	}
+	// Deduped total keeps one copy of the shared blob, so it cannot drop below
+	// a single artifact's standalone size.
+	if total < a.Size {
+		t.Errorf("DedupedTotal = %d, want >= one artifact's size %d", total, a.Size)
+	}
+}
+
+// TestDedupedTotalDistinctDevNotDeduped pins the (dev, ino) key: the same inode
+// number on two different devices (external volume, container fs) is a genuine
+// collision and must NOT be deduped, or the total would silently under-count.
+func TestDedupedTotalDistinctDevNotDeduped(t *testing.T) {
+	const ino, blocks = 42, int64(1_000_000)
+	a := model.ScanResult{Size: blocks, Links: map[model.InodeKey]int64{{Dev: 1, Ino: ino}: blocks}}
+	b := model.ScanResult{Size: blocks, Links: map[model.InodeKey]int64{{Dev: 2, Ino: ino}: blocks}}
+
+	if got := model.DedupedTotal([]model.ScanResult{a, b}); got != 2*blocks {
+		t.Errorf("DedupedTotal (distinct devices) = %d, want %d (no dedup)", got, 2*blocks)
+	}
+	// Same dev+ino is a real hard link and MUST dedup.
+	b.Links = map[model.InodeKey]int64{{Dev: 1, Ino: ino}: blocks}
+	if got := model.DedupedTotal([]model.ScanResult{a, b}); got != blocks {
+		t.Errorf("DedupedTotal (same dev+ino) = %d, want %d (deduped once)", got, blocks)
+	}
+}
+
+// TestDedupedTotalNoLinks: with no hard links, the total is just the sum.
+func TestDedupedTotalNoLinks(t *testing.T) {
+	results := []model.ScanResult{{Size: 100}, {Size: 250}, {Size: 0}}
+	if got := model.DedupedTotal(results); got != 350 {
+		t.Errorf("DedupedTotal = %d, want 350", got)
+	}
+}

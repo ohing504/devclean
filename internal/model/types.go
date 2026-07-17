@@ -140,6 +140,30 @@ func HumanSize(size int64) string {
 	}
 }
 
+// DedupedTotal returns the total disk usage across results with blocks shared
+// via hard links counted once. Each result's Size already counts its own
+// hard-linked inodes once (intra-artifact); this nets out inodes that recur
+// across artifacts — e.g. a pnpm store blob also hard-linked into a project's
+// node_modules — so the total reflects the space actually freed by deleting
+// everything shown, not an inflated sum.
+func DedupedTotal(results []ScanResult) int64 {
+	var total int64
+	seen := make(map[InodeKey]struct{})
+	for _, r := range results {
+		total += r.Size
+		for key, blocks := range r.Links {
+			// First artifact to hold this inode keeps it (already in r.Size);
+			// every later artifact double-counted it, so subtract it back out.
+			if _, dup := seen[key]; dup {
+				total -= blocks
+				continue
+			}
+			seen[key] = struct{}{}
+		}
+	}
+	return total
+}
+
 // ProtectionResult holds the result of a protection analysis.
 type ProtectionResult struct {
 	IsProtected bool     `json:"is_protected"`

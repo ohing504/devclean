@@ -16,13 +16,8 @@ type ScanOutput struct {
 
 // WriteJSON writes scan results as formatted JSON.
 func WriteJSON(w io.Writer, results []model.ScanResult) error {
-	var totalSize int64
-	for _, r := range results {
-		totalSize += r.Size
-	}
-
 	out := ScanOutput{
-		TotalSize:  totalSize,
+		TotalSize:  model.DedupedTotal(results), // nets out blocks shared via hard links
 		TotalCount: len(results),
 		Results:    results,
 	}
