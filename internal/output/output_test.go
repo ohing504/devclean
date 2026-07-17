@@ -36,8 +36,8 @@ func sampleResults() []model.ScanResult {
 }
 
 // TestWriteTableSparseAnnotation verifies a materially sparse artifact renders
-// its apparent size alongside disk — the point of A1. Full render-path test:
-// it pins that the artifact size cell actually routes through sizeCell.
+// its apparent size alongside disk. Full render-path test: it pins that the
+// artifact size cell actually routes through sizeCell.
 func TestWriteTableSparseAnnotation(t *testing.T) {
 	sparse := model.ScanResult{
 		Path:         "/Users/dev/proj/node_modules",

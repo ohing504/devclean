@@ -47,7 +47,6 @@ func newScanCmd() *cobra.Command {
 				return err
 			}
 
-			// Sort
 			sortResults(results, sortBy, reverse)
 
 			if jsonOutput {
