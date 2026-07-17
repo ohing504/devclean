@@ -13,6 +13,30 @@ import (
 // directly: a fully-copied tree, the original removed, and — on copy failure —
 // the original left intact with the partial copy cleaned up.
 
+// TestShouldFallBackToCopy verifies the moveToDir dispatch: only a cross-device
+// EXDEV (as os.Rename wraps it, in an *os.LinkError) routes to the copy
+// fallback; any other rename error must propagate untouched rather than be
+// masked behind a copy attempt.
+func TestShouldFallBackToCopy(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"exdev wrapped in LinkError", &os.LinkError{Op: "rename", Err: syscall.EXDEV}, true},
+		{"bare exdev", syscall.EXDEV, true},
+		{"permission denied", &os.LinkError{Op: "rename", Err: syscall.EACCES}, false},
+		{"not exist", os.ErrNotExist, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldFallBackToCopy(tt.err); got != tt.want {
+				t.Errorf("shouldFallBackToCopy(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMoveByCopy_CopiesTreeAndRemovesOriginal(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "node_modules")

@@ -107,14 +107,20 @@ func moveToDir(src, destDir string) error {
 	if err == nil {
 		return nil
 	}
-	// os.Rename fails with EXDEV when src and dest are on different
-	// filesystems (external drive, separate partition). The Trash lives on
-	// the home volume, so an artifact on any other volume always hits this.
-	// Fall back to copy-then-remove.
-	if !errors.Is(err, syscall.EXDEV) {
+	if !shouldFallBackToCopy(err) {
 		return err
 	}
 	return moveByCopy(src, dest)
+}
+
+// shouldFallBackToCopy reports whether a failed os.Rename should retry via
+// copy-then-remove. os.Rename fails with EXDEV when src and dest are on
+// different filesystems (external drive, separate partition); the Trash lives
+// on the home volume, so an artifact on any other volume always hits this. Any
+// other error is a genuine failure and must propagate untouched, not be masked
+// behind a copy attempt.
+func shouldFallBackToCopy(err error) bool {
+	return errors.Is(err, syscall.EXDEV)
 }
 
 // moveByCopy is the cross-device fallback for moveToDir: copy the tree to dest,
