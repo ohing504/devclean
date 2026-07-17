@@ -217,6 +217,19 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		}
 
 		for _, e := range entries {
+			// No-follow policy: never descend into or match a symlink. Following
+			// links would (a) double-count a target that also lives on disk
+			// elsewhere — inflating reported reclaimable space, (b) let a delete
+			// of a symlinked artifact (e.g. a pnpm/monorepo node_modules) reclaim
+			// nothing while risking a shared target, and (c) reopen symlink
+			// cycles. e.IsDir() already excludes symlinks (ReadDir uses lstat
+			// semantics), so this is an explicit assertion of that guarantee, not
+			// a behavior change — it keeps a future refactor from silently
+			// following links. Real reclaimable content behind these links is the
+			// job of the Global Caches scanner (pnpm store) and hardlink dedup.
+			if e.Type()&os.ModeSymlink != 0 {
+				continue
+			}
 			if !e.IsDir() {
 				continue
 			}
