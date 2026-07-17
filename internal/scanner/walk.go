@@ -265,16 +265,15 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 	return results, nil
 }
 
-// sizeWorkerCap bounds concurrent du forks so a large scan does not spawn a
-// subprocess per artifact all at once.
+// sizeWorkerCap bounds concurrent sizing walks so a large scan does not
+// traverse every artifact tree at once.
 const sizeWorkerCap = 8
 
-// sizePending fills in Size for every result by running DirSize concurrently
-// across a bounded worker pool. The walk finds artifacts serially but defers
-// their sizing (one du fork each) to here so the forks and their I/O overlap.
-// du is faster per artifact than an in-process traversal, so the speedup comes
-// from overlapping the sizing, not from replacing du. Returns ctx.Err() if the
-// scan is cancelled mid-sizing.
+// sizePending fills in Size, ApparentSize and Links for every result by running
+// Measure concurrently across a bounded worker pool. The walk finds artifacts
+// serially but defers their sizing (one in-process tree walk each) to here so
+// the traversals and their I/O overlap. Returns ctx.Err() if the scan is
+// cancelled mid-sizing.
 func sizePending(ctx context.Context, results []model.ScanResult) error {
 	workers := runtime.NumCPU()
 	if workers > sizeWorkerCap {
@@ -303,7 +302,10 @@ func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers
 		go func() {
 			defer wg.Done()
 			for i := range idx {
-				results[i].Size = DirSize(results[i].Path)
+				st := Measure(results[i].Path)
+				results[i].Size = st.Disk
+				results[i].ApparentSize = st.Apparent
+				results[i].Links = st.Links
 			}
 		}()
 	}

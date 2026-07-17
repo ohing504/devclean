@@ -53,18 +53,17 @@ func (s *LLMScanner) Scan(ctx context.Context, root string) ([]model.ScanResult,
 			return false
 		default:
 		}
-		results = append(results, model.ScanResult{
+		results = append(results, sized(model.ScanResult{
 			Path:           path,
 			Ecosystem:      model.EcoLLM,
 			Category:       model.CatCache,
-			Size:           DirSize(path),
 			LastMod:        ModTime(path),
 			Safety:         model.SafetySafe,
 			ProjectRoot:    filepath.Dir(path),
 			Label:          label,
 			Recommendation: rec,
 			LastUsedAt:     ModTime(path),
-		})
+		}))
 		ReportProgress(ctx, len(results))
 		return true
 	}

@@ -120,16 +120,14 @@ func (s *XcodeScanner) Scan(ctx context.Context, root string) ([]model.ScanResul
 			continue
 		}
 
-		size := DirSize(full)
-		results = append(results, model.ScanResult{
+		results = append(results, sized(model.ScanResult{
 			Path:        full,
 			Ecosystem:   model.EcoXcode,
 			Category:    a.category,
-			Size:        size,
 			LastMod:     ModTime(full),
 			Safety:      a.safety,
 			ProjectRoot: filepath.Dir(full),
-		})
+		}))
 		ReportProgress(ctx, len(results))
 	}
 	return results, nil
@@ -153,15 +151,14 @@ func expandChildren(ctx context.Context, parent string, a xcodeArtifact) []model
 		default:
 		}
 		child := filepath.Join(parent, e.Name())
-		out = append(out, model.ScanResult{
+		out = append(out, sized(model.ScanResult{
 			Path:        child,
 			Ecosystem:   model.EcoXcode,
 			Category:    a.category,
-			Size:        DirSize(child),
 			LastMod:     ModTime(child),
 			Safety:      a.safety,
 			ProjectRoot: parent,
-		})
+		}))
 		ReportProgress(ctx, len(out))
 	}
 	return out
@@ -208,7 +205,10 @@ func enrichDeviceSupport(results []model.ScanResult) {
 			parsedAll[i] = parsed{matched: false}
 			continue
 		}
-		key := m[1] // "<model> <version>"
+		// Scope the key to the parent dir so builds only supersede within the
+		// same DeviceSupport root; otherwise model-less names like "16.4 (…)"
+		// could collide across platforms if slices are ever batched together.
+		key := filepath.Dir(r.Path) + "\x00" + m[1] // parent + "<model> <version>"
 		parsedAll[i] = parsed{key: key, matched: true}
 
 		mt := r.LastMod.Unix()

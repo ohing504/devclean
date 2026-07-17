@@ -114,3 +114,147 @@ func TestDirSizeMissingPath(t *testing.T) {
 		t.Errorf("DirSize(missing) = %d, want 0", got)
 	}
 }
+
+// TestMeasureSparseFile is the core A1 case: a sparse file's disk usage
+// (allocated blocks) must stay far below its apparent (logical) size. This is
+// the Docker.raw scenario in miniature — the old du-only path already got this
+// right, and the in-process Measure must not regress it.
+func TestMeasureSparseFile(t *testing.T) {
+	dir := t.TempDir()
+	f, err := os.Create(filepath.Join(dir, "sparse.img"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const apparent = 100 << 20 // 100 MiB hole, no data written
+	if err := f.Truncate(apparent); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st := Measure(dir)
+	if st.Apparent < apparent {
+		t.Errorf("Apparent = %d, want >= %d (logical size of the hole)", st.Apparent, int64(apparent))
+	}
+	if st.Disk > 1<<20 {
+		t.Errorf("Disk = %d, want < 1MiB (sparse file allocates almost no blocks)", st.Disk)
+	}
+	if st.Disk >= st.Apparent {
+		t.Errorf("Disk (%d) should be far below Apparent (%d) for a sparse file", st.Disk, st.Apparent)
+	}
+}
+
+// TestMeasureNormalFileBothPositive: a fully-written file reports both apparent
+// and disk > 0, and disk covers the logical content (block rounding makes it a
+// lower bound, never below).
+func TestMeasureNormalFileBothPositive(t *testing.T) {
+	dir := t.TempDir()
+	const size = 200_000
+	if err := os.WriteFile(filepath.Join(dir, "data.bin"), make([]byte, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := Measure(dir)
+	if st.Apparent < size {
+		t.Errorf("Apparent = %d, want >= %d", st.Apparent, int64(size))
+	}
+	if st.Disk < size {
+		t.Errorf("Disk = %d, want >= %d (allocated blocks cover the content)", st.Disk, int64(size))
+	}
+}
+
+// TestMeasureHardlinkIntraDedup: two directory entries pointing at the same
+// inode within one artifact must be counted once for both apparent and disk,
+// and the shared inode recorded in Links (so DedupedTotal can net it across
+// artifacts).
+func TestMeasureHardlinkIntraDedup(t *testing.T) {
+	dir := t.TempDir()
+	const size = 300_000
+	orig := filepath.Join(dir, "orig")
+	if err := os.WriteFile(orig, make([]byte, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(orig, filepath.Join(dir, "hardlink")); err != nil {
+		t.Fatal(err)
+	}
+
+	st := Measure(dir)
+	// Apparent counts the inode once, not once per link (matches du -A).
+	if st.Apparent >= 2*size {
+		t.Errorf("Apparent = %d, want ~%d (hard link counted once, not doubled)", st.Apparent, int64(size))
+	}
+	if st.Apparent < size {
+		t.Errorf("Apparent = %d, want >= %d", st.Apparent, int64(size))
+	}
+	if len(st.Links) != 1 {
+		t.Fatalf("Links = %v, want exactly 1 shared inode", st.Links)
+	}
+	for _, blocks := range st.Links {
+		if blocks <= 0 {
+			t.Errorf("recorded shared inode blocks = %d, want > 0", blocks)
+		}
+	}
+}
+
+// TestDedupedTotalHardlinkAcrossArtifacts is the pnpm case in miniature: one
+// file hard-linked into two separate artifacts (store ↔ consumer) must be
+// counted once in the grand total, not once per artifact.
+func TestDedupedTotalHardlinkAcrossArtifacts(t *testing.T) {
+	base := t.TempDir()
+	store := filepath.Join(base, "store")
+	consumer := filepath.Join(base, "consumer")
+	for _, d := range []string{store, consumer} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const size = 500_000
+	blob := filepath.Join(store, "blob")
+	if err := os.WriteFile(blob, make([]byte, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(blob, filepath.Join(consumer, "blob")); err != nil {
+		t.Fatal(err)
+	}
+
+	a := sized(model.ScanResult{Path: store})
+	b := sized(model.ScanResult{Path: consumer})
+	results := []model.ScanResult{a, b}
+
+	naive := a.Size + b.Size
+	total := model.DedupedTotal(results)
+	if total >= naive {
+		t.Errorf("DedupedTotal = %d, want < naive sum %d (shared blob counted once)", total, naive)
+	}
+	// Deduped total keeps one copy of the shared blob, so it cannot drop below
+	// a single artifact's standalone size.
+	if total < a.Size {
+		t.Errorf("DedupedTotal = %d, want >= one artifact's size %d", total, a.Size)
+	}
+}
+
+// TestDedupedTotalDistinctDevNotDeduped pins the (dev, ino) key: the same inode
+// number on two different devices (external volume, container fs) is a genuine
+// collision and must NOT be deduped, or the total would silently under-count.
+func TestDedupedTotalDistinctDevNotDeduped(t *testing.T) {
+	const ino, blocks = 42, int64(1_000_000)
+	a := model.ScanResult{Size: blocks, Links: map[model.InodeKey]int64{{Dev: 1, Ino: ino}: blocks}}
+	b := model.ScanResult{Size: blocks, Links: map[model.InodeKey]int64{{Dev: 2, Ino: ino}: blocks}}
+
+	if got := model.DedupedTotal([]model.ScanResult{a, b}); got != 2*blocks {
+		t.Errorf("DedupedTotal (distinct devices) = %d, want %d (no dedup)", got, 2*blocks)
+	}
+	// Same dev+ino is a real hard link and MUST dedup.
+	b.Links = map[model.InodeKey]int64{{Dev: 1, Ino: ino}: blocks}
+	if got := model.DedupedTotal([]model.ScanResult{a, b}); got != blocks {
+		t.Errorf("DedupedTotal (same dev+ino) = %d, want %d (deduped once)", got, blocks)
+	}
+}
+
+// TestDedupedTotalNoLinks: with no hard links, the total is just the sum.
+func TestDedupedTotalNoLinks(t *testing.T) {
+	results := []model.ScanResult{{Size: 100}, {Size: 250}, {Size: 0}}
+	if got := model.DedupedTotal(results); got != 350 {
+		t.Errorf("DedupedTotal = %d, want 350", got)
+	}
+}

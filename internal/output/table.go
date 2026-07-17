@@ -39,13 +39,14 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 		ecoGroups = applyTopN(ecoGroups, opts.TopN)
 	}
 
-	var grandTotal int64
+	var naiveTotal int64
 	var grandCount int
-	var safeTotal int64
+	var allItems []model.ScanResult
 
 	for _, eg := range ecoGroups {
-		grandTotal += eg.totalSize
+		naiveTotal += eg.totalSize
 		grandCount += len(eg.items)
+		allItems = append(allItems, eg.items...)
 
 		projects := model.GroupByProject(eg.items)
 
@@ -74,23 +75,26 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 			// Project path
 			fmt.Fprintf(w, "  %s\n", ui.DimStyle.Render(pathutil.ShortenHome(p.Path)))
 
-			// Count safe items
-			for _, r := range p.Items {
-				if r.Safety == model.SafetySafe {
-					safeTotal += r.Size
-				}
-			}
-
 			// Group artifacts by sub-package
 			subPkgs := groupBySubPackage(p.Items, p.Path)
 			renderSubPackages(w, subPkgs, opts)
 		}
 	}
 
-	fmt.Fprintf(
-		w, "\n%s\n",
-		ui.TotalStyle.Render(fmt.Sprintf("Total: %s (%d items)", model.HumanSize(grandTotal), grandCount)),
-	)
+	// Totals dedup blocks shared across artifacts via hard links (e.g. a pnpm
+	// store blob also linked into node_modules), so the figures reflect space
+	// actually freed rather than an inflated sum of overlapping artifacts.
+	grandTotal := model.DedupedTotal(allItems)
+	safeItems := model.FilterResults(allItems, func(r model.ScanResult) bool {
+		return r.Safety == model.SafetySafe
+	})
+	safeTotal := model.DedupedTotal(safeItems)
+
+	fmt.Fprintf(w, "\n%s", ui.TotalStyle.Render(fmt.Sprintf("Total: %s (%d items)", model.HumanSize(grandTotal), grandCount)))
+	if grandTotal < naiveTotal {
+		fmt.Fprintf(w, " %s", ui.DimStyle.Render("(excludes hard-linked blocks shared across items)"))
+	}
+	fmt.Fprintln(w)
 	if safeTotal > 0 {
 		fmt.Fprintf(
 			w, "%s\n",
@@ -259,7 +263,7 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 				w, "      %s %-24s %10s%s%s\n",
 				icon,
 				name+" "+cat,
-				ui.InfoStyle.Render(model.HumanSize(r.Size)),
+				ui.InfoStyle.Render(sizeCell(r)),
 				lastUsedTag(r),
 				rec,
 			)
@@ -272,6 +276,23 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more packages (%s)", collapsedPkgs, model.HumanSize(collapsedPkgSize))),
 		)
 	}
+}
+
+// sparseMinDiff is the apparent−disk gap above which a size is worth annotating
+// as sparse. Below it, ordinary block-rounding slack (apparent can even fall
+// under disk) would produce noise.
+const sparseMinDiff = 1 << 30 // 1 GiB
+
+// sizeCell renders an artifact's real on-disk size, annotating it with the
+// larger size the file nominally reports when it is materially sparse —
+// nominal more than double disk and over sparseMinDiff larger. Example: a
+// Docker.raw image shows "24.0 GB (appears as 460.0 GB)", making clear it only
+// uses 24 GB on disk though it presents itself as 460 GB.
+func sizeCell(r model.ScanResult) string {
+	if r.ApparentSize > r.Size*2 && r.ApparentSize-r.Size > sparseMinDiff {
+		return fmt.Sprintf("%s (appears as %s)", model.HumanSize(r.Size), model.HumanSize(r.ApparentSize))
+	}
+	return model.HumanSize(r.Size)
 }
 
 func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot string, opts TableOptions) {
@@ -293,7 +314,7 @@ func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot stri
 			w, "    %s %-30s %10s%s%s\n",
 			icon,
 			name+" "+cat,
-			ui.InfoStyle.Render(model.HumanSize(r.Size)),
+			ui.InfoStyle.Render(sizeCell(r)),
 			lastUsedTag(r),
 			rec,
 		)

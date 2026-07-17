@@ -47,6 +47,36 @@ Legend: ✔ safe  ⚠ caution  ✖ protected   ● Active  ● Recent  ● Stale
         Run 'devclean list' for details
 ```
 
+A sparse artifact is shown as `8.6 GB (appears as 494.4 GB)` — real disk size, then the size it reports. When hard-linked blocks are shared across artifacts, the total counts them once and says so.
+
+### JSON (`--json`)
+
+```json
+{
+  "total_size": 5583457484,
+  "total_count": 5,
+  "results": [
+    {
+      "path": "/Users/you/workspace/my-app/node_modules",
+      "ecosystem": "node",
+      "category": "deps",
+      "size": 1782579200,
+      "apparent_size": 1690123456,
+      "last_modified": "2026-07-14T09:12:00Z",
+      "activity": "active",
+      "safety": "safe",
+      "protected": false
+    }
+  ]
+}
+```
+
+- `size` — disk usage (allocated blocks); sparse-aware, used for sorting and `--min-size`.
+- `apparent_size` — logical size; omitted when zero. Much larger than `size` for sparse files.
+- `total_size` — sum of `size` with hard-linked blocks counted once.
+
+Also present when known: `reason`, `project_root`, `label`, `recommendation`, `last_used_at`.
+
 ## clean
 
 Clean reclaimable disk space. See `devclean clean --help` for all flags.

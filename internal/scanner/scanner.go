@@ -3,10 +3,8 @@ package scanner
 import (
 	"context"
 	"io/fs"
-	"os"
-	"os/exec"
-	"strconv"
-	"strings"
+	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -157,36 +155,87 @@ func partitionScanners(scanners []Scanner) ([]walkEcosystem, []Scanner) {
 	return tables, rest
 }
 
-// DirSize calculates the disk usage of a directory using `du -sk`.
-// Falls back to walking the filesystem if du is not available.
-//
-// du is faster than an in-process traversal (macOS uses bulk attribute
-// syscalls), so the per-artifact fork is kept; the walk engine amortizes it by
-// sizing artifacts concurrently (see sizePending).
-func DirSize(path string) int64 {
-	cmd := exec.Command("du", "-sk", path)
-	out, err := cmd.Output()
-	if err == nil {
-		parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 2)
-		if kb, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
-			return kb * 1024 // KB to bytes
-		}
-	}
+// SizeStat holds the apparent (sum of logical file sizes) and disk (allocated
+// blocks) bytes for a path, plus the hard-linked inodes it counted so a caller
+// can dedup blocks shared across artifacts (e.g. pnpm store ↔ node_modules).
+type SizeStat struct {
+	Apparent int64
+	Disk     int64
+	Links    map[model.InodeKey]int64 // Nlink>1 inode → disk blocks, keyed by (dev, ino)
+}
 
-	// Fallback: walk filesystem
-	var size int64
-	_ = fs.WalkDir(os.DirFS(path), ".", func(_ string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		info, err := d.Info()
+// Measure walks path in-process and returns its apparent and disk sizes.
+//
+// Disk uses st_blocks×512 (allocated blocks), so it stays correct for sparse
+// files where the logical size vastly exceeds what is on disk, and matches
+// `du`. Apparent sums logical file sizes. Directories contribute their own
+// blocks to Disk (ext4 dirs use real blocks; APFS reports ~0) but not to
+// Apparent. Symlinks are not followed — neither the target nor the link's own
+// blocks are counted (consistent with the walk engine's no-follow policy).
+// Files hard-linked more than once are counted once within this artifact and
+// recorded in Links so a caller can net out blocks shared across artifacts.
+func Measure(path string) SizeStat {
+	var st SizeStat
+	seen := make(map[model.InodeKey]struct{})
+	_ = filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {
+			return nil // skip unreadable / racing entries, keep summing the rest
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
 			return nil
 		}
-		size += info.Size()
+		sys, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			if !d.IsDir() && d.Type()&fs.ModeSymlink == 0 {
+				st.Apparent += info.Size() // non-unix fallback: apparent only
+			}
+			return nil
+		}
+		blocks := int64(sys.Blocks) * 512
+		if d.IsDir() {
+			st.Disk += blocks
+			return nil
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		if sys.Nlink > 1 {
+			// Count a multiply-linked inode once per artifact for both apparent
+			// and disk (matches `du`/`du -A` within-call dedup), and record it
+			// so DedupedTotal can net it out across artifacts.
+			key := model.InodeKey{Dev: uint64(sys.Dev), Ino: uint64(sys.Ino)}
+			if _, dup := seen[key]; dup {
+				return nil
+			}
+			seen[key] = struct{}{}
+			if st.Links == nil {
+				st.Links = make(map[model.InodeKey]int64)
+			}
+			st.Links[key] = blocks
+		}
+		st.Apparent += info.Size()
+		st.Disk += blocks
 		return nil
 	})
-	return size
+	return st
+}
+
+// DirSize returns the disk usage (allocated blocks) of a path. Thin wrapper over
+// Measure for callers that only need the disk figure.
+func DirSize(path string) int64 {
+	return Measure(path).Disk
+}
+
+// sized fills Size, ApparentSize and Links on r by measuring r.Path. Convenience
+// for the stat-based scanners (xcode/global/llm) that build results one at a
+// time, mirroring what the walk engine's sizePending does in bulk.
+func sized(r model.ScanResult) model.ScanResult {
+	st := Measure(r.Path)
+	r.Size = st.Disk
+	r.ApparentSize = st.Apparent
+	r.Links = st.Links
+	return r
 }
 
 // ModTime returns the modification time of a path, or zero time on error.

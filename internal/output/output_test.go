@@ -35,6 +35,86 @@ func sampleResults() []model.ScanResult {
 	}
 }
 
+// TestWriteTableSparseAnnotation verifies a materially sparse artifact renders
+// its apparent size alongside disk — the point of A1. Full render-path test:
+// it pins that the artifact size cell actually routes through sizeCell.
+func TestWriteTableSparseAnnotation(t *testing.T) {
+	sparse := model.ScanResult{
+		Path:         "/Users/dev/proj/node_modules",
+		Ecosystem:    model.EcoNode,
+		Category:     model.CatDeps,
+		ProjectRoot:  "/Users/dev/proj",
+		Size:         4096,       // disk: sparse, almost nothing allocated
+		ApparentSize: 2147483649, // apparent: ~2 GiB logical
+		Activity:     model.StatusDormant,
+		Safety:       model.SafetySafe,
+	}
+	var buf bytes.Buffer
+	output.WriteTableWithOptions(&buf, []model.ScanResult{sparse}, output.TableOptions{Verbose: true})
+	if out := buf.String(); !strings.Contains(out, "appears as") {
+		t.Errorf("sparse artifact must show its nominal size; got:\n%s", out)
+	}
+}
+
+// TestWriteTableNoSparseAnnotationForDense verifies a normal artifact (apparent
+// below disk from block slack) is not annotated — the threshold must not fire
+// on ordinary trees.
+func TestWriteTableNoSparseAnnotationForDense(t *testing.T) {
+	dense := model.ScanResult{
+		Path:         "/Users/dev/proj/node_modules",
+		Ecosystem:    model.EcoNode,
+		Category:     model.CatDeps,
+		ProjectRoot:  "/Users/dev/proj",
+		Size:         150 * 1000 * 1000, // 150 MB disk
+		ApparentSize: 122 * 1000 * 1000, // apparent below disk (rounding slack)
+		Activity:     model.StatusDormant,
+		Safety:       model.SafetySafe,
+	}
+	var buf bytes.Buffer
+	output.WriteTableWithOptions(&buf, []model.ScanResult{dense}, output.TableOptions{Verbose: true})
+	if out := buf.String(); strings.Contains(out, "appears as") {
+		t.Errorf("dense artifact must not be annotated; got:\n%s", out)
+	}
+}
+
+// TestWriteJSONDedupsHardlinkedTotal pins that the JSON total_size nets out
+// blocks shared across artifacts via hard links (the pnpm case), rather than
+// summing the overlapping per-artifact sizes.
+func TestWriteJSONDedupsHardlinkedTotal(t *testing.T) {
+	shared := map[model.InodeKey]int64{{Dev: 1, Ino: 7}: 400}
+	results := []model.ScanResult{
+		{Path: "/a", Ecosystem: model.EcoNode, Category: model.CatDeps, Size: 500, Links: shared},
+		{Path: "/b", Ecosystem: model.EcoNode, Category: model.CatDeps, Size: 500, Links: shared},
+	}
+	var buf bytes.Buffer
+	if err := output.WriteJSON(&buf, results); err != nil {
+		t.Fatalf("WriteJSON error: %v", err)
+	}
+	var out output.ScanOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("JSON parse error: %v", err)
+	}
+	// 500 + 500 − 400 (shared inode counted once) = 600, not 1000.
+	if out.TotalSize != 600 {
+		t.Errorf("TotalSize = %d, want 600 (deduped)", out.TotalSize)
+	}
+}
+
+// TestWriteTableDedupNote verifies the table annotates its grand total when
+// hard-link dedup made it smaller than the naive sum.
+func TestWriteTableDedupNote(t *testing.T) {
+	shared := map[model.InodeKey]int64{{Dev: 1, Ino: 7}: 400}
+	results := []model.ScanResult{
+		{Path: "/a/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/a", Size: 500, Links: shared, Safety: model.SafetySafe, Activity: model.StatusDormant},
+		{Path: "/b/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/b", Size: 500, Links: shared, Safety: model.SafetySafe, Activity: model.StatusDormant},
+	}
+	var buf bytes.Buffer
+	output.WriteTableWithOptions(&buf, results, output.TableOptions{Verbose: true})
+	if out := buf.String(); !strings.Contains(out, "excludes hard-linked") {
+		t.Errorf("expected hard-link dedup note in total; got:\n%s", out)
+	}
+}
+
 func TestWriteJSON(t *testing.T) {
 	results := sampleResults()
 	var buf bytes.Buffer
