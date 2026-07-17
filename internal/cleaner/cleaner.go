@@ -1,6 +1,7 @@
 package cleaner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -29,14 +30,25 @@ func New(opts Options) *Cleaner {
 	return &Cleaner{opts: opts}
 }
 
-// Clean deletes or trashes a scan result item.
-func (c *Cleaner) Clean(r model.ScanResult) error {
+// Clean reclaims a scan result item: protection and dry-run gates apply to
+// every strategy; execution then goes through the item's DeleteMethod when one
+// is attached, or falls back to path removal (trash or permanent).
+func (c *Cleaner) Clean(ctx context.Context, r model.ScanResult) error {
 	if r.Protected {
 		return fmt.Errorf("refusing to delete protected item: %s (%s)", r.Path, r.Reason)
 	}
 
 	if c.opts.DryRun {
 		return nil
+	}
+
+	if r.Delete != nil {
+		// A method without Run is a scanner bug; refuse rather than fall back
+		// to path removal, which could delete a path the method never meant to.
+		if r.Delete.Run == nil {
+			return fmt.Errorf("delete method for %s has no Run function", r.Path)
+		}
+		return r.Delete.Run(ctx)
 	}
 
 	if c.opts.Force {
@@ -53,10 +65,10 @@ type CleanResult struct {
 }
 
 // CleanAll cleans multiple results and returns per-item outcomes.
-func (c *Cleaner) CleanAll(results []model.ScanResult) []CleanResult {
+func (c *Cleaner) CleanAll(ctx context.Context, results []model.ScanResult) []CleanResult {
 	var out []CleanResult
 	for _, r := range results {
-		err := c.Clean(r)
+		err := c.Clean(ctx, r)
 		out = append(out, CleanResult{Item: r, Error: err})
 	}
 	return out

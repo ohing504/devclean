@@ -1,6 +1,9 @@
 package model_test
 
 import (
+	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -205,5 +208,52 @@ func TestFilterResults(t *testing.T) {
 	})
 	if len(none) != 0 {
 		t.Errorf("expected 0 results, got %d", len(none))
+	}
+}
+
+func TestDeleteStrategy(t *testing.T) {
+	tests := []struct {
+		name   string
+		result model.ScanResult
+		want   model.DeleteKind
+	}{
+		{"nil delete means path", model.ScanResult{Path: "/tmp/x"}, model.DeleteKindPath},
+		{"command method", model.ScanResult{Delete: &model.DeleteMethod{Kind: model.DeleteKindCommand}}, model.DeleteKindCommand},
+		{"api method", model.ScanResult{Delete: &model.DeleteMethod{Kind: model.DeleteKindAPI}}, model.DeleteKindAPI},
+	}
+	for _, tt := range tests {
+		if got := tt.result.DeleteStrategy(); got != tt.want {
+			t.Errorf("%s: got %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestScanResultJSON_DeleteMethod(t *testing.T) {
+	withMethod := model.ScanResult{
+		Path: "/tmp/x",
+		Delete: &model.DeleteMethod{
+			Kind:    model.DeleteKindCommand,
+			Display: "docker rmi abc",
+			Run:     func(context.Context) error { return nil },
+		},
+	}
+	data, err := json.Marshal(withMethod)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, `"delete":{"kind":"command","display":"docker rmi abc"}`) {
+		t.Errorf("delete method not serialized as kind+display: %s", got)
+	}
+	if strings.Contains(got, "Run") || strings.Contains(got, "run") {
+		t.Errorf("Run must not leak into JSON: %s", got)
+	}
+
+	without, err := json.Marshal(model.ScanResult{Path: "/tmp/x"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(without), `"delete"`) {
+		t.Errorf("nil Delete must be omitted from JSON: %s", without)
 	}
 }
