@@ -176,17 +176,16 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 			continue
 		}
 
-		results = append(results, model.ScanResult{
+		results = append(results, sized(model.ScanResult{
 			Path:           full,
 			Ecosystem:      model.EcoGlobal,
 			Category:       c.category,
-			Size:           DirSize(full),
 			LastMod:        ModTime(full),
 			Safety:         c.safety,
 			ProjectRoot:    filepath.Dir(full),
 			Label:          c.description,
 			Recommendation: c.rec,
-		})
+		}))
 		ReportProgress(ctx, len(results))
 	}
 
@@ -248,9 +247,11 @@ var codeSignCloneBrowsers = map[string]codeSignCloneBrowser{
 // safe zombies; while the browser runs (checked once per browser via
 // ProcessRunning) or when the bundle ID is unrecognized, they are caution.
 //
-// Sizes come from du (DirSize) and may overstate real disk usage when the
-// copies are APFS clones of the installed app bundle; clone-aware measurement
-// is a planned follow-up.
+// Sizes come from allocated blocks (Measure) and still overstate real disk
+// usage when the copies are APFS clones of the installed app bundle: clones
+// have distinct inodes and each reports full blocks, so neither block counting
+// nor inode dedup catches the sharing. Clone-aware measurement is a planned
+// follow-up (needs APFS extent-level accounting).
 func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []model.ScanResult {
 	matches, err := filepath.Glob(filepath.Join(s.TmpRoot, "*", "*", "X", "*.code_sign_clone"))
 	if err != nil {
@@ -298,17 +299,16 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 			}
 		}
 
-		out = append(out, model.ScanResult{
+		out = append(out, sized(model.ScanResult{
 			Path:           m,
 			Ecosystem:      model.EcoGlobal,
 			Category:       model.CatCache,
-			Size:           DirSize(m),
 			LastMod:        ModTime(m),
 			Safety:         safety,
 			ProjectRoot:    filepath.Dir(m),
 			Label:          codeSignCloneLabel(m, name),
 			Recommendation: rec,
-		})
+		}))
 		ReportProgress(ctx, found+len(out))
 	}
 	return out

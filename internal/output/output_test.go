@@ -35,6 +35,48 @@ func sampleResults() []model.ScanResult {
 	}
 }
 
+// TestWriteTableSparseAnnotation verifies a materially sparse artifact renders
+// its apparent size alongside disk — the point of A1. Full render-path test:
+// it pins that the artifact size cell actually routes through sizeCell.
+func TestWriteTableSparseAnnotation(t *testing.T) {
+	sparse := model.ScanResult{
+		Path:         "/Users/dev/proj/node_modules",
+		Ecosystem:    model.EcoNode,
+		Category:     model.CatDeps,
+		ProjectRoot:  "/Users/dev/proj",
+		Size:         4096,       // disk: sparse, almost nothing allocated
+		ApparentSize: 2147483649, // apparent: ~2 GiB logical
+		Activity:     model.StatusDormant,
+		Safety:       model.SafetySafe,
+	}
+	var buf bytes.Buffer
+	output.WriteTableWithOptions(&buf, []model.ScanResult{sparse}, output.TableOptions{Verbose: true})
+	if out := buf.String(); !strings.Contains(out, "apparent") {
+		t.Errorf("sparse artifact must show apparent size; got:\n%s", out)
+	}
+}
+
+// TestWriteTableNoSparseAnnotationForDense verifies a normal artifact (apparent
+// below disk from block slack) is not annotated — the threshold must not fire
+// on ordinary trees.
+func TestWriteTableNoSparseAnnotationForDense(t *testing.T) {
+	dense := model.ScanResult{
+		Path:         "/Users/dev/proj/node_modules",
+		Ecosystem:    model.EcoNode,
+		Category:     model.CatDeps,
+		ProjectRoot:  "/Users/dev/proj",
+		Size:         150 * 1000 * 1000, // 150 MB disk
+		ApparentSize: 122 * 1000 * 1000, // apparent below disk (rounding slack)
+		Activity:     model.StatusDormant,
+		Safety:       model.SafetySafe,
+	}
+	var buf bytes.Buffer
+	output.WriteTableWithOptions(&buf, []model.ScanResult{dense}, output.TableOptions{Verbose: true})
+	if out := buf.String(); strings.Contains(out, "apparent") {
+		t.Errorf("dense artifact must not be annotated; got:\n%s", out)
+	}
+}
+
 func TestWriteJSON(t *testing.T) {
 	results := sampleResults()
 	var buf bytes.Buffer

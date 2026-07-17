@@ -74,12 +74,22 @@ type ArtifactDef struct {
 	AlwaysSafe  bool     `json:"always_safe"`
 }
 
+// InodeKey identifies a physical inode uniquely. Inode numbers are only unique
+// per device, so any cross-artifact dedup key must include Dev — a home scan can
+// span multiple filesystems (external volumes, network mounts, Docker/APFS
+// containers), where two unrelated files may share an inode number.
+type InodeKey struct {
+	Dev uint64
+	Ino uint64
+}
+
 // ScanResult represents a single scannable item on disk.
 type ScanResult struct {
 	Path           string         `json:"path"`
 	Ecosystem      Ecosystem      `json:"ecosystem"`
 	Category       Category       `json:"category"`
-	Size           int64          `json:"size"`
+	Size           int64          `json:"size"`                   // disk usage: allocated blocks (st_blocks×512), sparse-aware
+	ApparentSize   int64          `json:"apparent_size,omitzero"` // sum of logical file sizes; exceeds Size for sparse files
 	LastMod        time.Time      `json:"last_modified"`
 	Activity       ActivityStatus `json:"activity"`
 	Safety         SafetyLevel    `json:"safety"`
@@ -89,6 +99,11 @@ type ScanResult struct {
 	Label          string         `json:"label,omitempty"`          // human-readable display name (e.g. "iPhone 17 Pro · iOS 26.3")
 	Recommendation string         `json:"recommendation,omitempty"` // hint for the user (e.g. "old build", "unavailable runtime")
 	LastUsedAt     time.Time      `json:"last_used_at,omitzero"`    // when the item itself was last used, if the scanner can tell (omitzero: zero time is dropped from JSON)
+
+	// Links maps each hard-linked inode (Nlink>1) found in this artifact to its
+	// disk blocks, so a caller can dedup blocks shared across artifacts (e.g.
+	// pnpm store ↔ node_modules) when computing a grand total. Not serialized.
+	Links map[InodeKey]int64 `json:"-"`
 }
 
 // HumanSize returns a human-readable size string.
@@ -99,9 +114,10 @@ func (r ScanResult) HumanSize() string {
 // HumanSize formats bytes into a human-readable string using decimal SI
 // units (1 KB = 1000 B). This matches the macOS Finder convention and keeps
 // the display aligned with the `--min-size` parser, which treats "MB" as
-// 10^6 per humanize/SI convention. Internally we still derive sizes from
-// `du -sk` (binary kilobytes), but the formatting layer is decimal so the
-// number a user types and the number they see agree on the same threshold.
+// 10^6 per humanize/SI convention. Sizes are derived internally from
+// st_blocks×512 (binary 512-byte units), but the formatting layer is decimal
+// so the number a user types and the number they see agree on the same
+// threshold.
 func HumanSize(size int64) string {
 	const (
 		KB = 1000

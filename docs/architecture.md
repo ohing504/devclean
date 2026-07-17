@@ -45,7 +45,7 @@ type Scanner interface {
 }
 ```
 
-Scanners report progress via context-attached callbacks for real-time UI updates; the walk batch reports under a single "projects" label, stat scanners under their own names. Size is calculated with `du -sk` for accurate disk usage. The walk engine does not size artifacts inline — it collects every matched artifact during the single pass, then sizes them across a bounded worker pool (`min(NumCPU, 8)`) so the per-artifact `du` calls and their I/O overlap. `du` is faster per artifact than an in-process traversal (macOS uses bulk attribute syscalls), so the win comes from concurrency, not from replacing `du`.
+Scanners report progress via context-attached callbacks for real-time UI updates; the walk batch reports under a single "projects" label, stat scanners under their own names. Sizing collects two figures per artifact via an in-process walk (`scanner.Measure`): **disk** (allocated blocks, `st_blocks×512` — sparse-accurate and matching `du`) and **apparent** (sum of logical file sizes). Directories contribute their own blocks to disk (real on ext4, ~0 on APFS); symlinks are never followed. Hard-linked inodes (`Nlink>1`) are counted once per artifact and recorded (keyed by `(dev, ino)`) so shared blocks can be netted out across artifacts. The walk engine does not size inline — it collects every matched artifact during the single pass, then sizes them across a bounded worker pool (`min(NumCPU, 8)`) so the traversals and their I/O overlap. Disk is the primary figure (sorting, `--min-size`, totals); apparent surfaces only when a file is materially sparse.
 
 ### Walk engine
 
@@ -72,7 +72,9 @@ Results are sorted by (table order, path) before returning, keeping output order
 
 ### Display Units
 
-`model.HumanSize` formats sizes with **decimal SI units** (1 KB = 1000 B). The CLI's `--min-size` flag uses the same convention by default (humanize.ParseBytes), so the threshold a user types and the size they see in output agree on the same arithmetic. Internally, `du -sk` returns binary kilobytes, but the formatting layer is decimal — so a 1 GiB directory renders as `1.1 GB` and `--min-size 1GB` will include it. Binary suffixes (`KiB`, `MiB`, `GiB`) are still accepted by `--min-size` for users who want explicit binary thresholds.
+`model.HumanSize` formats sizes with **decimal SI units** (1 KB = 1000 B). The CLI's `--min-size` flag uses the same convention by default (humanize.ParseBytes), so the threshold a user types and the size they see in output agree on the same arithmetic. Internally sizes come from `st_blocks×512` (binary 512-byte units), but the formatting layer is decimal — so a 1 GiB directory renders as `1.1 GB` and `--min-size 1GB` will include it. Binary suffixes (`KiB`, `MiB`, `GiB`) are still accepted by `--min-size` for users who want explicit binary thresholds.
+
+**Sparse-aware display**: the table shows an artifact's disk size, annotating it with the apparent size when apparent exceeds double the disk figure by more than 1 GiB — e.g. a `Docker.raw` image renders `24.0 GB (apparent 460.0 GB)`. The JSON output always carries `apparent_size` (`omitzero`, so dropped when zero) so agents can detect sparse files. Ordinary directories, where block-rounding leaves apparent ≤ disk, are never annotated.
 
 ### Metadata Enrichment
 

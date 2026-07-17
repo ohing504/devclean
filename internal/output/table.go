@@ -259,7 +259,7 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 				w, "      %s %-24s %10s%s%s\n",
 				icon,
 				name+" "+cat,
-				ui.InfoStyle.Render(model.HumanSize(r.Size)),
+				ui.InfoStyle.Render(sizeCell(r)),
 				lastUsedTag(r),
 				rec,
 			)
@@ -272,6 +272,23 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more packages (%s)", collapsedPkgs, model.HumanSize(collapsedPkgSize))),
 		)
 	}
+}
+
+// sparseMinDiff is the apparent−disk gap above which a size is worth annotating
+// as sparse. Below it, ordinary block-rounding slack (apparent can even fall
+// under disk) would produce noise.
+const sparseMinDiff = 1 << 30 // 1 GiB
+
+// sizeCell renders an artifact's disk size, annotating it with the apparent
+// (logical) size when the file is materially sparse — apparent more than double
+// disk and over sparseMinDiff larger. Example: a Docker.raw image shows
+// "24.0 GB (apparent 460.0 GB)" so the on-disk figure and the misleading
+// logical size are both visible.
+func sizeCell(r model.ScanResult) string {
+	if r.ApparentSize > r.Size*2 && r.ApparentSize-r.Size > sparseMinDiff {
+		return fmt.Sprintf("%s (apparent %s)", model.HumanSize(r.Size), model.HumanSize(r.ApparentSize))
+	}
+	return model.HumanSize(r.Size)
 }
 
 func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot string, opts TableOptions) {
@@ -293,7 +310,7 @@ func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot stri
 			w, "    %s %-30s %10s%s%s\n",
 			icon,
 			name+" "+cat,
-			ui.InfoStyle.Render(model.HumanSize(r.Size)),
+			ui.InfoStyle.Render(sizeCell(r)),
 			lastUsedTag(r),
 			rec,
 		)

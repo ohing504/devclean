@@ -258,7 +258,9 @@ func TestGolden_JSONOutput(t *testing.T) {
 	// Normalize for golden file: zero out volatile fields
 	for i := range results {
 		results[i].Path = filepath.Base(results[i].Path)
-		results[i].Size = 0              // du returns block-aligned sizes
+		results[i].Size = 0              // block-aligned, machine-specific
+		results[i].ApparentSize = 0      // block-rounding slack varies by filesystem
+		results[i].Links = nil           // inode-keyed; also keeps DedupedTotal at 0 with Size zeroed
 		results[i].LastMod = time.Time{} // zero out to make golden file stable
 		results[i].ProjectRoot = ""      // holds the absolute temp path — machine-specific
 	}

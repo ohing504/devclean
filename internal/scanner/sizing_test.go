@@ -114,3 +114,84 @@ func TestDirSizeMissingPath(t *testing.T) {
 		t.Errorf("DirSize(missing) = %d, want 0", got)
 	}
 }
+
+// TestMeasureSparseFile is the core A1 case: a sparse file's disk usage
+// (allocated blocks) must stay far below its apparent (logical) size. This is
+// the Docker.raw scenario in miniature — the old du-only path already got this
+// right, and the in-process Measure must not regress it.
+func TestMeasureSparseFile(t *testing.T) {
+	dir := t.TempDir()
+	f, err := os.Create(filepath.Join(dir, "sparse.img"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const apparent = 100 << 20 // 100 MiB hole, no data written
+	if err := f.Truncate(apparent); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st := Measure(dir)
+	if st.Apparent < apparent {
+		t.Errorf("Apparent = %d, want >= %d (logical size of the hole)", st.Apparent, int64(apparent))
+	}
+	if st.Disk > 1<<20 {
+		t.Errorf("Disk = %d, want < 1MiB (sparse file allocates almost no blocks)", st.Disk)
+	}
+	if st.Disk >= st.Apparent {
+		t.Errorf("Disk (%d) should be far below Apparent (%d) for a sparse file", st.Disk, st.Apparent)
+	}
+}
+
+// TestMeasureNormalFileBothPositive: a fully-written file reports both apparent
+// and disk > 0, and disk covers the logical content (block rounding makes it a
+// lower bound, never below).
+func TestMeasureNormalFileBothPositive(t *testing.T) {
+	dir := t.TempDir()
+	const size = 200_000
+	if err := os.WriteFile(filepath.Join(dir, "data.bin"), make([]byte, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := Measure(dir)
+	if st.Apparent < size {
+		t.Errorf("Apparent = %d, want >= %d", st.Apparent, int64(size))
+	}
+	if st.Disk < size {
+		t.Errorf("Disk = %d, want >= %d (allocated blocks cover the content)", st.Disk, int64(size))
+	}
+}
+
+// TestMeasureHardlinkIntraDedup: two directory entries pointing at the same
+// inode within one artifact must be counted once for both apparent and disk,
+// and the shared inode recorded in Links (so DedupedTotal can net it across
+// artifacts).
+func TestMeasureHardlinkIntraDedup(t *testing.T) {
+	dir := t.TempDir()
+	const size = 300_000
+	orig := filepath.Join(dir, "orig")
+	if err := os.WriteFile(orig, make([]byte, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(orig, filepath.Join(dir, "hardlink")); err != nil {
+		t.Fatal(err)
+	}
+
+	st := Measure(dir)
+	// Apparent counts the inode once, not once per link (matches du -A).
+	if st.Apparent >= 2*size {
+		t.Errorf("Apparent = %d, want ~%d (hard link counted once, not doubled)", st.Apparent, int64(size))
+	}
+	if st.Apparent < size {
+		t.Errorf("Apparent = %d, want >= %d", st.Apparent, int64(size))
+	}
+	if len(st.Links) != 1 {
+		t.Fatalf("Links = %v, want exactly 1 shared inode", st.Links)
+	}
+	for _, blocks := range st.Links {
+		if blocks <= 0 {
+			t.Errorf("recorded shared inode blocks = %d, want > 0", blocks)
+		}
+	}
+}
