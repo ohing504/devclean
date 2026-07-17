@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -101,6 +100,11 @@ func (w *walkScanner) Scan(ctx context.Context, root string) ([]model.ScanResult
 	return runWalk(ctx, root, []walkEcosystem{w.table})
 }
 
+// walkReadDir is os.ReadDir, indirected so a test can assert every directory is
+// read exactly once — the single-read property is the whole point of the
+// engine, and a reintroduced double-read is otherwise invisible to output.
+var walkReadDir = os.ReadDir
+
 // projectContext is one entry of the walk's active-project stack: a detected
 // project root plus the artifact rules applying beneath it.
 type projectContext struct {
@@ -138,35 +142,29 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 
 	var results []model.ScanResult
 	var stack []projectContext
+	numTables := len(tables)
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	// visit reads each directory exactly once and reuses its entries for both
+	// marker detection and recursion. The previous filepath.WalkDir version
+	// read every directory twice (WalkDir's own read to recurse, plus a second
+	// os.ReadDir here for markers) — the dominant cost on large trees. name is
+	// dir's base name, checked against the enclosing ecosystem rules; the stack
+	// holds the ancestor project contexts, scoped by the recursion itself.
+	var visit func(dir, name string) error
+	visit = func(dir, name string) error {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
-		if walkErr != nil {
-			return nil // unreadable entries are skipped, like the legacy scanners
-		}
-		if !d.IsDir() {
-			return nil
-		}
-
-		// Drop contexts of subtrees we have left.
-		for len(stack) > 0 && !isUnderRoot(path, stack[len(stack)-1].root) {
-			stack = stack[:len(stack)-1]
-		}
-
-		// Artifact match first, before the hidden-dir check. Size is filled in
-		// afterwards by sizePending — sizing (a du fork per artifact) is the
-		// slow step and runs concurrently once the walk has found everything.
-		if rule, tableIdx, projRoot, ok := matchArtifact(stack, path, d.Name(), len(tables)); ok {
+		// Artifact match first, before the hidden-dir check, against the
+		// ancestor contexts (dir's own context is pushed only if we descend).
+		// Size is filled in afterwards by sizePending.
+		if rule, tableIdx, projRoot, ok := matchArtifact(stack, dir, name, numTables); ok {
 			result := model.ScanResult{
-				Path:      path,
+				Path:      dir,
 				Ecosystem: tables[tableIdx].Eco,
 				Category:  rule.Category,
-				LastMod:   ModTime(path),
+				LastMod:   ModTime(dir),
 				Safety:    rule.Safety,
 			}
 			if tables[tableIdx].SetProjectRoot {
@@ -174,24 +172,24 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 			}
 			results = append(results, result)
 			ReportProgress(ctx, len(results))
-			return fs.SkipDir
+			return nil // matched artifact: do not descend
 		}
 
-		if name := d.Name(); strings.HasPrefix(name, ".") && !hiddenDescend[name] {
-			return fs.SkipDir
-		}
-
-		// Marker check: one ReadDir snapshot decides which ecosystems root a
-		// project at this directory.
-		entries, readErr := os.ReadDir(path)
-		if readErr != nil {
+		if strings.HasPrefix(name, ".") && !hiddenDescend[name] {
 			return nil
+		}
+
+		entries, err := walkReadDir(dir)
+		if err != nil {
+			return nil // unreadable dir is skipped, like the legacy scanners
 		}
 		names := make(map[string]bool, len(entries))
 		for _, e := range entries {
 			names[e.Name()] = true
 		}
 
+		// Marker check: establish the project contexts rooted at this directory.
+		pushed := 0
 		for i := range tables {
 			t := &tables[i]
 			rooted := false
@@ -207,18 +205,31 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 
 			rules := t.Rules
 			if t.ExtraRules != nil {
-				if extra := t.ExtraRules(path, names); len(extra) > 0 {
+				if extra := t.ExtraRules(dir, names); len(extra) > 0 {
 					combined := make([]artifactRule, 0, len(t.Rules)+len(extra))
 					combined = append(combined, t.Rules...)
 					combined = append(combined, extra...)
 					rules = combined
 				}
 			}
-			stack = append(stack, projectContext{root: path, tableIdx: i, rules: rules})
+			stack = append(stack, projectContext{root: dir, tableIdx: i, rules: rules})
+			pushed++
 		}
+
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			if err := visit(filepath.Join(dir, e.Name()), e.Name()); err != nil {
+				stack = stack[:len(stack)-pushed]
+				return err
+			}
+		}
+		stack = stack[:len(stack)-pushed]
 		return nil
-	})
-	if err != nil {
+	}
+
+	if err := visit(root, filepath.Base(root)); err != nil {
 		return nil, err
 	}
 

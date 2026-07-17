@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project scanners (Node, Rust, Ruby, Python, Go) are now declarative rule tables executed by a single shared filesystem walk instead of five independent traversals — one pass over the scan root regardless of how many project ecosystems are active. Stat-based scanners (xcode, global, llm) are unchanged.
 - The scan spinner shows a single "Scanning projects..." stage for all project scanners (previously "Scanning node...", "Scanning rust...", … in sequence). Stat scanners still report under their own names.
 - The project walk now sizes matched artifacts concurrently (bounded worker pool) instead of one `du` call at a time — up to ~4× faster warm-cache sizing on a many-artifact tree, with cold-scan and few-large-artifact gains varying; disk-usage numbers are unchanged.
+- The walk engine now reads each directory once and reuses those entries for both project-marker detection and recursion, instead of reading every directory twice (a `filepath.WalkDir` read plus a second `os.ReadDir`). Directory traversal — the dominant cost of scanning a large tree — is roughly 1.8× faster (~29% faster end-to-end on a workspace with tens of thousands of directories); scan results are unchanged.
 
 ### Fixed
 

@@ -34,7 +34,7 @@ internal/
 
 Two scanner families share the `Scanner` interface:
 
-- **Walk ecosystems** (Node, Rust, Ruby, Python, Go): declarative rule tables (`walkEcosystem` in `internal/scanner/walk.go`) executed by a single-pass walk engine. The registry partitions walk-based scanners out of every scan and batches them into **one** `filepath.WalkDir` traversal, dispatching each directory against all active tables — one pass regardless of how many project ecosystems are active.
+- **Walk ecosystems** (Node, Rust, Ruby, Python, Go): declarative rule tables (`walkEcosystem` in `internal/scanner/walk.go`) executed by a single-pass walk engine. The registry partitions walk-based scanners out of every scan and batches them into **one** recursive filesystem traversal, dispatching each directory against all active tables — one pass regardless of how many project ecosystems are active. The engine reads each directory **once** (`os.ReadDir`) and reuses those entries for both marker detection and recursion.
 - **Stat scanners** (Xcode, Global Caches, LLM Model Stores): implement `Scanner` directly and check fixed, known paths instead of walking a tree.
 
 ```go
@@ -57,7 +57,7 @@ A `walkEcosystem` table declares how one ecosystem participates in the shared wa
 | any-depth name | `__pycache__`, `.venv` | matches the directory name anywhere under the nearest project root |
 | any-depth suffix | `*.egg-info` | matches a directory-name suffix anywhere under the nearest project root |
 
-Per directory, the engine pops project contexts whose subtree it has left, matches artifact rules against the **nearest** enclosing project root of each active ecosystem (table order, first match wins), emits the artifact and skips its subtree on a match, and otherwise takes one `os.ReadDir` snapshot to detect new project roots before descending. Artifact matching runs **before** the hidden-directory check so compound rules ending in a hidden segment (`android/.gradle`) still match; unmatched hidden directories are descended into only when an active ecosystem lists the name as an artifact.
+Per directory, the engine matches artifact rules against the **nearest** enclosing project root of each active ecosystem (table order, first match wins), emits the artifact and skips its subtree on a match, and otherwise reads the directory once to detect new project roots (pushed onto a recursion-scoped context stack) before descending into its child directories. That single `os.ReadDir` serves both marker detection and recursion — no directory is read twice. Artifact matching runs **before** the hidden-directory check so compound rules ending in a hidden segment (`android/.gradle`) still match; unmatched hidden directories are descended into only when an active ecosystem lists the name as an artifact.
 
 Tables can also:
 
