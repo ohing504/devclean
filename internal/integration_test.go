@@ -170,10 +170,11 @@ func TestIntegration_FilterByEcosystem(t *testing.T) {
 	}
 }
 
-// TestIntegration_GlobalScannerPipeline drives the Global stat scanner through
-// the registry with an injected HOME, then classifies — exercising the full
-// scan→classify path for a fixed-home scanner (the walk fixtures above only
-// cover the tree-walking scanners).
+// TestIntegration_GlobalScannerPipeline drives the Global stat scanner with an
+// injected HOME, then classifies — exercising the full scan→classify path for a
+// fixed-home scanner (the walk fixtures above only cover the tree-walking
+// scanners). The scanner is constructed directly with an isolated TmpRoot and a
+// stubbed process check so it never touches real machine temp state.
 func TestIntegration_GlobalScannerPipeline(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -182,10 +183,11 @@ func TestIntegration_GlobalScannerPipeline(t *testing.T) {
 	mustMkdir(t, npm)
 	mustWriteFile(t, filepath.Join(npm, "cache.json"), make([]byte, 2048))
 
-	reg := scanner.DefaultRegistry()
-	globalScanners := reg.ForEcosystems([]model.Ecosystem{model.EcoGlobal})
-	// Global ignores the path argument and scans the injected HOME.
-	results, err := reg.ScanWith(context.Background(), home, globalScanners)
+	s := &scanner.GlobalScanner{
+		TmpRoot:        t.TempDir(), // isolate from real browser code-sign clones
+		ProcessRunning: func(string) bool { return false },
+	}
+	results, err := s.Scan(context.Background(), home)
 	if err != nil {
 		t.Fatalf("scan error: %v", err)
 	}
@@ -258,6 +260,7 @@ func TestGolden_JSONOutput(t *testing.T) {
 		results[i].Path = filepath.Base(results[i].Path)
 		results[i].Size = 0              // du returns block-aligned sizes
 		results[i].LastMod = time.Time{} // zero out to make golden file stable
+		results[i].ProjectRoot = ""      // holds the absolute temp path — machine-specific
 	}
 
 	var buf bytes.Buffer

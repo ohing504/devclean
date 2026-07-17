@@ -60,8 +60,7 @@
       "last_modified": "0001-01-01T00:00:00Z",
       "activity": "active",
       "safety": "safe",
-      "protected": false,
-      "project_root": "/var/folders/nb/j_zv8t0x2cbbkl2yvh46qthw0000gn/T/TestGolden_JSONOutput3411242693/001/py-svc"
+      "protected": false
     },
     {
       "path": "__pycache__",
@@ -71,8 +70,7 @@
       "last_modified": "0001-01-01T00:00:00Z",
       "activity": "active",
       "safety": "safe",
-      "protected": false,
-      "project_root": "/var/folders/nb/j_zv8t0x2cbbkl2yvh46qthw0000gn/T/TestGolden_JSONOutput3411242693/001/py-svc"
+      "protected": false
     }
   ]
 }
