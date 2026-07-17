@@ -159,6 +159,10 @@ func partitionScanners(scanners []Scanner) ([]walkEcosystem, []Scanner) {
 
 // DirSize calculates the disk usage of a directory using `du -sk`.
 // Falls back to walking the filesystem if du is not available.
+//
+// du is faster than an in-process traversal (macOS uses bulk attribute
+// syscalls), so the per-artifact fork is kept; the walk engine amortizes it by
+// sizing artifacts concurrently (see sizePending).
 func DirSize(path string) int64 {
 	cmd := exec.Command("du", "-sk", path)
 	out, err := cmd.Output()

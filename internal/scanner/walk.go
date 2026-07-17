@@ -5,8 +5,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/ohing504/devclean/internal/model"
 )
@@ -156,13 +158,14 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 			stack = stack[:len(stack)-1]
 		}
 
-		// Artifact match first, before the hidden-dir check.
+		// Artifact match first, before the hidden-dir check. Size is filled in
+		// afterwards by sizePending — sizing (a du fork per artifact) is the
+		// slow step and runs concurrently once the walk has found everything.
 		if rule, tableIdx, projRoot, ok := matchArtifact(stack, path, d.Name(), len(tables)); ok {
 			result := model.ScanResult{
 				Path:      path,
 				Ecosystem: tables[tableIdx].Eco,
 				Category:  rule.Category,
-				Size:      DirSize(path),
 				LastMod:   ModTime(path),
 				Safety:    rule.Safety,
 			}
@@ -215,6 +218,13 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := sizePending(ctx, results); err != nil {
+		return nil, err
+	}
 
 	ecoOrder := make(map[model.Ecosystem]int, len(tables))
 	for i, t := range tables {
@@ -228,7 +238,75 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		}
 		return results[i].Path < results[j].Path
 	})
-	return results, err
+	return results, nil
+}
+
+// sizeWorkerCap bounds concurrent du forks so a large scan does not spawn a
+// subprocess per artifact all at once.
+const sizeWorkerCap = 8
+
+// sizePending fills in Size for every result by running DirSize concurrently
+// across a bounded worker pool. The walk finds artifacts serially but defers
+// their sizing (one du fork each) to here so the forks and their I/O overlap.
+// du is faster per artifact than an in-process traversal, so the speedup comes
+// from overlapping the sizing, not from replacing du. Returns ctx.Err() if the
+// scan is cancelled mid-sizing.
+func sizePending(ctx context.Context, results []model.ScanResult) error {
+	workers := runtime.NumCPU()
+	if workers > sizeWorkerCap {
+		workers = sizeWorkerCap
+	}
+	return sizePendingWorkers(ctx, results, workers)
+}
+
+// sizePendingWorkers is sizePending with an explicit pool size, split out so
+// the worker count can be swept in benchmarks.
+func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers int) error {
+	if len(results) == 0 {
+		return nil
+	}
+	if workers > len(results) {
+		workers = len(results)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+
+	idx := make(chan int)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range idx {
+				results[i].Size = DirSize(results[i].Path)
+			}
+		}()
+	}
+
+	var canceled bool
+	for i := range results {
+		// Check cancellation first: a bare select would pick randomly between
+		// ctx.Done() and a ready worker, so tiny scans could finish without
+		// ever observing an already-cancelled context.
+		if ctx.Err() != nil {
+			canceled = true
+			break
+		}
+		select {
+		case <-ctx.Done():
+			canceled = true
+		case idx <- i:
+			continue
+		}
+		break
+	}
+	close(idx)
+	wg.Wait()
+	if canceled {
+		return ctx.Err()
+	}
+	return nil
 }
 
 // matchArtifact matches a directory (path, base name) against the artifact

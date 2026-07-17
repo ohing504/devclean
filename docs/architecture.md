@@ -45,7 +45,7 @@ type Scanner interface {
 }
 ```
 
-Scanners report progress via context-attached callbacks for real-time UI updates; the walk batch reports under a single "projects" label, stat scanners under their own names. Size calculated using `du -sk` for accurate disk usage.
+Scanners report progress via context-attached callbacks for real-time UI updates; the walk batch reports under a single "projects" label, stat scanners under their own names. Size is calculated with `du -sk` for accurate disk usage. The walk engine does not size artifacts inline — it collects every matched artifact during the single pass, then sizes them across a bounded worker pool (`min(NumCPU, 8)`) so the per-artifact `du` calls and their I/O overlap. `du` is faster per artifact than an in-process traversal (macOS uses bulk attribute syscalls), so the win comes from concurrency, not from replacing `du`.
 
 ### Walk engine
 
