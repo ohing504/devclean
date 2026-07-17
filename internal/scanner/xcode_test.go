@@ -406,8 +406,11 @@ func TestXcodeScanner_VendorCleanups(t *testing.T) {
 			if a.Run == nil {
 				t.Error("Run must not be nil")
 			}
-			if a.Command == "" {
-				t.Error("Command should be populated for display")
+			if a.Kind != model.DeleteKindCommand {
+				t.Errorf("Kind should be command, got %q", a.Kind)
+			}
+			if a.Display == "" {
+				t.Error("Display should be populated for dry-run")
 			}
 		}
 	}

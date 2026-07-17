@@ -99,6 +99,25 @@ Scanners derive these from peer comparison (DeviceSupport build ages), vendor AP
 
 Use this pattern when a single ecosystem produces directories whose names alone don't tell the user what they are.
 
+### Deletion Strategy
+
+Reclaiming is not always `os.RemoveAll` on a path — Docker images or simulator devices are reclaimed through vendor commands or API calls. Each `ScanResult` carries an optional `DeleteMethod` describing how it is reclaimed:
+
+```go
+type DeleteMethod struct {
+    Kind    DeleteKind                      // "path" | "command" | "api"
+    Display string                          // what would run — dry-run / listings
+    Run     func(ctx context.Context) error // executes the reclaim
+}
+
+// On ScanResult:
+Delete *DeleteMethod `json:"delete,omitempty"` // nil = path removal
+```
+
+The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached, otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal; command/api items follow the vendor's own recovery semantics (surfacing that in the selection UI belongs to the first ecosystem that ships such items).
+
+In JSON output, non-path items serialize as `"delete": {"kind": "command", "display": "..."}` (`Run` never serializes), so agents can tell strategies apart; absence of the key means path removal.
+
 ### Vendor Cleanup
 
 Scanners may opt into an additional interface to register ecosystem-native cleanup commands:
@@ -111,10 +130,11 @@ type VendorCleaner interface {
 type VendorCleanup struct {
     ID          string
     Description string
-    Command     string                          // for dry-run display
-    Run         func(ctx context.Context) error // executes the command
+    model.DeleteMethod // Kind + Display (dry-run) + Run — shared execution contract
 }
 ```
+
+`VendorCleanup` is the ecosystem-level **bulk** counterpart of a per-item `ScanResult.Delete`: both share the `model.DeleteMethod` execution contract. Bulk actions (e.g. `brew cleanup`) register here; per-item non-path reclaims (e.g. `docker rmi <id>`) attach a `DeleteMethod` to their `ScanResult`.
 
 `devclean clean --vendor-cleanup` collects cleanups from selected ecosystems and runs them alongside path-based deletion. Vendor commands keep the ecosystem's internal state consistent (e.g. `xcrun simctl delete unavailable` removes simulator devices and updates CoreSimulator's database in one step). Dry-run prints the command without executing.
 
@@ -173,7 +193,7 @@ Table output groups results by: **ecosystem → project → sub-package → arti
    - Quick select: `[a]` all, `[n]` none, `[s]` safe only, `[d]` dormant only
    - Protected projects hidden with explanation
 3. Choose: Move to Trash / Permanently delete / Cancel
-4. Execute with per-artifact status output
+4. Execute with per-artifact status output — items with an attached `DeleteMethod` run it instead of path removal (see Deletion Strategy)
 5. Summary: items cleaned, space freed
 
 Trash moves use `os.Rename` into the Trash dir on the home volume. When the artifact lives on a different filesystem (external drive, separate partition), `os.Rename` fails with `EXDEV`; the cleaner falls back to a recursive copy followed by removing the original. The copy recreates directories, regular files (contents + permission bits), and symlinks (as links, never followed). The original is removed only after the copy fully succeeds — a mid-copy failure leaves the original intact and discards the partial copy, so a cross-device move can never lose data.

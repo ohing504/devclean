@@ -130,7 +130,7 @@ func TestIntegration_ScanClassifyClean(t *testing.T) {
 	// Clean (force, since TempDir won't map to Trash)
 	c := cleaner.New(cleaner.Options{Force: true})
 	for _, r := range results {
-		if err := c.Clean(r); err != nil {
+		if err := c.Clean(t.Context(), r); err != nil {
 			t.Errorf("clean error for %s: %v", r.Path, err)
 		}
 	}

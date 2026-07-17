@@ -70,9 +70,12 @@ func (s *XcodeScanner) VendorCleanups() []VendorCleanup {
 		{
 			ID:          "simctl-delete-unavailable",
 			Description: "Delete simulator devices whose runtime was removed",
-			Command:     "xcrun simctl delete unavailable",
-			Run: func(ctx context.Context) error {
-				return exec.CommandContext(ctx, "xcrun", "simctl", "delete", "unavailable").Run()
+			DeleteMethod: model.DeleteMethod{
+				Kind:    model.DeleteKindCommand,
+				Display: "xcrun simctl delete unavailable",
+				Run: func(ctx context.Context) error {
+					return exec.CommandContext(ctx, "xcrun", "simctl", "delete", "unavailable").Run()
+				},
 			},
 		},
 	}

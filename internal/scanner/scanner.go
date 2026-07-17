@@ -21,12 +21,13 @@ type Scanner interface {
 // VendorCleanup describes an ecosystem-native cleanup action that delegates to
 // an official tool (e.g. `xcrun simctl delete unavailable` for Xcode). These
 // run alongside path-based cleanup but use the vendor's own command so internal
-// state stays consistent.
+// state stays consistent. It is the ecosystem-level bulk counterpart of a
+// per-item ScanResult.Delete: both share the model.DeleteMethod execution
+// contract (Kind, Display for dry-run, Run to execute).
 type VendorCleanup struct {
-	ID          string                          // stable identifier, e.g. "simctl-delete-unavailable"
-	Description string                          // user-facing summary
-	Command     string                          // command that would be run, for dry-run / display
-	Run         func(ctx context.Context) error // executes the cleanup
+	ID          string // stable identifier, e.g. "simctl-delete-unavailable"
+	Description string // user-facing summary
+	model.DeleteMethod
 }
 
 // VendorCleaner is implemented by scanners that contribute vendor-native

@@ -161,7 +161,7 @@ func newCleanCmd() *cobra.Command {
 							relPath = rel
 						}
 					}
-					err := c.Clean(r)
+					err := c.Clean(cmd.Context(), r)
 					if err != nil {
 						failed++
 						fmt.Printf("    %s %s — %v\n", ui.ErrStyle.Render("✗"), relPath, err)
@@ -280,7 +280,7 @@ func runVendorCleanups(ecosystems []model.Ecosystem, dryRun bool) {
 	fmt.Printf("\n%s\n", ui.ProjectStyle.Render("Vendor cleanup:"))
 	for _, p := range actions {
 		header := fmt.Sprintf("  [%s] %s", p.eco, p.action.Description)
-		fmt.Println(ui.DimStyle.Render("    " + p.action.Command))
+		fmt.Println(ui.DimStyle.Render("    " + p.action.Display))
 		if dryRun {
 			fmt.Printf("%s %s\n", header, ui.DimStyle.Render("(dry-run)"))
 			continue

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -74,6 +75,26 @@ type ArtifactDef struct {
 	AlwaysSafe  bool     `json:"always_safe"`
 }
 
+// DeleteKind identifies how an artifact is reclaimed.
+type DeleteKind string
+
+const (
+	DeleteKindPath    DeleteKind = "path"    // filesystem removal of Path (trash or permanent)
+	DeleteKindCommand DeleteKind = "command" // vendor CLI command
+	DeleteKindAPI     DeleteKind = "api"     // in-process API call
+)
+
+// DeleteMethod describes how a result is reclaimed when plain path removal
+// does not apply (vendor command, API call). Display is what would run, shown
+// in dry-run and listings; Run performs the reclaim and must honor ctx. Run is
+// never serialized — kind and display surface in JSON so agents can tell
+// strategies apart.
+type DeleteMethod struct {
+	Kind    DeleteKind                      `json:"kind"`
+	Display string                          `json:"display"`
+	Run     func(ctx context.Context) error `json:"-"`
+}
+
 // InodeKey identifies a physical inode uniquely. Inode numbers are only unique
 // per device, so any cross-artifact dedup key must include Dev — a home scan can
 // span multiple filesystems (external volumes, network mounts, Docker/APFS
@@ -100,10 +121,23 @@ type ScanResult struct {
 	Recommendation string         `json:"recommendation,omitempty"` // hint for the user (e.g. "old build", "unavailable runtime")
 	LastUsedAt     time.Time      `json:"last_used_at,omitzero"`    // when the item itself was last used, if the scanner can tell (omitzero: zero time is dropped from JSON)
 
+	// Delete overrides how this result is reclaimed. Nil means path removal
+	// (trash or permanent delete of Path).
+	Delete *DeleteMethod `json:"delete,omitempty"`
+
 	// Links maps each hard-linked inode (Nlink>1) found in this artifact to its
 	// disk blocks, so a caller can dedup blocks shared across artifacts (e.g.
 	// pnpm store ↔ node_modules) when computing a grand total. Not serialized.
 	Links map[InodeKey]int64 `json:"-"`
+}
+
+// DeleteStrategy returns the effective delete strategy for this result:
+// the attached method's kind, or path removal when none is set.
+func (r ScanResult) DeleteStrategy() DeleteKind {
+	if r.Delete != nil {
+		return r.Delete.Kind
+	}
+	return DeleteKindPath
 }
 
 // HumanSize returns a human-readable size string.
