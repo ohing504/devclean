@@ -224,7 +224,6 @@ func ApplyGitInfo(results []model.ScanResult) {
 
 		info := cache[gitRoot]
 
-		// Set project root to git root
 		results[i].ProjectRoot = gitRoot
 
 		// Use the most recent of: artifact mtime, git commit time, project dir mtime

@@ -45,7 +45,19 @@ type Scanner interface {
 }
 ```
 
-Scanners report progress via context-attached callbacks for real-time UI updates; the walk batch reports under a single "projects" label, stat scanners under their own names. Sizing collects two figures per artifact via an in-process walk (`scanner.Measure`): **disk** (allocated blocks, `st_blocks×512` — sparse-accurate and matching `du`) and **apparent** (sum of logical file sizes). Directories contribute their own blocks to disk (real on ext4, ~0 on APFS); symlinks are never followed. Hard-linked inodes (`Nlink>1`) are counted once per artifact and recorded (keyed by `(dev, ino)`) so shared blocks can be netted out across artifacts. The walk engine does not size inline — it collects every matched artifact during the single pass, then sizes them across a bounded worker pool (`min(NumCPU, 8)`) so the traversals and their I/O overlap. The stat scanners (global/xcode/llm) size the same way: they discover artifacts via `stat` first, then defer to that same `sizePending` pool instead of measuring each inline. Disk is the primary figure (sorting, `--min-size`, totals); apparent surfaces only when a file is materially sparse.
+Scanners report progress via context-attached callbacks: the walk batch reports under a single "projects" label, stat scanners under their own names.
+
+**Sizing** collects two figures per artifact through an in-process walk (`scanner.Measure`):
+
+- **disk** — allocated blocks (`st_blocks×512`), sparse-accurate and matching `du`. The primary figure: sorting, `--min-size`, and totals all use it. Directories contribute their own blocks (real on ext4, ~0 on APFS).
+- **apparent** — sum of logical file sizes. Surfaces only when a file is materially sparse.
+
+Two invariants keep the figures honest:
+
+- **Hard links** (`Nlink>1`) are counted once per artifact, keyed by `(dev, ino)`, so shared blocks net out across artifacts.
+- **Symlinks** are never followed.
+
+Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through one shared bounded worker pool (`sizePending`, `min(NumCPU, 8)`) so the tree-walk I/O overlaps.
 
 ### Walk engine
 
