@@ -19,8 +19,7 @@ func TestGoScanner_FindsVendor(t *testing.T) {
 	mustMkdir(t, vendor)
 	mustWriteFile(t, filepath.Join(vendor, "doc.go"), make([]byte, 4096))
 
-	s := scanner.NewGoScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoGo)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -49,8 +48,7 @@ func TestGoScanner_IgnoresVendorWithoutGoMod(t *testing.T) {
 	mustMkdir(t, vendor)
 	mustWriteFile(t, filepath.Join(vendor, "a"), []byte("x"))
 
-	s := scanner.NewGoScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoGo)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -71,8 +69,7 @@ func TestGoScanner_IgnoresRubyVendorBundle(t *testing.T) {
 	mustMkdir(t, bundle)
 	mustWriteFile(t, filepath.Join(bundle, "x.rb"), []byte("x"))
 
-	s := scanner.NewGoScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoGo)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -91,8 +88,7 @@ func TestGoScanner_MultipleProjects(t *testing.T) {
 		mustWriteFile(t, filepath.Join(proj, "vendor", "f"), []byte("v"))
 	}
 
-	s := scanner.NewGoScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoGo)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -102,11 +98,14 @@ func TestGoScanner_MultipleProjects(t *testing.T) {
 }
 
 func TestGoScanner_NameAndEcosystem(t *testing.T) {
-	s := scanner.NewGoScanner()
-	if s.Name() != "go" {
-		t.Errorf("expected name=go, got %s", s.Name())
+	for _, s := range scanner.DefaultRegistry().All() {
+		if s.Name() != "go" {
+			continue
+		}
+		if s.Ecosystem() != model.EcoGo {
+			t.Errorf("expected ecosystem=go, got %s", s.Ecosystem())
+		}
+		return
 	}
-	if s.Ecosystem() != model.EcoGo {
-		t.Errorf("expected ecosystem=go, got %s", s.Ecosystem())
-	}
+	t.Error(`expected a registered scanner named "go"`)
 }

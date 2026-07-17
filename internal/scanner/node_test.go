@@ -18,8 +18,7 @@ func TestNodeScanner_FindsNodeModules(t *testing.T) {
 	mustWriteFile(t, filepath.Join(nmDir, "index.js"), make([]byte, 4096))
 	mustWriteFile(t, filepath.Join(projDir, "package.json"), []byte(`{}`))
 
-	s := scanner.NewNodeScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -55,8 +54,7 @@ func TestNodeScanner_FindsNextBuild(t *testing.T) {
 	mustWriteFile(t, filepath.Join(nextDir, "data.json"), make([]byte, 2048))
 	mustWriteFile(t, filepath.Join(projDir, "package.json"), []byte(`{}`))
 
-	s := scanner.NewNodeScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -80,8 +78,7 @@ func TestNodeScanner_SkipsNestedNodeModules(t *testing.T) {
 	mustWriteFile(t, filepath.Join(nested, "index.js"), []byte("x"))
 	mustWriteFile(t, filepath.Join(projDir, "package.json"), []byte(`{}`))
 
-	s := scanner.NewNodeScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -104,8 +101,7 @@ func TestNodeScanner_IgnoresWithoutPackageJSON(t *testing.T) {
 	nmDir := filepath.Join(root, "random", "node_modules")
 	mustMkdir(t, nmDir)
 
-	s := scanner.NewNodeScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -128,8 +124,7 @@ func TestNodeScanner_MultipleProjects(t *testing.T) {
 	mustMkdir(t, filepath.Join(proj2, ".next"))
 	mustWriteFile(t, filepath.Join(proj2, "package.json"), []byte(`{}`))
 
-	s := scanner.NewNodeScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -166,8 +161,7 @@ func TestNodeScanner_DetectsReactNativeViaPodfile(t *testing.T) {
 	mustMkdir(t, expo)
 	mustWriteFile(t, filepath.Join(expo, "data.json"), make([]byte, 512))
 
-	s := scanner.NewNodeScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -205,8 +199,7 @@ func TestNodeScanner_DetectsReactNativeViaMetroConfig(t *testing.T) {
 	mustMkdir(t, metro)
 	mustWriteFile(t, filepath.Join(metro, "blob"), make([]byte, 1024))
 
-	s := scanner.NewNodeScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -231,8 +224,7 @@ func TestNodeScanner_NonReactNativeIgnoresRNArtifacts(t *testing.T) {
 	mustMkdir(t, pods)
 	mustWriteFile(t, filepath.Join(pods, "x"), []byte("y"))
 
-	s := scanner.NewNodeScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -260,8 +252,7 @@ func TestNodeScanner_ReactNativeSkipsWalkIntoPods(t *testing.T) {
 	mustWriteFile(t, filepath.Join(projDir, "ios", "Pods", "react-native", "package.json"), []byte(`{}`))
 	mustWriteFile(t, filepath.Join(nested, "x.js"), []byte("z"))
 
-	s := scanner.NewNodeScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -282,11 +273,14 @@ func TestNodeScanner_ReactNativeSkipsWalkIntoPods(t *testing.T) {
 }
 
 func TestNodeScanner_NameAndEcosystem(t *testing.T) {
-	s := scanner.NewNodeScanner()
-	if s.Name() != "node" {
-		t.Errorf("expected name=node, got %s", s.Name())
+	for _, s := range scanner.DefaultRegistry().All() {
+		if s.Name() != "node" {
+			continue
+		}
+		if s.Ecosystem() != model.EcoNode {
+			t.Errorf("expected ecosystem=node, got %s", s.Ecosystem())
+		}
+		return
 	}
-	if s.Ecosystem() != model.EcoNode {
-		t.Errorf("expected ecosystem=node, got %s", s.Ecosystem())
-	}
+	t.Error(`expected a registered scanner named "node"`)
 }

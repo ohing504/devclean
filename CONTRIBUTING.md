@@ -54,12 +54,27 @@ pushing to avoid the CI round-trip.
 
 ## Adding a new ecosystem
 
-The most common contribution. Mirror an existing scanner — Ruby is the simplest reference (`internal/scanner/ruby.go`), Python shows the deepest-root recursive variant, Xcode shows the fixed-path variant.
+The most common contribution. There are two scanner families — pick the one that matches where the artifacts live (`docs/architecture.md` § Scanner Design has the details):
 
-1. **Define the scanner**: `internal/scanner/<lang>.go` implementing `Scanner` interface (Name, Ecosystem, Scan).
+### Walk ecosystem — artifacts inside project trees
+
+For ecosystems like Node, Rust, Ruby, Python, Go: artifacts sit next to (or beneath) a marker file inside project directories. No `Scanner` implementation needed — you add a rule table.
+
+1. **Define the table**: `internal/scanner/<lang>.go` with a `walkEcosystem` value — marker file names plus artifact rules (exact rel-path, any-depth name, or suffix; each with category + safety). Rust (`rust.go`) is the smallest reference, Ruby (`ruby.go`) shows a compound path (`vendor/bundle`), Python (`python.go`) shows any-depth + suffix rules with `SetProjectRoot`, Node (`node.go`) shows per-project extra rules (React Native).
+2. **Register**: append the table to `walkEcosystemTable` in `internal/scanner/walk.go` (position = dedup attribution priority) and add `reg.Register(newWalkScanner(<lang>WalkEcosystem))` at the same position in `internal/scanner/registry_default.go`.
+3. **Tests**: `internal/scanner/<lang>_test.go` calling `scanner.WalkScan(ctx, root, model.EcoYourLang)`. Cover detection, artifact discovery, edge cases (no marker, false-positive siblings, monorepo nesting if applicable). Use `t.TempDir()` for fixtures.
+
+### Stat ecosystem — fixed paths, vendor APIs
+
+For ecosystems like Xcode, Global Caches, LLM Model Stores: artifacts live at known home-rooted paths, so there is no project tree to walk.
+
+1. **Define the scanner**: `internal/scanner/<name>.go` implementing the `Scanner` interface (Name, Ecosystem, Scan). Xcode (`xcode.go`) is the reference — a fixed path catalog, scope-gated by the scan root.
 2. **Register**: add `reg.Register(NewYourScanner())` in `internal/scanner/registry_default.go`.
-3. **Add ecosystem id**: `EcoYourLang` constant in `internal/model/types.go` and append to `AllEcosystems()`.
-4. **Tests**: `internal/scanner/<lang>_test.go`. Cover detection, artifact discovery, edge cases (no marker, false-positive siblings, monorepo nesting if applicable). Use `t.TempDir()` for fixtures.
+3. **Tests**: `internal/scanner/<name>_test.go` exercising `Scan` directly.
+
+### Both families
+
+4. **Add ecosystem id**: `EcoYourLang` constant in `internal/model/types.go` and append to `AllEcosystems()`.
 5. **Update SSOT**:
    - `docs/ecosystems.md`: add a section + flip the status table row to `implemented`
    - `README.md`: add a row to the Supported Ecosystems table

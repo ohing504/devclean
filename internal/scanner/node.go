@@ -1,37 +1,42 @@
 package scanner
 
 import (
-	"context"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/ohing504/devclean/internal/model"
 )
 
-var nodeArtifacts = []model.ArtifactDef{
-	{Pattern: "node_modules", Category: model.CatDeps, Description: "NPM dependencies", AlwaysSafe: true},
-	{Pattern: ".next", Category: model.CatBuild, Description: "Next.js build cache", AlwaysSafe: true},
-	{Pattern: ".nuxt", Category: model.CatBuild, Description: "Nuxt.js build cache", AlwaysSafe: true},
-	{Pattern: ".output", Category: model.CatBuild, Description: "Nuxt 3 output", AlwaysSafe: true},
-	{Pattern: "dist", Category: model.CatBuild, Description: "Build output", AlwaysSafe: true},
-	{Pattern: ".turbo", Category: model.CatCache, Description: "Turborepo cache", AlwaysSafe: true},
-	{Pattern: ".parcel-cache", Category: model.CatCache, Description: "Parcel cache", AlwaysSafe: true},
-	{Pattern: "coverage", Category: model.CatBuild, Description: "Test coverage reports", AlwaysSafe: true},
-	{Pattern: ".svelte-kit", Category: model.CatBuild, Description: "SvelteKit cache", AlwaysSafe: true},
+// nodeWalkEcosystem drives Node.js scanning in the single-pass walk engine.
+var nodeWalkEcosystem = walkEcosystem{
+	Name:    "node",
+	Eco:     model.EcoNode,
+	Markers: []string{"package.json"},
+	Rules: []artifactRule{
+		{RelPath: "node_modules", Category: model.CatDeps, Safety: model.SafetySafe},   // NPM dependencies
+		{RelPath: ".next", Category: model.CatBuild, Safety: model.SafetySafe},         // Next.js build cache
+		{RelPath: ".nuxt", Category: model.CatBuild, Safety: model.SafetySafe},         // Nuxt.js build cache
+		{RelPath: ".output", Category: model.CatBuild, Safety: model.SafetySafe},       // Nuxt 3 output
+		{RelPath: "dist", Category: model.CatBuild, Safety: model.SafetySafe},          // Build output
+		{RelPath: ".turbo", Category: model.CatCache, Safety: model.SafetySafe},        // Turborepo cache
+		{RelPath: ".parcel-cache", Category: model.CatCache, Safety: model.SafetySafe}, // Parcel cache
+		{RelPath: "coverage", Category: model.CatBuild, Safety: model.SafetySafe},      // Test coverage reports
+		{RelPath: ".svelte-kit", Category: model.CatBuild, Safety: model.SafetySafe},   // SvelteKit cache
+	},
+	ExtraRules: nodeExtraRules,
 }
 
-// React Native artifacts live at multi-segment paths inside the project root.
-// Discovered only when the project is detected as React Native (Podfile / metro.config).
-var reactNativeArtifacts = []model.ArtifactDef{
-	{Pattern: "ios/Pods", Category: model.CatDeps, Description: "CocoaPods dependencies (React Native)", AlwaysSafe: true},
-	{Pattern: "ios/build", Category: model.CatBuild, Description: "iOS build output (React Native)", AlwaysSafe: true},
-	{Pattern: "ios/DerivedData", Category: model.CatBuild, Description: "iOS DerivedData (React Native)", AlwaysSafe: true},
-	{Pattern: "android/build", Category: model.CatBuild, Description: "Android build output (React Native)", AlwaysSafe: true},
-	{Pattern: "android/.gradle", Category: model.CatCache, Description: "Android Gradle cache (React Native)", AlwaysSafe: true},
-	{Pattern: ".expo", Category: model.CatCache, Description: "Expo cache", AlwaysSafe: true},
-	{Pattern: ".metro", Category: model.CatCache, Description: "Metro bundler cache", AlwaysSafe: true},
+// reactNativeRules are added to a Node project context when the project is
+// detected as React Native. They live at multi-segment paths inside the
+// project root (ios/Pods) or are RN tooling caches (.expo, .metro).
+var reactNativeRules = []artifactRule{
+	{RelPath: "ios/Pods", Category: model.CatDeps, Safety: model.SafetySafe},         // CocoaPods dependencies
+	{RelPath: "ios/build", Category: model.CatBuild, Safety: model.SafetySafe},       // iOS build output
+	{RelPath: "ios/DerivedData", Category: model.CatBuild, Safety: model.SafetySafe}, // iOS DerivedData
+	{RelPath: "android/build", Category: model.CatBuild, Safety: model.SafetySafe},   // Android build output
+	{RelPath: "android/.gradle", Category: model.CatCache, Safety: model.SafetySafe}, // Android Gradle cache
+	{RelPath: ".expo", Category: model.CatCache, Safety: model.SafetySafe},           // Expo cache
+	{RelPath: ".metro", Category: model.CatCache, Safety: model.SafetySafe},          // Metro bundler cache
 }
 
 var reactNativeMarkers = []string{
@@ -41,110 +46,21 @@ var reactNativeMarkers = []string{
 	"metro.config.mjs",
 }
 
-// NodeScanner scans for Node.js project artifacts.
-type NodeScanner struct{}
-
-func NewNodeScanner() *NodeScanner {
-	return &NodeScanner{}
-}
-
-func (s *NodeScanner) Name() string               { return "node" }
-func (s *NodeScanner) Ecosystem() model.Ecosystem { return model.EcoNode }
-
-func (s *NodeScanner) Scan(ctx context.Context, root string) ([]model.ScanResult, error) {
-	var results []model.ScanResult
-	artifactSet := make(map[string]model.ArtifactDef, len(nodeArtifacts))
-	for _, a := range nodeArtifacts {
-		artifactSet[a.Pattern] = a
-	}
-
-	skipPaths := make(map[string]bool)
-	rnChecked := make(map[string]bool)
-
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		if !d.IsDir() {
-			return nil
-		}
-
-		// Skip already-found artifact subtrees (and the artifact dir itself when revisited).
-		for skip := range skipPaths {
-			if path == skip || strings.HasPrefix(path, skip+string(os.PathSeparator)) {
-				return fs.SkipDir
-			}
-		}
-
-		// On first visit to a Node project directory, check if it's React Native and
-		// register multi-segment artifacts (ios/Pods, android/build, etc.) directly.
-		if !rnChecked[path] && hasFile(path, "package.json") {
-			rnChecked[path] = true
-			if isReactNativeProject(path) {
-				for _, art := range reactNativeArtifacts {
-					full := filepath.Join(path, art.Pattern)
-					info, statErr := os.Stat(full)
-					if statErr != nil || !info.IsDir() {
-						continue
-					}
-					results = append(results, model.ScanResult{
-						Path:      full,
-						Ecosystem: model.EcoNode,
-						Category:  art.Category,
-						Size:      DirSize(full),
-						LastMod:   ModTime(full),
-						Safety:    safetyFromDef(art),
-					})
-					ReportProgress(ctx, len(results))
-					skipPaths[full] = true
-				}
-			}
-		}
-
-		// Skip hidden dirs that aren't artifacts we care about
-		name := d.Name()
-		if strings.HasPrefix(name, ".") && artifactSet[name].Pattern == "" {
-			return fs.SkipDir
-		}
-
-		// Check if this directory is a known artifact inside a Node project
-		if art, ok := artifactSet[name]; ok {
-			projectDir := filepath.Dir(path)
-			if hasFile(projectDir, "package.json") {
-				size := DirSize(path)
-				results = append(results, model.ScanResult{
-					Path:      path,
-					Ecosystem: model.EcoNode,
-					Category:  art.Category,
-					Size:      size,
-					LastMod:   ModTime(path),
-					Safety:    safetyFromDef(art),
-				})
-				ReportProgress(ctx, len(results))
-				skipPaths[path] = true
-				return fs.SkipDir
-			}
-		}
-
+// nodeExtraRules adds React Native artifact rules to Node projects that
+// carry an RN marker (ios/Podfile or a metro config file).
+func nodeExtraRules(projectRoot string, entryNames map[string]bool) []artifactRule {
+	if !isReactNativeProject(projectRoot, entryNames) {
 		return nil
-	})
-
-	return results, err
+	}
+	return reactNativeRules
 }
 
-func isReactNativeProject(dir string) bool {
+func isReactNativeProject(dir string, entryNames map[string]bool) bool {
 	if hasFile(filepath.Join(dir, "ios"), "Podfile") {
 		return true
 	}
 	for _, marker := range reactNativeMarkers {
-		if hasFile(dir, marker) {
+		if entryNames[marker] {
 			return true
 		}
 	}
@@ -154,11 +70,4 @@ func isReactNativeProject(dir string) bool {
 func hasFile(dir, name string) bool {
 	_, err := os.Stat(filepath.Join(dir, name))
 	return err == nil
-}
-
-func safetyFromDef(a model.ArtifactDef) model.SafetyLevel {
-	if a.AlwaysSafe {
-		return model.SafetySafe
-	}
-	return model.SafetyCaution
 }

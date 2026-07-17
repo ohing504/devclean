@@ -10,13 +10,16 @@ import (
 )
 
 func TestRubyScanner_NameAndEcosystem(t *testing.T) {
-	s := scanner.NewRubyScanner()
-	if s.Name() != "ruby" {
-		t.Errorf("expected name=ruby, got %s", s.Name())
+	for _, s := range scanner.DefaultRegistry().All() {
+		if s.Name() != "ruby" {
+			continue
+		}
+		if s.Ecosystem() != model.EcoRuby {
+			t.Errorf("expected ecosystem=ruby, got %s", s.Ecosystem())
+		}
+		return
 	}
-	if s.Ecosystem() != model.EcoRuby {
-		t.Errorf("expected ecosystem=ruby, got %s", s.Ecosystem())
-	}
+	t.Error(`expected a registered scanner named "ruby"`)
 }
 
 func TestRubyScanner_FindsVendorBundle(t *testing.T) {
@@ -28,8 +31,7 @@ func TestRubyScanner_FindsVendorBundle(t *testing.T) {
 	mustWriteFile(t, filepath.Join(bundleDir, "rails.rb"), make([]byte, 4096))
 	mustWriteFile(t, filepath.Join(projDir, "Gemfile"), []byte("source 'https://rubygems.org'"))
 
-	s := scanner.NewRubyScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoRuby)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -61,8 +63,7 @@ func TestRubyScanner_FindsBundleCache(t *testing.T) {
 	mustWriteFile(t, filepath.Join(projDir, ".bundle", "config"), []byte("BUNDLE_PATH: vendor/bundle"))
 	mustWriteFile(t, filepath.Join(projDir, "Gemfile"), []byte("source 'https://rubygems.org'"))
 
-	s := scanner.NewRubyScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoRuby)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -87,8 +88,7 @@ func TestRubyScanner_FindsTmp(t *testing.T) {
 	mustWriteFile(t, filepath.Join(tmpDir, "compile.cache"), make([]byte, 2048))
 	mustWriteFile(t, filepath.Join(projDir, "Gemfile"), []byte("source 'https://rubygems.org'"))
 
-	s := scanner.NewRubyScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoRuby)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -112,8 +112,7 @@ func TestRubyScanner_FindsCoverage(t *testing.T) {
 	mustWriteFile(t, filepath.Join(projDir, "coverage", "index.html"), make([]byte, 1024))
 	mustWriteFile(t, filepath.Join(projDir, "Gemfile"), []byte("source 'https://rubygems.org'"))
 
-	s := scanner.NewRubyScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoRuby)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -137,8 +136,7 @@ func TestRubyScanner_FindsRubyLSP(t *testing.T) {
 	mustWriteFile(t, filepath.Join(projDir, ".ruby-lsp", "cache.json"), make([]byte, 512))
 	mustWriteFile(t, filepath.Join(projDir, "Gemfile"), []byte("source 'https://rubygems.org'"))
 
-	s := scanner.NewRubyScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoRuby)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -161,8 +159,7 @@ func TestRubyScanner_IgnoresWithoutGemfile(t *testing.T) {
 	bundleDir := filepath.Join(root, "random", "vendor", "bundle")
 	mustMkdir(t, bundleDir)
 
-	s := scanner.NewRubyScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoRuby)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -181,8 +178,7 @@ func TestRubyScanner_SkipsNestedArtifacts(t *testing.T) {
 	mustWriteFile(t, filepath.Join(nestedTmp, "data"), []byte("x"))
 	mustWriteFile(t, filepath.Join(projDir, "Gemfile"), []byte("source 'https://rubygems.org'"))
 
-	s := scanner.NewRubyScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoRuby)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}
@@ -214,8 +210,7 @@ func TestRubyScanner_MultipleProjects(t *testing.T) {
 	mustMkdir(t, filepath.Join(proj2, "coverage"))
 	mustWriteFile(t, filepath.Join(proj2, "Gemfile"), []byte("source 'https://rubygems.org'"))
 
-	s := scanner.NewRubyScanner()
-	results, err := s.Scan(context.Background(), root)
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoRuby)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
 	}

@@ -15,8 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Global Caches**: Browser Temp detection (macOS) — zombie Chromium-family code-sign clones under `/private/var/folders/*/*/X/*.code_sign_clone` left behind by force-killed browsers (headless automation like lighthouse/puppeteer), labeled with browser name and copy count. `safe` when the browser is not running; `caution` while it runs (newest copy may be in use) or for unrecognized bundle IDs.
 - **LLM Model Stores** scanner (`llm`) covering local model weights at fixed home paths: LM Studio (`~/.lmstudio/models`, per model) and Hugging Face hub (`~/.cache/huggingface/hub`, per model, `models--org--name` decoded to `org/name`), plus the Ollama (`~/.ollama/models`) and llamafile (`~/.llamafile`) stores as a whole. All `safe` with re-download notes; the Ollama note points to `ollama rm <model>` for removing individual models. Results carry a new `last_used_at` JSON field (model directory mtime; omitted when unknown), shown in the table as a dim "last used …" hint.
 
+### Changed
+
+- Project scanners (Node, Rust, Ruby, Python, Go) are now declarative rule tables executed by a single shared filesystem walk instead of five independent traversals — one pass over the scan root regardless of how many project ecosystems are active. Stat-based scanners (xcode, global, llm) are unchanged.
+- The scan spinner shows a single "Scanning projects..." stage for all project scanners (previously "Scanning node...", "Scanning rust...", … in sequence). Stat scanners still report under their own names.
+
 ### Fixed
 
+- Directories listed by several ecosystems (e.g. `coverage/` in a project with both `package.json` and `Gemfile`) were reported once per ecosystem, double-counting their size. They are now reported once, attributed to the first ecosystem in scanner order (node → rust → ruby → python → go) among those active in the scan — a full scan attributes a shared `coverage/` to node, while `--eco ruby` attributes it to ruby.
+- Scanners no longer walk into another ecosystem's matched artifact: `__pycache__` directories inside `node_modules` were previously reported separately by the Python scanner, and `node_modules` itself was fully traversed by four other scanners.
 - Tree selector: `a` (select all) no longer selects artifacts under protected projects, matching the other bulk-select keys and the ✗ rendering (deletion was already blocked by the cleaner guard).
 - `clean --vendor-cleanup` without `--eco` ran vendor commands for every registered ecosystem (e.g. `xcrun simctl delete unavailable` when nothing Xcode-related was cleaned); it is now scoped to the targeted ecosystems.
 - Ctrl-C / SIGTERM now cancels an in-progress scan instead of being ignored until the walk finishes.

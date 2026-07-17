@@ -102,6 +102,8 @@ func (r *Registry) ScanWith(ctx context.Context, root string, scanners []Scanner
 }
 
 // ScanWithProgress runs scanners with an optional progress callback.
+// Walk-based scanners are partitioned out and executed first as a single
+// batched filesystem pass; the remaining scanners run sequentially.
 func (r *Registry) ScanWithProgress(ctx context.Context, root string, scanners []Scanner, onProgress ProgressFunc) ([]model.ScanResult, error) {
 	var all []model.ScanResult
 
@@ -113,7 +115,20 @@ func (r *Registry) ScanWithProgress(ctx context.Context, root string, scanners [
 		})
 	}
 
-	for _, s := range scanners {
+	walkTables, rest := partitionScanners(scanners)
+
+	if len(walkTables) > 0 {
+		if onProgress != nil {
+			onProgress("projects", len(all))
+		}
+		results, err := runWalk(scanCtx, root, walkTables)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, results...)
+	}
+
+	for _, s := range rest {
 		if onProgress != nil {
 			onProgress(s.Name(), len(all))
 		}
@@ -124,6 +139,22 @@ func (r *Registry) ScanWithProgress(ctx context.Context, root string, scanners [
 		all = append(all, results...)
 	}
 	return all, nil
+}
+
+// partitionScanners splits scanners into walk-engine tables (batched into a
+// single filesystem pass) and the remaining scanners (run sequentially).
+// Table order follows the scanners' order, which mirrors the registry order.
+func partitionScanners(scanners []Scanner) ([]walkEcosystem, []Scanner) {
+	var tables []walkEcosystem
+	var rest []Scanner
+	for _, s := range scanners {
+		if w, ok := s.(*walkScanner); ok {
+			tables = append(tables, w.table)
+		} else {
+			rest = append(rest, s)
+		}
+	}
+	return tables, rest
 }
 
 // DirSize calculates the disk usage of a directory using `du -sk`.
