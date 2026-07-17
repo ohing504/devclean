@@ -227,9 +227,10 @@ func DirSize(path string) int64 {
 	return Measure(path).Disk
 }
 
-// sized fills Size, ApparentSize and Links on r by measuring r.Path. Convenience
-// for the stat-based scanners (xcode/global/llm) that build results one at a
-// time, mirroring what the walk engine's sizePending does in bulk.
+// sized fills Size, ApparentSize and Links on r by measuring r.Path — the
+// single-result form of what the walk engine's sizePending does in bulk (the
+// stat-based scanners now defer to sizePending; this remains for callers that
+// size one result at a time).
 func sized(r model.ScanResult) model.ScanResult {
 	st := Measure(r.Path)
 	r.Size = st.Disk

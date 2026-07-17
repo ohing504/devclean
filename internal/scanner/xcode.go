@@ -120,15 +120,21 @@ func (s *XcodeScanner) Scan(ctx context.Context, root string) ([]model.ScanResul
 			continue
 		}
 
-		results = append(results, sized(model.ScanResult{
+		results = append(results, model.ScanResult{
 			Path:        full,
 			Ecosystem:   model.EcoXcode,
 			Category:    a.category,
 			LastMod:     ModTime(full),
 			Safety:      a.safety,
 			ProjectRoot: filepath.Dir(full),
-		}))
+		})
 		ReportProgress(ctx, len(results))
+	}
+
+	// Size every artifact (including expanded children) in one bounded worker
+	// pool rather than serially as each is discovered.
+	if err := sizePending(ctx, results); err != nil {
+		return results, err
 	}
 	return results, nil
 }
@@ -151,14 +157,14 @@ func expandChildren(ctx context.Context, parent string, a xcodeArtifact) []model
 		default:
 		}
 		child := filepath.Join(parent, e.Name())
-		out = append(out, sized(model.ScanResult{
+		out = append(out, model.ScanResult{
 			Path:        child,
 			Ecosystem:   model.EcoXcode,
 			Category:    a.category,
 			LastMod:     ModTime(child),
 			Safety:      a.safety,
 			ProjectRoot: parent,
-		}))
+		})
 		ReportProgress(ctx, len(out))
 	}
 	return out

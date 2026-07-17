@@ -53,7 +53,7 @@ func (s *LLMScanner) Scan(ctx context.Context, root string) ([]model.ScanResult,
 			return false
 		default:
 		}
-		results = append(results, sized(model.ScanResult{
+		results = append(results, model.ScanResult{
 			Path:           path,
 			Ecosystem:      model.EcoLLM,
 			Category:       model.CatCache,
@@ -63,7 +63,7 @@ func (s *LLMScanner) Scan(ctx context.Context, root string) ([]model.ScanResult,
 			Label:          label,
 			Recommendation: rec,
 			LastUsedAt:     ModTime(path),
-		}))
+		})
 		ReportProgress(ctx, len(results))
 		return true
 	}
@@ -120,6 +120,11 @@ func (s *LLMScanner) Scan(ctx context.Context, root string) ([]model.ScanResult,
 		}
 	}
 
+	// Size every discovered store in one bounded worker pool rather than
+	// serially as each is found (one tree walk per store overlaps the rest).
+	if err := sizePending(ctx, results); err != nil {
+		return results, err
+	}
 	return results, nil
 }
 
