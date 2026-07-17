@@ -176,7 +176,7 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 			continue
 		}
 
-		results = append(results, sized(model.ScanResult{
+		results = append(results, model.ScanResult{
 			Path:           full,
 			Ecosystem:      model.EcoGlobal,
 			Category:       c.category,
@@ -185,7 +185,7 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 			ProjectRoot:    filepath.Dir(full),
 			Label:          c.description,
 			Recommendation: c.rec,
-		}))
+		})
 		ReportProgress(ctx, len(results))
 	}
 
@@ -196,6 +196,12 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 	// subdirectory must not surface system temp entries.
 	if runtime.GOOS == "darwin" && isUnderRoot(home, absRoot) {
 		results = append(results, s.scanCodeSignClones(ctx, len(results))...)
+	}
+
+	// Size all caches (and any code-sign clones) in one bounded worker pool
+	// rather than serially as each is discovered.
+	if err := sizePending(ctx, results); err != nil {
+		return results, err
 	}
 	return results, nil
 }
@@ -299,7 +305,7 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 			}
 		}
 
-		out = append(out, sized(model.ScanResult{
+		out = append(out, model.ScanResult{
 			Path:           m,
 			Ecosystem:      model.EcoGlobal,
 			Category:       model.CatCache,
@@ -308,7 +314,7 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 			ProjectRoot:    filepath.Dir(m),
 			Label:          codeSignCloneLabel(m, name),
 			Recommendation: rec,
-		}))
+		})
 		ReportProgress(ctx, found+len(out))
 	}
 	return out
