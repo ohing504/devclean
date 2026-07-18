@@ -74,7 +74,7 @@ type walkEcosystem struct {
 // ecosystems. The order decides attribution when a directory matches rules
 // of several ecosystems (first match wins) and the result ordering; it
 // mirrors the registry order.
-var walkEcosystemTable = []walkEcosystem{nodeWalkEcosystem, rustWalkEcosystem, rubyWalkEcosystem, pythonWalkEcosystem, goWalkEcosystem, flutterWalkEcosystem}
+var walkEcosystemTable = []walkEcosystem{nodeWalkEcosystem, rustWalkEcosystem, rubyWalkEcosystem, pythonWalkEcosystem, goWalkEcosystem, flutterWalkEcosystem, androidWalkEcosystem}
 
 // WalkScan runs the single-pass walk engine over root with the tables of the
 // given ecosystems activated. Ecosystems without a walk table are ignored.

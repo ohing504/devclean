@@ -11,12 +11,12 @@
 | `python` | Python | implemented |
 | `go` | Go | implemented (per-project only) |
 | `flutter` | Flutter/Dart | implemented |
+| `android` | Android | implemented |
 | `global` | Global Caches | implemented |
 | `llm` | LLM Model Stores | implemented |
-| `android` | Android | planned |
 | `docker` | Docker | planned |
 
-**Dedup attribution**: project ecosystems (node, rust, ruby, python, go, flutter) share a single-pass scan — a directory matching artifact rules of several active ecosystems is reported once, attributed to the first in scanner order (node → rust → ruby → python → go → flutter), so `--eco` subsets can shift attribution (a shared `coverage/` goes to node in a full scan, to ruby under `--eco ruby`).
+**Dedup attribution**: project ecosystems (node, rust, ruby, python, go, flutter, android) share a single-pass scan — a directory matching artifact rules of several active ecosystems is reported once, attributed to the first in scanner order (node → rust → ruby → python → go → flutter → android), so `--eco` subsets can shift attribution (a shared `coverage/` goes to node in a full scan, to ruby under `--eco ruby`).
 
 ## Node.js
 
@@ -131,6 +131,23 @@
 - `build/` and `.dart_tool/` are exactly the two directories `flutter clean` deletes; both regenerate on the next build.
 - **The Flutter SDK checkout is excluded.** The SDK is itself a git repo full of `pubspec.yaml` roots, and its `engine/src/build` / `engine/src/flutter/build` are committed GN build-system *source* trees — not build output. Matching `build` by name would offer real SDK source for deletion, and gitignore-aware protection misses it (committed-clean files are not `protected`). The scanner detects the SDK root by its invariant bootstrap layout (`bin/flutter` + `bin/internal/engine.version`, location-independent — never a hardcoded path) and skips the whole subtree.
 - The global pub package cache `~/.pub-cache` (macOS/Linux default) is home-rooted and handled by the Global Caches scanner as `caution` — it is shared by every Flutter project and re-downloads on the next `flutter pub get`. The `PUB_CACHE` env override is not tracked; only the default location is scanned.
+
+## Android
+
+**Detection**: `build.gradle` or `build.gradle.kts` in parent directory. Every Gradle module carries its own build script, so the root project and each subproject (`app/`, `feature/`, ...) is detected as its own project root.
+
+**Artifacts**:
+
+| Pattern | Category | Safety | Description |
+|---------|----------|--------|-------------|
+| `build` | build | safe | Compiled output (what `gradle clean` removes) |
+| `.gradle` | cache | safe | Per-project Gradle cache (regenerates on next build) |
+
+**Notes**:
+- Because each module has its own marker, the single `build` rule reclaims every module's output (`build`, `app/build`, `feature/build`, ...) without enumerating module names.
+- **Scope is per-project only.** The shared Gradle user home (`~/.gradle/caches`), AVD images, and NDK / system-images are home-rooted and handled by the Global Caches scanner, not here — no duplicate registration.
+- **No SDK exclusion needed** (unlike Flutter): the Android SDK ships no `build.gradle`, so it never establishes a project context and nothing inside it is offered for deletion.
+- **React Native overlap**: an RN project nests an `android/` Gradle tree. `android/build` and `android/.gradle` are matched by node's RN rules first in scanner order, so they attribute to node; the android scanner still covers the deeper module builds (`android/app/build`) the RN rules do not list.
 
 ## Xcode (macOS only)
 
