@@ -10,13 +10,13 @@
 | `xcode` | iOS/Xcode (macOS only) | implemented |
 | `python` | Python | implemented |
 | `go` | Go | implemented (per-project only) |
+| `flutter` | Flutter/Dart | implemented |
 | `global` | Global Caches | implemented |
 | `llm` | LLM Model Stores | implemented |
 | `android` | Android | planned |
-| `flutter` | Flutter/Dart | planned |
 | `docker` | Docker | planned |
 
-**Dedup attribution**: project ecosystems (node, rust, ruby, python, go) share a single-pass scan — a directory matching artifact rules of several active ecosystems is reported once, attributed to the first in scanner order (node → rust → ruby → python → go), so `--eco` subsets can shift attribution (a shared `coverage/` goes to node in a full scan, to ruby under `--eco ruby`).
+**Dedup attribution**: project ecosystems (node, rust, ruby, python, go, flutter) share a single-pass scan — a directory matching artifact rules of several active ecosystems is reported once, attributed to the first in scanner order (node → rust → ruby → python → go → flutter), so `--eco` subsets can shift attribution (a shared `coverage/` goes to node in a full scan, to ruby under `--eco ruby`).
 
 ## Node.js
 
@@ -116,6 +116,21 @@
 - `vendor/` is `caution` because `go mod vendor` is an opt-in choice — devs who vendor often do so for offline builds, reproducibility, or supply-chain pinning. Regeneration requires network access plus the original `go.sum`.
 - Go's two big disk hogs — `~/.cache/go-build` (build cache) and `~/go/pkg/mod` (module cache) — are global, not per-project. They will be handled by the Global Caches scanner so they aren't double-attributed to every Go project on the machine.
 
+## Flutter/Dart
+
+**Detection**: `pubspec.yaml` in parent directory.
+
+**Artifacts**:
+
+| Pattern | Category | Safety | Description |
+|---------|----------|--------|-------------|
+| `build` | build | safe | Compiled output (what `flutter clean` removes) |
+| `.dart_tool` | build | safe | Build-runner / tooling state (regenerates on next build) |
+
+**Notes**:
+- `build/` and `.dart_tool/` are exactly the two directories `flutter clean` deletes; both regenerate on the next build.
+- The global pub package cache `~/.pub-cache` (macOS/Linux default) is home-rooted and handled by the Global Caches scanner as `caution` — it is shared by every Flutter project and re-downloads on the next `flutter pub get`. The `PUB_CACHE` env override is not tracked; only the default location is scanned.
+
 ## Xcode (macOS only)
 
 **Detection**: fixed paths under `~/Library/Developer/...` and `~/Library/Logs/...`. The scanner does not walk a project tree — it checks a known set of Xcode/CoreSimulator directories and reports the ones that exist. On non-darwin platforms, the scanner is a no-op.
@@ -169,6 +184,7 @@ Each entry that is `caution` carries a consequence-of-deletion note in `recommen
 | `~/.gradle/caches`, `~/.gradle/wrapper/dists` | cache | caution |
 | `~/.cargo/registry`, `~/.cargo/git` | cache | caution |
 | `~/go/pkg/mod` | deps | caution (read-only files) |
+| `~/.pub-cache` | deps | caution (shared by all Flutter projects; re-downloads on next `flutter pub get`) |
 | `~/Library/Caches/ms-playwright`, `~/.cache/ms-playwright` | cache | caution |
 | `~/.rustup/toolchains` | runtime | caution (toolchains must be reinstalled) |
 | `~/.nvm/versions`, `~/.pyenv/versions`, `~/.rbenv/versions` | runtime | caution (installed runtimes deleted, not caches) |

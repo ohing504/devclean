@@ -8,6 +8,7 @@ func DefaultRegistry() *Registry {
 	reg.Register(newWalkScanner(rubyWalkEcosystem))
 	reg.Register(newWalkScanner(pythonWalkEcosystem))
 	reg.Register(newWalkScanner(goWalkEcosystem))
+	reg.Register(newWalkScanner(flutterWalkEcosystem))
 	reg.Register(NewXcodeScanner())
 	reg.Register(NewGlobalScanner())
 	reg.Register(NewLLMScanner())
