@@ -61,6 +61,13 @@ type walkEcosystem struct {
 	// arbitrary depth (python), where output grouping needs explicit
 	// attribution.
 	SetProjectRoot bool
+	// PruneRoot reports whether dir is a tree that must be skipped entirely —
+	// no artifact matching, no project context, no descent. Used to exclude an
+	// ecosystem's own toolchain/SDK checkout (e.g. the Flutter SDK), whose
+	// internal build/.dart_tool dirs are managed by the tool itself and must
+	// never be offered for deletion. names holds dir's direct entries so cheap
+	// gate checks avoid a stat on every directory.
+	PruneRoot func(dir string, names map[string]bool) bool
 }
 
 // walkEcosystemTable is the canonical, ordered table of walk-based
@@ -186,6 +193,15 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		names := make(map[string]bool, len(entries))
 		for _, e := range entries {
 			names[e.Name()] = true
+		}
+
+		// Prune check: an ecosystem may claim this whole subtree as its own
+		// toolchain/SDK checkout and exclude it — skip before establishing any
+		// context or descending, so nothing inside is ever a deletion target.
+		for i := range tables {
+			if p := tables[i].PruneRoot; p != nil && p(dir, names) {
+				return nil
+			}
 		}
 
 		// Marker check: establish the project contexts rooted at this directory.

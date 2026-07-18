@@ -129,6 +129,7 @@
 
 **Notes**:
 - `build/` and `.dart_tool/` are exactly the two directories `flutter clean` deletes; both regenerate on the next build.
+- **The Flutter SDK checkout is excluded.** The SDK is itself a git repo full of `pubspec.yaml` roots, and its `engine/src/build` / `engine/src/flutter/build` are committed GN build-system *source* trees — not build output. Matching `build` by name would offer real SDK source for deletion, and gitignore-aware protection misses it (committed-clean files are not `protected`). The scanner detects the SDK root by its invariant bootstrap layout (`bin/flutter` + `bin/internal/engine.version`, location-independent — never a hardcoded path) and skips the whole subtree.
 - The global pub package cache `~/.pub-cache` (macOS/Linux default) is home-rooted and handled by the Global Caches scanner as `caution` — it is shared by every Flutter project and re-downloads on the next `flutter pub get`. The `PUB_CACHE` env override is not tracked; only the default location is scanned.
 
 ## Xcode (macOS only)

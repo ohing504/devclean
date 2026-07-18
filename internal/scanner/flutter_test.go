@@ -57,6 +57,56 @@ func TestFlutterScanner_IgnoresWithoutPubspec(t *testing.T) {
 	}
 }
 
+func TestFlutterScanner_ExcludesSDKCheckout(t *testing.T) {
+	root := t.TempDir()
+
+	// A Flutter SDK checkout: bin/flutter + bin/internal/engine.version, with a
+	// root pubspec.yaml and internal build/.dart_tool that must NOT be reported.
+	sdk := filepath.Join(root, "flutter")
+	mustMkdir(t, filepath.Join(sdk, "bin", "internal"))
+	mustWriteFile(t, filepath.Join(sdk, "bin", "flutter"), []byte("#!/bin/sh"))
+	mustWriteFile(t, filepath.Join(sdk, "bin", "internal", "engine.version"), []byte("abc123"))
+	mustWriteFile(t, filepath.Join(sdk, "pubspec.yaml"), []byte("name: _flutter_packages"))
+	// engine source tree named "build" (committed source, not build output)
+	mustMkdir(t, filepath.Join(sdk, "engine", "src", "build"))
+	mustWriteFile(t, filepath.Join(sdk, "engine", "src", "build", "BUILD.gn"), make([]byte, 4096))
+	// internal package .dart_tool
+	mustMkdir(t, filepath.Join(sdk, "packages", "flutter_tools", ".dart_tool"))
+	mustWriteFile(t, filepath.Join(sdk, "packages", "flutter_tools", ".dart_tool", "x"), make([]byte, 4096))
+
+	// A real app project alongside the SDK, which MUST still be reported.
+	app := filepath.Join(root, "myapp")
+	mustMkdir(t, filepath.Join(app, "build"))
+	mustWriteFile(t, filepath.Join(app, "build", "out"), make([]byte, 4096))
+	mustWriteFile(t, filepath.Join(app, "pubspec.yaml"), []byte("name: myapp"))
+
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoFlutter)
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+
+	for _, r := range results {
+		if filepath.Base(filepath.Dir(r.Path)) == "src" || // engine/src/build
+			r.Path == filepath.Join(sdk, "engine", "src", "build") {
+			t.Errorf("SDK engine source tree must be excluded, got %s", r.Path)
+		}
+		if want := sdk; len(r.Path) >= len(want) && r.Path[:len(want)] == want {
+			t.Errorf("no artifact under the SDK checkout may be reported, got %s", r.Path)
+		}
+	}
+
+	// The app's build/ must survive the SDK exclusion.
+	var foundApp bool
+	for _, r := range results {
+		if r.Path == filepath.Join(app, "build") {
+			foundApp = true
+		}
+	}
+	if !foundApp {
+		t.Errorf("app build/ should still be reported alongside an excluded SDK; results=%v", results)
+	}
+}
+
 func TestFlutterScanner_NameAndEcosystem(t *testing.T) {
 	for _, s := range scanner.DefaultRegistry().All() {
 		if s.Name() != "flutter" {
