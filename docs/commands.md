@@ -142,6 +142,16 @@ They are scoped to the ecosystems you target: the `--eco` selection, or — when
 | Ecosystem | Command | What it does |
 |-----------|---------|--------------|
 | xcode | `xcrun simctl delete unavailable` | Removes simulator devices whose iOS/watchOS/tvOS runtime was uninstalled. |
+| global | `brew cleanup -s` | Removes stale Homebrew downloads and old versions. |
+| global | `npm cache clean --force` | Clears the npm package cache. |
+| global | `yarn cache clean` | Clears the Yarn cache. |
+| global | `pnpm store prune` | Removes unreferenced packages from the pnpm store. |
+| global | `pip cache purge` | Removes all wheels from the pip cache. |
+| global | `uv cache prune` | Removes outdated entries from the uv cache. |
+
+Commands for tools not installed on the machine are skipped (detected via PATH
+lookup). The `global` ecosystem runs every installed manager's prune together;
+individual tools can't be targeted separately since they share one ecosystem.
 
 `--dry-run` prints the commands without executing. `--vendor-cleanup` is
 additive — combine with `--safe`, `--status`, `--yes` as usual.

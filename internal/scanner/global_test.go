@@ -2,6 +2,7 @@ package scanner_test
 
 import (
 	"context"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -360,5 +361,54 @@ func TestGlobalScanner_SkipsMissingPaths(t *testing.T) {
 	}
 	if len(results) != 0 {
 		t.Fatalf("expected no results for empty home, got %d", len(results))
+	}
+}
+
+// TestGlobalScanner_VendorCleanups stubs PATH lookup so only brew and pip3 are
+// "installed", and verifies VendorCleanups offers exactly those — including the
+// pip3 fallback surfacing in the displayed command.
+func TestGlobalScanner_VendorCleanups(t *testing.T) {
+	s := scanner.NewGlobalScanner()
+	s.LookPath = func(file string) (string, error) {
+		if file == "brew" || file == "pip3" {
+			return "/usr/local/bin/" + file, nil
+		}
+		return "", exec.ErrNotFound
+	}
+
+	vc, ok := any(s).(scanner.VendorCleaner)
+	if !ok {
+		t.Fatal("GlobalScanner should implement VendorCleaner")
+	}
+	actions := vc.VendorCleanups()
+	if len(actions) != 2 {
+		t.Fatalf("expected 2 actions (brew, pip3), got %d", len(actions))
+	}
+
+	byID := make(map[string]scanner.VendorCleanup, len(actions))
+	for _, a := range actions {
+		if a.Kind != model.DeleteKindCommand {
+			t.Errorf("%s: Kind should be command, got %q", a.ID, a.Kind)
+		}
+		if a.Display == "" || a.Run == nil {
+			t.Errorf("%s: Display/Run must be populated", a.ID)
+		}
+		byID[a.ID] = a
+	}
+
+	if _, ok := byID["brew-cleanup"]; !ok {
+		t.Error("expected brew-cleanup action")
+	}
+	pip, ok := byID["pip-cache-purge"]
+	if !ok {
+		t.Fatal("expected pip-cache-purge action via pip3 fallback")
+	}
+	if pip.Display != "pip3 cache purge" {
+		t.Errorf("pip entry should use the pip3 fallback executable, got %q", pip.Display)
+	}
+	for _, absent := range []string{"npm-cache-clean", "yarn-cache-clean", "pnpm-store-prune", "uv-cache-prune"} {
+		if _, present := byID[absent]; present {
+			t.Errorf("uninstalled tool %s must be skipped", absent)
+		}
 	}
 }

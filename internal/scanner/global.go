@@ -129,12 +129,17 @@ type GlobalScanner struct {
 	// is currently running (default: pgrep -x). A field so tests can stub
 	// browser run state.
 	ProcessRunning func(processName string) bool
+	// LookPath resolves an executable in PATH (default: exec.LookPath). A field
+	// so VendorCleanups only offers commands for tools actually installed, and
+	// tests can stub which tools are present.
+	LookPath func(file string) (string, error)
 }
 
 func NewGlobalScanner() *GlobalScanner {
 	return &GlobalScanner{
 		TmpRoot:        "/private/var/folders",
 		ProcessRunning: processRunning,
+		LookPath:       exec.LookPath,
 	}
 }
 
@@ -147,6 +152,66 @@ func processRunning(name string) bool {
 
 func (s *GlobalScanner) Name() string               { return "global" }
 func (s *GlobalScanner) Ecosystem() model.Ecosystem { return model.EcoGlobal }
+
+// globalVendorCleanup describes a package manager's native cache-prune command.
+// tools lists candidate executables in preference order (first one found in PATH
+// is used), so pip3-only machines still match the pip entry.
+type globalVendorCleanup struct {
+	id    string
+	tools []string
+	args  []string
+	desc  string
+}
+
+// globalVendorCleanups are vendor-native prune commands for the global caches.
+// All are non-destructive — they only reclaim regenerable download/store caches,
+// so no destructive-action gate is needed here.
+var globalVendorCleanups = []globalVendorCleanup{
+	{"brew-cleanup", []string{"brew"}, []string{"cleanup", "-s"}, "Remove stale Homebrew downloads and old versions"},
+	{"npm-cache-clean", []string{"npm"}, []string{"cache", "clean", "--force"}, "Clear the npm package cache"},
+	{"yarn-cache-clean", []string{"yarn"}, []string{"cache", "clean"}, "Clear the Yarn cache"},
+	{"pnpm-store-prune", []string{"pnpm"}, []string{"store", "prune"}, "Remove unreferenced packages from the pnpm store"},
+	{"pip-cache-purge", []string{"pip", "pip3"}, []string{"cache", "purge"}, "Remove all wheels from the pip cache"},
+	{"uv-cache-prune", []string{"uv"}, []string{"cache", "prune"}, "Remove outdated entries from the uv cache"},
+}
+
+// VendorCleanups returns prune commands for the package managers installed on
+// this machine. Tools absent from PATH are skipped so the offer only lists what
+// can actually run. Since every global cache shares the one ecosystem, these run
+// together whenever the global ecosystem is in a --vendor-cleanup scope.
+func (s *GlobalScanner) VendorCleanups() []VendorCleanup {
+	lookPath := s.LookPath
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+
+	var out []VendorCleanup
+	for _, v := range globalVendorCleanups {
+		var tool string
+		for _, cand := range v.tools {
+			if _, err := lookPath(cand); err == nil {
+				tool = cand
+				break
+			}
+		}
+		if tool == "" {
+			continue // none of the candidate executables are installed
+		}
+		args := v.args
+		out = append(out, VendorCleanup{
+			ID:          v.id,
+			Description: v.desc,
+			DeleteMethod: model.DeleteMethod{
+				Kind:    model.DeleteKindCommand,
+				Display: tool + " " + strings.Join(args, " "),
+				Run: func(ctx context.Context) error {
+					return exec.CommandContext(ctx, tool, args...).Run()
+				},
+			},
+		})
+	}
+	return out
+}
 
 func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResult, error) {
 	home, err := os.UserHomeDir()
