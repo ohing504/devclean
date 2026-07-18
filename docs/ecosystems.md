@@ -14,7 +14,7 @@
 | `android` | Android | implemented |
 | `global` | Global Caches | implemented |
 | `llm` | LLM Model Stores | implemented |
-| `docker` | Docker | planned |
+| `docker` | Docker | implemented (scan only; prune deferred) |
 
 **Dedup attribution**: project ecosystems (node, rust, ruby, python, go, flutter, android) share a single-pass scan — a directory matching artifact rules of several active ecosystems is reported once, attributed to the first in scanner order (node → rust → ruby → python → go → flutter → android), so `--eco` subsets can shift attribution (a shared `coverage/` goes to node in a full scan, to ruby under `--eco ruby`).
 
@@ -183,6 +183,23 @@
 **Notes**:
 - `Archives` is `caution` because losing an archive means losing the ability to symbolicate crash reports for that release.
 - `CoreSimulator/Devices` is `caution` because it contains app installs, settings, and user data inside simulators currently in use.
+
+## Docker
+
+**Detection**: a fixed path — the default Docker Desktop VM disk image `~/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw`. A stat-based scanner (like Xcode / Global Caches), not a project-tree walk. A non-default Docker data root is not tracked; only the default location is scanned.
+
+**Scope rule**: reported only when the path is the same as, or a descendant of, the scan root (default `~`). Narrowing the root excludes it.
+
+**Artifacts**:
+
+| Path (relative to home) | Category | Safety | Description |
+|-------------------------|----------|--------|-------------|
+| `Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw` | runtime | protected | Docker Desktop VM disk image — holds every image, container and volume |
+
+**Notes**:
+- **Protected, never path-deleted.** The image is a single sparse file holding all Docker state; deleting it destroys every image, container and volume. It is reported as `protected` so the cleaner refuses to remove it (`Protected: true`).
+- **Sparse-aware sizing.** `Size` is the real on-disk usage (allocated blocks, `st_blocks×512`); `ApparentSize` is the image's declared size. A 460G-declared image reads as its real ~8G on disk — the shared sparse-aware `Measure` handles this with no Docker-specific code.
+- **Reclaiming space is deferred.** Space inside the image is reclaimed by Docker's own prune (`docker system prune`), which is destructive (removes images/containers/volumes/build cache). That vendor cleanup is gated behind a future `--include-destructive` flag and is **not** wired up yet — this scanner reports the image and its real footprint only.
 
 ## Global Caches
 

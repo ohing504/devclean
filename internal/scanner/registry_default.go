@@ -11,6 +11,7 @@ func DefaultRegistry() *Registry {
 	reg.Register(newWalkScanner(flutterWalkEcosystem))
 	reg.Register(newWalkScanner(androidWalkEcosystem))
 	reg.Register(NewXcodeScanner())
+	reg.Register(NewDockerScanner())
 	reg.Register(NewGlobalScanner())
 	reg.Register(NewLLMScanner())
 	return reg
