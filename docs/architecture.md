@@ -140,8 +140,9 @@ type VendorCleanup struct {
 
 Current implementations:
 - `xcode`: `xcrun simctl delete unavailable`
+- `global`: `brew cleanup`, `npm`/`yarn cache clean`, `pnpm store prune`, `pip`/`uv cache prune` — tools absent from PATH are skipped, so only installed managers are offered
 
-Natural future fits: Docker `system prune`, Homebrew `cleanup`, Gradle `--stop`, pip cache purge.
+Natural future fits: Docker `system prune`, Gradle `--stop`.
 
 ## Safety Model
 
