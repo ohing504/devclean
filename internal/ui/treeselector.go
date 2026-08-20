@@ -415,7 +415,7 @@ func (m treeModel) View() string {
 	var b strings.Builder
 	b.WriteString(m.renderHeader())
 	b.WriteString(m.viewport.View())
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 	b.WriteString(m.renderFooter())
 
 	return b.String()
