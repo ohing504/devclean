@@ -341,3 +341,77 @@ func TestSelectAllConsistentWithSelectBySafety(t *testing.T) {
 		}
 	}
 }
+
+// newManyArtifactsFixture builds a single unprotected project with n
+// artifacts — enough rows to overflow a small terminal window.
+func newManyArtifactsFixture(t *testing.T, n int) treeModel {
+	t.Helper()
+	results := make([]model.ScanResult, n)
+	for i := range results {
+		results[i] = model.ScanResult{
+			Path:        "/proj/many/artifact" + string(rune('a'+i%26)) + string(rune('0'+i/26)),
+			Ecosystem:   model.EcoNode,
+			Size:        int64(i + 1),
+			Safety:      model.SafetySafe,
+			ProjectRoot: "/proj/many",
+		}
+	}
+	items := BuildTreeItems(results)
+	if len(items) == 0 {
+		t.Fatal("BuildTreeItems returned no items")
+	}
+	return treeModel{items: items}
+}
+
+// TestCursorStaysWithinViewport reproduces the reported bug: with more rows
+// than fit on screen, moving the cursor down must scroll the viewport so the
+// highlighted row is always inside [YOffset, YOffset+Height). Before the
+// viewport-backed rendering was added, View() dumped every row unconditionally
+// and the cursor could scroll off the visible terminal region entirely.
+func TestCursorStaysWithinViewport(t *testing.T) {
+	m := newManyArtifactsFixture(t, 40)
+
+	// Small window: forces scrolling almost immediately.
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 17})
+	m = updated.(treeModel)
+	if !m.ready {
+		t.Fatal("model did not become ready after WindowSizeMsg")
+	}
+	if m.viewport.Height != 10 { // 17 - chromeLines(7)
+		t.Fatalf("viewport height = %d, want 10", m.viewport.Height)
+	}
+
+	assertCursorVisible := func(t *testing.T, m treeModel) {
+		t.Helper()
+		_, starts, counts := m.layoutItems()
+		top := starts[m.cursor]
+		bottom := top + counts[m.cursor] - 1
+		if top < m.viewport.YOffset || bottom > m.viewport.YOffset+m.viewport.Height-1 {
+			t.Fatalf("cursor row [%d,%d] outside visible window [%d,%d]",
+				top, bottom, m.viewport.YOffset, m.viewport.YOffset+m.viewport.Height-1)
+		}
+	}
+
+	sawScroll := false
+	for i := 0; i < 39; i++ {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = updated.(treeModel)
+		assertCursorVisible(t, m)
+		if m.viewport.YOffset > 0 {
+			sawScroll = true
+		}
+	}
+	if !sawScroll {
+		t.Fatal("viewport never scrolled despite cursor moving past the visible window")
+	}
+
+	// Scrolling back up must also keep the cursor visible, down to the top.
+	for i := 0; i < 39; i++ {
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		m = updated.(treeModel)
+		assertCursorVisible(t, m)
+	}
+	if m.viewport.YOffset != 0 {
+		t.Fatalf("YOffset = %d after scrolling back to the first row, want 0", m.viewport.YOffset)
+	}
+}

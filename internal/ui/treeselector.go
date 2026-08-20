@@ -5,10 +5,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ohing504/devclean/internal/model"
 	"github.com/ohing504/devclean/internal/pathutil"
 )
+
+// chromeLines is the number of lines occupied by the static header and
+// footer around the scrollable item viewport (see renderHeader/renderFooter).
+const chromeLines = 7
 
 // ItemType distinguishes rows in the tree selector.
 type ItemType int
@@ -42,9 +47,11 @@ type TreeSelectorResult struct {
 
 // treeModel is the bubbletea model for tree selection.
 type treeModel struct {
-	items   []TreeItem
-	cursor  int
-	aborted bool
+	items    []TreeItem
+	cursor   int
+	aborted  bool
+	viewport viewport.Model
+	ready    bool
 }
 
 // BuildTreeItems constructs the flat item list from grouped scan results.
@@ -152,7 +159,7 @@ func RunTreeSelector(results []model.ScanResult) TreeSelectorResult {
 		cursor: cursor,
 	}
 
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	finalModel, err := p.Run()
 	if err != nil {
 		return TreeSelectorResult{Aborted: true}
@@ -178,36 +185,89 @@ func (m treeModel) Init() tea.Cmd {
 }
 
 func (m treeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	key, ok := msg.(tea.KeyMsg)
-	if !ok {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		height := msg.Height - chromeLines
+		if height < 1 {
+			height = 1
+		}
+		if !m.ready {
+			m.viewport = viewport.New(msg.Width, height)
+			m.ready = true
+		} else {
+			m.viewport.Width = msg.Width
+			m.viewport.Height = height
+		}
+		m.syncViewport()
+		return m, nil
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "up", "k":
+			m.moveCursor(-1)
+		case "down", "j":
+			m.moveCursor(1)
+		case "left", "h":
+			m.jumpProject(-1)
+		case "right", "l":
+			m.jumpProject(1)
+		case " ":
+			m.toggleCurrent()
+		case "enter":
+			return m, tea.Quit
+		case "q", "esc", "ctrl+c":
+			m.aborted = true
+			return m, tea.Quit
+		case "a":
+			m.selectAll()
+		case "n":
+			m.selectNone()
+		case "s":
+			m.selectBySafety(model.SafetySafe)
+		case "d":
+			m.selectByActivity(model.StatusDormant)
+		}
+		m.syncViewport()
 		return m, nil
 	}
-	switch key.String() {
-	case "up", "k":
-		m.moveCursor(-1)
-	case "down", "j":
-		m.moveCursor(1)
-	case "left", "h":
-		m.jumpProject(-1)
-	case "right", "l":
-		m.jumpProject(1)
-	case " ":
-		m.toggleCurrent()
-	case "enter":
-		return m, tea.Quit
-	case "q", "esc", "ctrl+c":
-		m.aborted = true
-		return m, tea.Quit
-	case "a":
-		m.selectAll()
-	case "n":
-		m.selectNone()
-	case "s":
-		m.selectBySafety(model.SafetySafe)
-	case "d":
-		m.selectByActivity(model.StatusDormant)
-	}
 	return m, nil
+}
+
+// layoutItems renders every item to its display lines and records, per item,
+// the line index each one starts at and how many lines it occupies (eco
+// headers and projects span 2 lines, artifacts span 1).
+func (m treeModel) layoutItems() (lines []string, starts, counts []int) {
+	starts = make([]int, len(m.items))
+	counts = make([]int, len(m.items))
+	for i, item := range m.items {
+		starts[i] = len(lines)
+		parts := strings.Split(m.renderItem(i, item, i == m.cursor), "\n")
+		counts[i] = len(parts)
+		lines = append(lines, parts...)
+	}
+	return lines, starts, counts
+}
+
+// syncViewport rebuilds the viewport content from the current item list and
+// scrolls just enough to keep the cursor row visible.
+func (m *treeModel) syncViewport() {
+	if !m.ready {
+		return
+	}
+
+	lines, starts, counts := m.layoutItems()
+	m.viewport.SetContent(strings.Join(lines, "\n"))
+
+	if m.cursor < 0 || m.cursor >= len(starts) {
+		return
+	}
+	top := starts[m.cursor]
+	bottom := top + counts[m.cursor] - 1
+	if top < m.viewport.YOffset {
+		m.viewport.SetYOffset(top)
+	} else if bottom > m.viewport.YOffset+m.viewport.Height-1 {
+		m.viewport.SetYOffset(bottom - m.viewport.Height + 1)
+	}
 }
 
 func (m *treeModel) moveCursor(dir int) {
@@ -348,38 +408,51 @@ func (m *treeModel) selectByActivity(activity model.ActivityStatus) {
 }
 
 func (m treeModel) View() string {
-	var b strings.Builder
+	if !m.ready {
+		return "Initializing...\n"
+	}
 
+	var b strings.Builder
+	b.WriteString(m.renderHeader())
+	b.WriteString(m.viewport.View())
+	b.WriteString("\n")
+	b.WriteString(m.renderFooter())
+
+	return b.String()
+}
+
+// renderHeader renders the static key-binding help block above the
+// scrollable item viewport. Must stay at 3 lines to match chromeLines.
+func (m treeModel) renderHeader() string {
+	var b strings.Builder
 	fmt.Fprintf(&b, "%s move  %s jump project  %s toggle  %s confirm  %s cancel",
 		DimStyle.Render("[↑↓]"), DimStyle.Render("[←→]"), DimStyle.Render("[space]"), DimStyle.Render("[enter]"), DimStyle.Render("[esc]"))
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "%s all  %s none  %s safe only  %s dormant only",
 		DimStyle.Render("[a]"), DimStyle.Render("[n]"), DimStyle.Render("[s]"), DimStyle.Render("[d]"))
 	b.WriteString("\n\n")
+	return b.String()
+}
 
+// renderFooter renders the selection summary and legend below the
+// scrollable item viewport. Must stay at 4 lines to match chromeLines.
+func (m treeModel) renderFooter() string {
 	var selectedCount int
 	var selectedSize int64
-
-	for i, item := range m.items {
+	for _, item := range m.items {
 		if item.Type == ItemArtifact && item.Selected {
 			selectedCount++
 			selectedSize += item.Size
 		}
-
-		isCursor := i == m.cursor
-		line := m.renderItem(i, item, isCursor)
-		b.WriteString(line)
-		b.WriteString("\n")
 	}
 
-	b.WriteString("\n")
+	var b strings.Builder
 	b.WriteString(InfoStyle.Render(fmt.Sprintf("Selected: %d items (%s)", selectedCount, model.HumanSize(selectedSize))))
 	b.WriteString("\n\n")
 	fmt.Fprintf(&b, "%s  %s safe  %s caution  %s protected   %s Active  %s Recent  %s Stale  %s Dormant\n",
 		DimStyle.Render("Legend:"),
 		SafeStyle.Render("✔"), CautionStyle.Render("⚠"), ProtectedStyle.Render("✖"),
 		ActiveStyle.Render("●"), RecentStyle.Render("●"), StaleStyle.Render("●"), DormantStyle.Render("●"))
-
 	return b.String()
 }
 
