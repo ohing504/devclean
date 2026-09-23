@@ -4,6 +4,7 @@ package ui
 // file uses the internal package instead of the usual ui_test convention.
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -413,5 +414,23 @@ func TestCursorStaysWithinViewport(t *testing.T) {
 	}
 	if m.viewport.YOffset != 0 {
 		t.Fatalf("YOffset = %d after scrolling back to the first row, want 0", m.viewport.YOffset)
+	}
+}
+
+// TestFooterDedupsHardLinkedSelection: selecting two artifacts that share a
+// hard-linked inode (pnpm store ↔ node_modules) must count the shared blocks
+// once, matching the scan total, instead of summing each artifact's Size.
+func TestFooterDedupsHardLinkedSelection(t *testing.T) {
+	shared := model.InodeKey{Dev: 1, Ino: 42}
+	results := []model.ScanResult{
+		{Path: "/store", Ecosystem: model.EcoNode, Size: 3000, Safety: model.SafetySafe, ProjectRoot: "/store", Links: map[model.InodeKey]int64{shared: 1000}},
+		{Path: "/app/node_modules", Ecosystem: model.EcoNode, Size: 2000, Safety: model.SafetySafe, ProjectRoot: "/app", Links: map[model.InodeKey]int64{shared: 1000}},
+	}
+	m := treeModel{items: BuildTreeItems(results)}
+	m.selectAll()
+
+	want := "Selected: 2 items (" + model.HumanSize(4000) + ")"
+	if got := m.renderFooter(); !strings.Contains(got, want) {
+		t.Fatalf("footer = %q, want it to contain %q", got, want)
 	}
 }

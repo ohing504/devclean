@@ -93,10 +93,7 @@ func newCleanCmd() *cobra.Command {
 			}
 
 			// Show summary
-			var totalSize int64
-			for _, r := range toClean {
-				totalSize += r.Size
-			}
+			totalSize := model.DedupedTotal(toClean)
 
 			if dryRun {
 				fmt.Printf(
@@ -147,8 +144,7 @@ func newCleanCmd() *cobra.Command {
 			// Execute cleanup
 			c := cleaner.New(cleaner.Options{Force: force})
 
-			var cleaned int
-			var freedSize int64
+			var cleanedItems []model.ScanResult
 			var failed int
 
 			groups := model.GroupByProject(toClean)
@@ -166,16 +162,20 @@ func newCleanCmd() *cobra.Command {
 						failed++
 						fmt.Printf("    %s %s — %v\n", ui.ErrStyle.Render("✗"), relPath, err)
 					} else {
-						cleaned++
-						freedSize += r.Size
+						cleanedItems = append(cleanedItems, r)
 						fmt.Printf("    %s %s (%s)\n", ui.SafeStyle.Render("✔"), relPath, model.HumanSize(r.Size))
 					}
 				}
 			}
 
+			// Trashed items still occupy disk until the Trash is emptied.
+			verb := "moved to Trash"
+			if force {
+				verb = "freed"
+			}
 			fmt.Printf(
 				"\n%s\n",
-				ui.SafeStyle.Render(fmt.Sprintf("Cleaned %d items (%s freed)", cleaned, model.HumanSize(freedSize))),
+				ui.SafeStyle.Render(fmt.Sprintf("Cleaned %d items (%s %s)", len(cleanedItems), model.HumanSize(model.DedupedTotal(cleanedItems)), verb)),
 			)
 			if failed > 0 {
 				fmt.Printf("%s\n", ui.ErrStyle.Render(fmt.Sprintf("%d items failed", failed)))

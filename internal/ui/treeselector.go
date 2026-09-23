@@ -437,17 +437,15 @@ func (m treeModel) renderHeader() string {
 // renderFooter renders the selection summary and legend below the
 // scrollable item viewport. Must stay at 4 lines to match chromeLines.
 func (m treeModel) renderFooter() string {
-	var selectedCount int
-	var selectedSize int64
+	var selected []model.ScanResult
 	for _, item := range m.items {
-		if item.Type == ItemArtifact && item.Selected {
-			selectedCount++
-			selectedSize += item.Size
+		if item.Type == ItemArtifact && item.Selected && item.Result != nil {
+			selected = append(selected, *item.Result)
 		}
 	}
 
 	var b strings.Builder
-	b.WriteString(InfoStyle.Render(fmt.Sprintf("Selected: %d items (%s)", selectedCount, model.HumanSize(selectedSize))))
+	b.WriteString(InfoStyle.Render(fmt.Sprintf("Selected: %d items (%s)", len(selected), model.HumanSize(model.DedupedTotal(selected)))))
 	b.WriteString("\n\n")
 	fmt.Fprintf(&b, "%s  %s safe  %s caution  %s protected   %s Active  %s Recent  %s Stale  %s Dormant\n",
 		DimStyle.Render("Legend:"),
