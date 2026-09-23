@@ -36,6 +36,8 @@
 | `coverage` | build | safe | Test coverage reports |
 | `.svelte-kit` | build | safe | SvelteKit cache |
 
+**pnpm-installed `node_modules`**: when `node_modules/.modules.yaml` exists (pnpm writes it on install; `pnpm-lock.yaml` alone does not prove pnpm populated the folder), the result carries a note that its files are shared with the pnpm store. pnpm clones (macOS) or hard-links (Linux) store files into `node_modules`, so deleting it alone frees little; running `pnpm store prune` afterwards removes packages no project references.
+
 **Installed-package trees are excluded**: `node_modules`/`dist` inside a pnpm store or a macOS `.app` bundle are package content, not project output — see [Walk engine](architecture.md#walk-engine).
 
 **Monorepo support**: artifacts in sub-packages (apps/, packages/) are grouped under the git root project. Sub-packages are displayed with headers showing their path and total size.

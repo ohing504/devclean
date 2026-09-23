@@ -13,17 +13,29 @@ var nodeWalkEcosystem = walkEcosystem{
 	Eco:     model.EcoNode,
 	Markers: []string{"package.json"},
 	Rules: []artifactRule{
-		{RelPath: "node_modules", Category: model.CatDeps, Safety: model.SafetySafe},   // NPM dependencies
-		{RelPath: ".next", Category: model.CatBuild, Safety: model.SafetySafe},         // Next.js build cache
-		{RelPath: ".nuxt", Category: model.CatBuild, Safety: model.SafetySafe},         // Nuxt.js build cache
-		{RelPath: ".output", Category: model.CatBuild, Safety: model.SafetySafe},       // Nuxt 3 output
-		{RelPath: "dist", Category: model.CatBuild, Safety: model.SafetySafe},          // Build output
-		{RelPath: ".turbo", Category: model.CatCache, Safety: model.SafetySafe},        // Turborepo cache
-		{RelPath: ".parcel-cache", Category: model.CatCache, Safety: model.SafetySafe}, // Parcel cache
-		{RelPath: "coverage", Category: model.CatBuild, Safety: model.SafetySafe},      // Test coverage reports
-		{RelPath: ".svelte-kit", Category: model.CatBuild, Safety: model.SafetySafe},   // SvelteKit cache
+		{RelPath: "node_modules", Category: model.CatDeps, Safety: model.SafetySafe, Recommend: pnpmStoreNote}, // NPM dependencies
+		{RelPath: ".next", Category: model.CatBuild, Safety: model.SafetySafe},                                 // Next.js build cache
+		{RelPath: ".nuxt", Category: model.CatBuild, Safety: model.SafetySafe},                                 // Nuxt.js build cache
+		{RelPath: ".output", Category: model.CatBuild, Safety: model.SafetySafe},                               // Nuxt 3 output
+		{RelPath: "dist", Category: model.CatBuild, Safety: model.SafetySafe},                                  // Build output
+		{RelPath: ".turbo", Category: model.CatCache, Safety: model.SafetySafe},                                // Turborepo cache
+		{RelPath: ".parcel-cache", Category: model.CatCache, Safety: model.SafetySafe},                         // Parcel cache
+		{RelPath: "coverage", Category: model.CatBuild, Safety: model.SafetySafe},                              // Test coverage reports
+		{RelPath: ".svelte-kit", Category: model.CatBuild, Safety: model.SafetySafe},                           // SvelteKit cache
 	},
 	ExtraRules: nodeExtraRules,
+}
+
+// pnpmStoreNote flags a node_modules installed by pnpm, detected by the
+// .modules.yaml pnpm writes on install (a pnpm-lock.yaml alone does not prove
+// pnpm populated node_modules). Its files are clones (macOS) or hard links
+// (Linux) of the pnpm store, so deleting node_modules alone frees little until
+// the store drops the now-unreferenced packages.
+func pnpmStoreNote(dir string) string {
+	if hasFile(dir, ".modules.yaml") {
+		return "shares files with pnpm store — run `pnpm store prune` after deleting to free space"
+	}
+	return ""
 }
 
 // reactNativeRules are added to a Node project context when the project is

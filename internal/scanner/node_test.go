@@ -1,9 +1,13 @@
 package scanner_test
 
 import (
+	"context"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
+	"github.com/ohing504/devclean/internal/scanner"
 )
 
 func TestNodeWalk(t *testing.T) {
@@ -71,4 +75,33 @@ func TestNodeWalk(t *testing.T) {
 			want: []artifact{safe("rn/ios/Pods", model.CatDeps)},
 		},
 	})
+}
+
+// TestNodeModulesPnpmNote: a node_modules installed by pnpm (it writes
+// node_modules/.modules.yaml) shares its file blocks with the pnpm store, so
+// deleting it alone frees little. The result must say so; npm/yarn-installed
+// node_modules carry no note.
+func TestNodeModulesPnpmNote(t *testing.T) {
+	root := t.TempDir()
+	for _, p := range []string{"pnpm-app/package.json", "pnpm-app/node_modules/.modules.yaml", "npm-app/package.json", "npm-app/node_modules/lodash/index.js"} {
+		full := filepath.Join(root, filepath.FromSlash(p))
+		mustMkdir(t, filepath.Dir(full))
+		mustWriteFile(t, full, nil)
+	}
+
+	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
+	if err != nil {
+		t.Fatalf("WalkScan: %v", err)
+	}
+	got := make(map[string]string)
+	for _, r := range results {
+		rel, _ := filepath.Rel(root, r.Path)
+		got[filepath.ToSlash(rel)] = r.Recommendation
+	}
+	if !strings.Contains(got["pnpm-app/node_modules"], "pnpm store prune") {
+		t.Errorf("pnpm node_modules recommendation = %q, want a pnpm store prune note", got["pnpm-app/node_modules"])
+	}
+	if rec, ok := got["npm-app/node_modules"]; !ok || rec != "" {
+		t.Errorf("npm node_modules recommendation = %q (found=%v), want empty", rec, ok)
+	}
 }
