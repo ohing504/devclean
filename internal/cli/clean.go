@@ -113,6 +113,9 @@ func newCleanCmd() *cobra.Command {
 							}
 						}
 						fmt.Printf("    %s %s (%s)\n", ui.DimStyle.Render("•"), relPath, ui.DimStyle.Render(model.HumanSize(r.Size)))
+						if r.Delete != nil {
+							fmt.Printf("      %s\n", ui.DimStyle.Render("runs: "+r.Delete.Display))
+						}
 					}
 				}
 				if vendorCleanup {
@@ -121,24 +124,53 @@ func newCleanCmd() *cobra.Command {
 				return nil
 			}
 
-			// Choose delete method if not --yes
+			// Choose delete method if not --yes. Items with a DeleteMethod run
+			// their tool's command whatever is chosen here; Trash vs permanent
+			// applies only to path items, so it is asked only when there are any.
 			if !yes {
-				var deleteMethod string
-				err := huh.NewSelect[string]().
-					Title(fmt.Sprintf("Delete %d items (%s)?", len(toClean), model.HumanSize(totalSize))).
-					Options(
-						huh.NewOption("Move to Trash (recoverable)", "trash"),
-						huh.NewOption("Permanently delete", "force"),
-						huh.NewOption("Cancel", "cancel"),
-					).
-					Value(&deleteMethod).
-					Run()
-				if err != nil || deleteMethod == "cancel" {
-					fmt.Println("Cancelled.")
-					return nil
+				var commandItems int
+				for _, r := range toClean {
+					if r.Delete != nil {
+						commandItems++
+					}
 				}
-				if deleteMethod == "force" {
-					force = true
+				title := fmt.Sprintf("Delete %d items (%s)?", len(toClean), model.HumanSize(totalSize))
+				if commandItems == len(toClean) {
+					confirmed := false
+					err := huh.NewConfirm().
+						Title(title).
+						Description("Each item is reclaimed by its tool's own cleanup command (shown with --dry-run).").
+						Affirmative("Run").
+						Negative("Cancel").
+						Value(&confirmed).
+						Run()
+					if err != nil || !confirmed {
+						fmt.Println("Cancelled.")
+						return nil
+					}
+				} else {
+					sel := huh.NewSelect[string]().
+						Title(title).
+						Options(
+							huh.NewOption("Move to Trash (recoverable)", "trash"),
+							huh.NewOption("Permanently delete", "force"),
+							huh.NewOption("Cancel", "cancel"),
+						)
+					if commandItems > 0 {
+						sel = sel.Description(fmt.Sprintf(
+							"%d item(s) run their tool's own cleanup command regardless of this choice; it applies to the other %d.",
+							commandItems, len(toClean)-commandItems,
+						))
+					}
+					var deleteMethod string
+					err := sel.Value(&deleteMethod).Run()
+					if err != nil || deleteMethod == "cancel" {
+						fmt.Println("Cancelled.")
+						return nil
+					}
+					if deleteMethod == "force" {
+						force = true
+					}
 				}
 			}
 

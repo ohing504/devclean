@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -186,6 +187,9 @@ func TestIntegration_GlobalScannerPipeline(t *testing.T) {
 	s := &scanner.GlobalScanner{
 		TmpRoot:        t.TempDir(), // isolate from real browser code-sign clones
 		ProcessRunning: func(string) bool { return false },
+		// No tool installed: the cache keeps its declared safety and no
+		// external command (brew) runs.
+		LookPath: func(string) (string, error) { return "", exec.ErrNotFound },
 	}
 	results, err := s.Scan(context.Background(), home)
 	if err != nil {

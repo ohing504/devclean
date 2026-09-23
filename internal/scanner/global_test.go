@@ -2,9 +2,12 @@ package scanner_test
 
 import (
 	"context"
+	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,8 +29,7 @@ func TestGlobalScanner_DetectsCaches(t *testing.T) {
 	mustMkdir(t, pnpm)
 	mustWriteFile(t, filepath.Join(pnpm, "blob"), make([]byte, 4096))
 
-	s := scanner.NewGlobalScanner()
-	s.TmpRoot = t.TempDir() // isolate from real code-sign clones on this machine
+	s := newIsolatedGlobalScanner(t)
 	results, err := s.Scan(context.Background(), home)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
@@ -114,8 +116,7 @@ func TestGlobalScanner_DetectsExpandedCatalog(t *testing.T) {
 	// Settings live next to the caches and must never be picked up.
 	mustWriteFile(t, filepath.Join(cursorRoot, "settings.json"), []byte("{}"))
 
-	s := scanner.NewGlobalScanner()
-	s.TmpRoot = t.TempDir() // isolate from real code-sign clones on this machine
+	s := newIsolatedGlobalScanner(t)
 	results, err := s.Scan(context.Background(), home)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
@@ -184,7 +185,7 @@ func TestGlobalScanner_ScopedRootExcludesHomeCaches(t *testing.T) {
 	projects := filepath.Join(home, "projects")
 	mustMkdir(t, projects)
 
-	s := scanner.NewGlobalScanner()
+	s := newIsolatedGlobalScanner(t)
 	results, err := s.Scan(context.Background(), projects)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
@@ -216,7 +217,7 @@ func TestGlobalScanner_DetectsBrowserCodeSignClones(t *testing.T) {
 	mustMkdir(t, filepath.Join(tmpRoot, "aa", "bbb", "T", "com.google.Chrome.code_sign_clone", "copy1"))
 	mustMkdir(t, filepath.Join(tmpRoot, "aa", "bbb", "X", "com.google.Chrome.savedState"))
 
-	s := scanner.NewGlobalScanner()
+	s := newIsolatedGlobalScanner(t)
 	s.TmpRoot = tmpRoot
 	// Browser not running → the clones are safe zombies.
 	s.ProcessRunning = func(string) bool { return false }
@@ -270,7 +271,7 @@ func TestGlobalScanner_CodeSignClonesCautionWhenBrowserRunning(t *testing.T) {
 	mustMkdir(t, filepath.Join(unknown, "copy1"))
 
 	var checked []string
-	s := scanner.NewGlobalScanner()
+	s := newIsolatedGlobalScanner(t)
 	s.TmpRoot = tmpRoot
 	s.ProcessRunning = func(name string) bool {
 		checked = append(checked, name)
@@ -336,7 +337,7 @@ func TestGlobalScanner_CodeSignClonesExcludedFromScopedScan(t *testing.T) {
 	projects := filepath.Join(home, "projects")
 	mustMkdir(t, projects)
 
-	s := scanner.NewGlobalScanner()
+	s := newIsolatedGlobalScanner(t)
 	s.TmpRoot = tmpRoot
 	results, err := s.Scan(context.Background(), projects)
 	if err != nil {
@@ -353,8 +354,7 @@ func TestGlobalScanner_SkipsMissingPaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	s := scanner.NewGlobalScanner()
-	s.TmpRoot = t.TempDir() // isolate from real code-sign clones on this machine
+	s := newIsolatedGlobalScanner(t)
 	results, err := s.Scan(context.Background(), home)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
@@ -365,50 +365,294 @@ func TestGlobalScanner_SkipsMissingPaths(t *testing.T) {
 }
 
 // TestGlobalScanner_VendorCleanups stubs PATH lookup so only brew and pip3 are
-// "installed", and verifies VendorCleanups offers exactly those — including the
-// pip3 fallback surfacing in the displayed command.
+// "installed", and verifies VendorCleanups offers exactly the pip entry through
+// its pip3 fallback. brew is never a vendor cleanup: its cleanup is a scan item.
 func TestGlobalScanner_VendorCleanups(t *testing.T) {
-	s := scanner.NewGlobalScanner()
-	s.LookPath = func(file string) (string, error) {
-		if file == "brew" || file == "pip3" {
-			return "/usr/local/bin/" + file, nil
-		}
-		return "", exec.ErrNotFound
-	}
+	s := newIsolatedGlobalScanner(t, "brew", "pip3")
 
 	vc, ok := any(s).(scanner.VendorCleaner)
 	if !ok {
 		t.Fatal("GlobalScanner should implement VendorCleaner")
 	}
 	actions := vc.VendorCleanups()
-	if len(actions) != 2 {
-		t.Fatalf("expected 2 actions (brew, pip3), got %d", len(actions))
+	if len(actions) != 1 {
+		t.Fatalf("expected only the pip action, got %+v", actions)
 	}
-
-	byID := make(map[string]scanner.VendorCleanup, len(actions))
-	for _, a := range actions {
-		if a.Kind != model.DeleteKindCommand {
-			t.Errorf("%s: Kind should be command, got %q", a.ID, a.Kind)
-		}
-		if a.Display == "" || a.Run == nil {
-			t.Errorf("%s: Display/Run must be populated", a.ID)
-		}
-		byID[a.ID] = a
-	}
-
-	if _, ok := byID["brew-cleanup"]; !ok {
-		t.Error("expected brew-cleanup action")
-	}
-	pip, ok := byID["pip-cache-purge"]
-	if !ok {
-		t.Fatal("expected pip-cache-purge action via pip3 fallback")
+	pip := actions[0]
+	if pip.ID != "pip-cache-purge" || pip.Kind != model.DeleteKindCommand || pip.Run == nil {
+		t.Errorf("expected a runnable pip-cache-purge command, got %+v", pip)
 	}
 	if pip.Display != "pip3 cache purge" {
 		t.Errorf("pip entry should use the pip3 fallback executable, got %q", pip.Display)
 	}
-	for _, absent := range []string{"npm-cache-clean", "yarn-cache-clean", "pnpm-store-prune", "uv-cache-prune"} {
-		if _, present := byID[absent]; present {
-			t.Errorf("uninstalled tool %s must be skipped", absent)
+}
+
+// TestGlobalScanner_InstalledToolSafety: a cache whose owning tool is in PATH
+// is in use — deleting it only makes the tool download the same content again
+// — so it is raised to caution and --yes skips it. Without the tool the entry
+// keeps its declared safety with a note that no installed tool uses it. Entries
+// without an owning executable, and entries already declared caution, are
+// unaffected by what is installed.
+func TestGlobalScanner_InstalledToolSafety(t *testing.T) {
+	cases := []struct {
+		name      string
+		relPath   string
+		installed []string
+		safety    model.SafetyLevel
+		recHas    string
+	}{
+		{"owning tool installed", ".npm", []string{"npm"}, model.SafetyCaution, "npm is installed"},
+		{"owning tool absent", ".npm", nil, model.SafetySafe, "npm not installed"},
+		{"fallback executable installed", ".cache/pip", []string{"pip3"}, model.SafetyCaution, "pip3 is installed"},
+		{"all candidates absent", ".cache/pip", nil, model.SafetySafe, "pip/pip3 not installed"},
+		{"no owning executable", "Library/Caches/electron", []string{"npm", "node"}, model.SafetySafe, ""},
+		{"declared caution keeps its note", "Library/pnpm/store", []string{"pnpm"}, model.SafetyCaution, "hard-linked"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			dir := filepath.Join(home, filepath.FromSlash(tc.relPath))
+			mustMkdir(t, dir)
+			mustWriteFile(t, filepath.Join(dir, "blob"), make([]byte, 1024))
+
+			results, err := newIsolatedGlobalScanner(t, tc.installed...).Scan(context.Background(), home)
+			if err != nil {
+				t.Fatalf("Scan error: %v", err)
+			}
+			if len(results) != 1 || results[0].Path != dir {
+				t.Fatalf("expected exactly %s, got %+v", dir, results)
+			}
+			r := results[0]
+			if r.Safety != tc.safety {
+				t.Errorf("safety = %s, want %s", r.Safety, tc.safety)
+			}
+			if !strings.Contains(r.Recommendation, tc.recHas) {
+				t.Errorf("recommendation = %q, want it to contain %q", r.Recommendation, tc.recHas)
+			}
+		})
+	}
+}
+
+// fakeBrew stubs RunCommand as a brew executable: `brew --cache` prints
+// cacheDir, `brew cleanup ... --dry-run` prints dryRun (or fails with
+// dryRunErr), and every call is recorded so a test can check what a delete
+// runs.
+type fakeBrew struct {
+	cacheDir  string
+	dryRun    string
+	dryRunErr error
+	calls     [][]string // env entries, then "brew", then args
+}
+
+func (f *fakeBrew) run(_ context.Context, env []string, name string, args ...string) ([]byte, error) {
+	f.calls = append(f.calls, append(append(append([]string{}, env...), filepath.Base(name)), args...))
+	switch {
+	case slices.Equal(args, []string{"--cache"}):
+		return []byte(f.cacheDir + "\n"), nil
+	case slices.Contains(args, "--dry-run"):
+		return []byte(f.dryRun), f.dryRunErr
+	}
+	return nil, nil
+}
+
+// brewDryRun is `brew cleanup -s --dry-run` output in the shape Homebrew prints.
+func brewDryRun(summarySize string) string {
+	out := "Would remove: /opt/homebrew/Cellar/node/24.1.0 (2,345 files, 91.2MB)\n" +
+		"Would remove: /Users/me/Library/Caches/Homebrew/downloads/abc--node--24.1.0.bottle.tar.gz (23.1MB)\n"
+	if summarySize != "" {
+		out += "==> This operation would free approximately " + summarySize + " of disk space.\n"
+	}
+	return out
+}
+
+// TestGlobalScanner_HomebrewCleanupItem: with brew installed, the Homebrew
+// cache is reported as one item sized by brew's dry-run estimate (which covers
+// old versions outside the cache directory) and deleted by running brew
+// cleanup with autoremove disabled — never by removing the directory.
+func TestGlobalScanner_HomebrewCleanupItem(t *testing.T) {
+	sizes := []struct {
+		printed string
+		bytes   int64
+	}{
+		{"4.1GB", 4_100_000_000},
+		{"34.6MB", 34_600_000},
+		{"1KB", 1_000},
+		{"512B", 512},
+	}
+	for _, sz := range sizes {
+		t.Run(sz.printed, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			cache := filepath.Join(home, "Library", "Caches", "Homebrew")
+			mustMkdir(t, cache)
+			mustWriteFile(t, filepath.Join(cache, "blob"), make([]byte, 4096))
+
+			brew := &fakeBrew{cacheDir: cache, dryRun: brewDryRun(sz.printed)}
+			s := newIsolatedGlobalScanner(t, "brew")
+			s.RunCommand = brew.run
+			results, err := s.Scan(context.Background(), home)
+			if err != nil {
+				t.Fatalf("Scan error: %v", err)
+			}
+			if len(results) != 1 {
+				t.Fatalf("expected only the Homebrew cleanup item, got %+v", results)
+			}
+			r := results[0]
+			if r.Path != cache || r.Size != sz.bytes || r.Safety != model.SafetySafe {
+				t.Errorf("got path=%s size=%d safety=%s, want path=%s size=%d safety=safe", r.Path, r.Size, r.Safety, cache, sz.bytes)
+			}
+			if r.Delete == nil || r.Delete.Kind != model.DeleteKindCommand {
+				t.Fatalf("expected a command delete method, got %+v", r.Delete)
+			}
+
+			brew.calls = nil
+			if err := r.Delete.Run(context.Background()); err != nil {
+				t.Fatalf("Delete.Run: %v", err)
+			}
+			if len(brew.calls) != 1 {
+				t.Fatalf("expected one brew command, got %v", brew.calls)
+			}
+			call := brew.calls[0]
+			if !slices.Contains(call, "HOMEBREW_NO_AUTOREMOVE=1") || !strings.HasSuffix(strings.Join(call, " "), "brew cleanup") {
+				t.Errorf("delete ran %v, want HOMEBREW_NO_AUTOREMOVE=1 ... brew cleanup", call)
+			}
+		})
+	}
+}
+
+// TestGlobalScanner_HomebrewWithoutCleanupItem covers the cases where brew
+// yields no cleanup item. The cache directory is then reported as a measured
+// path item: caution while brew is installed (brew uses it), carrying the
+// error when the dry-run failed, and a plain safe catalog entry without brew.
+func TestGlobalScanner_HomebrewWithoutCleanupItem(t *testing.T) {
+	cases := []struct {
+		name      string
+		installed []string
+		brew      *fakeBrew
+		safety    model.SafetyLevel
+		recHas    string
+	}{
+		{"nothing to free", []string{"brew"}, &fakeBrew{dryRun: brewDryRun("")}, model.SafetyCaution, "brew is installed"},
+		{"dry-run fails", []string{"brew"}, &fakeBrew{dryRunErr: errors.New("exit status 1")}, model.SafetyCaution, "exit status 1"},
+		{"brew absent", nil, nil, model.SafetySafe, "brew not installed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			cache := filepath.Join(home, "Library", "Caches", "Homebrew")
+			mustMkdir(t, cache)
+			mustWriteFile(t, filepath.Join(cache, "blob"), make([]byte, 4096))
+
+			s := newIsolatedGlobalScanner(t, tc.installed...)
+			if tc.brew != nil {
+				tc.brew.cacheDir = cache
+				s.RunCommand = tc.brew.run
+			}
+			results, err := s.Scan(context.Background(), home)
+			if err != nil {
+				t.Fatalf("Scan error: %v", err)
+			}
+			if len(results) != 1 || results[0].Path != cache {
+				t.Fatalf("expected only %s, got %+v", cache, results)
+			}
+			r := results[0]
+			if r.Delete != nil || r.Size == 0 || r.Safety != tc.safety {
+				t.Errorf("got delete=%+v size=%d safety=%s, want a measured path item with safety=%s", r.Delete, r.Size, r.Safety, tc.safety)
+			}
+			if !strings.Contains(r.Recommendation, tc.recHas) {
+				t.Errorf("recommendation = %q, want it to contain %q", r.Recommendation, tc.recHas)
+			}
+		})
+	}
+}
+
+// TestGlobalScanner_HomebrewCacheElsewhere: when HOMEBREW_CACHE points outside
+// home, the cleanup item is reported at brew's cache path and the directory in
+// home is still reported on its own, not hidden behind the item.
+func TestGlobalScanner_HomebrewCacheElsewhere(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	homeCache := filepath.Join(home, "Library", "Caches", "Homebrew")
+	mustMkdir(t, homeCache)
+	mustWriteFile(t, filepath.Join(homeCache, "blob"), make([]byte, 4096))
+	external := t.TempDir()
+
+	s := newIsolatedGlobalScanner(t, "brew")
+	s.RunCommand = (&fakeBrew{cacheDir: external, dryRun: brewDryRun("1.2GB")}).run
+	results, err := s.Scan(context.Background(), home)
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+	byPath := make(map[string]model.ScanResult, len(results))
+	for _, r := range results {
+		byPath[r.Path] = r
+	}
+	if r, ok := byPath[external]; !ok || r.Delete == nil {
+		t.Errorf("expected the cleanup item at %s, got %+v", external, results)
+	}
+	if r, ok := byPath[homeCache]; !ok || r.Delete != nil || r.Safety != model.SafetyCaution {
+		t.Errorf("expected %s as a caution path item, got %+v", homeCache, results)
+	}
+}
+
+// TestGlobalScanner_FindsToolOutsidePATH: a scan started without the user's
+// login PATH (launchd, cron, an agent's non-login shell) must still see tools
+// installed to user-level bin directories, or their in-use caches would be
+// reported as safe.
+func TestGlobalScanner_FindsToolOutsidePATH(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "")
+	mustMkdir(t, filepath.Join(home, ".bun", "bin"))
+	mustWriteFile(t, filepath.Join(home, ".bun", "bin", "bun"), []byte("#!/bin/sh\n"))
+	if err := os.Chmod(filepath.Join(home, ".bun", "bin", "bun"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(home, ".bun", "install", "cache")
+	mustMkdir(t, cache)
+	mustWriteFile(t, filepath.Join(cache, "blob"), make([]byte, 1024))
+
+	s := scanner.NewGlobalScanner()
+	s.TmpRoot = t.TempDir()
+	// brew in the Homebrew prefix is found too on a machine that has it;
+	// fail its commands so the result does not depend on the host.
+	s.RunCommand = func(context.Context, []string, string, ...string) ([]byte, error) {
+		return nil, errors.New("not run in tests")
+	}
+	results, err := s.Scan(context.Background(), home)
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+	for _, r := range results {
+		if r.Path == cache {
+			if r.Safety != model.SafetyCaution || !strings.Contains(r.Recommendation, "bun is installed") {
+				t.Errorf("got safety=%s rec=%q, want caution with a bun note", r.Safety, r.Recommendation)
+			}
+			return
 		}
 	}
+	t.Fatalf("expected %s to be detected, got %+v", cache, results)
+}
+
+// newIsolatedGlobalScanner returns a GlobalScanner that sees only the given
+// tools as installed, finds no code-sign clones or running browsers, and fails
+// the test on any external command, so results never depend on the host.
+func newIsolatedGlobalScanner(t *testing.T, installed ...string) *scanner.GlobalScanner {
+	t.Helper()
+	s := scanner.NewGlobalScanner()
+	s.TmpRoot = t.TempDir()
+	s.ProcessRunning = func(string) bool { return false }
+	s.LookPath = func(file string) (string, error) {
+		if slices.Contains(installed, file) {
+			return "/usr/local/bin/" + file, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	s.RunCommand = func(_ context.Context, _ []string, name string, args ...string) ([]byte, error) {
+		t.Errorf("unexpected command: %s %s", name, strings.Join(args, " "))
+		return nil, errors.New("unexpected command")
+	}
+	return s
 }
