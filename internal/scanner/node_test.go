@@ -78,15 +78,29 @@ func TestNodeWalk(t *testing.T) {
 }
 
 // TestNodeModulesPnpmNote: a node_modules installed by pnpm (it writes
-// node_modules/.modules.yaml) shares its file blocks with the pnpm store, so
-// deleting it alone frees little. The result must say so; npm/yarn-installed
-// node_modules carry no note.
+// node_modules/.modules.yaml with the storeDir it imported from) shares file
+// blocks with the pnpm store only when the store is on the same volume — across
+// volumes pnpm can neither clone nor hard-link, so it copies. The note appears
+// only in the shared case; npm/yarn-installed node_modules carry no note.
 func TestNodeModulesPnpmNote(t *testing.T) {
 	root := t.TempDir()
-	for _, p := range []string{"pnpm-app/package.json", "pnpm-app/node_modules/.modules.yaml", "npm-app/package.json", "npm-app/node_modules/lodash/index.js"} {
+	store := filepath.Join(root, "store", "v10")
+	mustMkdir(t, store)
+	files := map[string]string{
+		"same-volume/package.json":               "",
+		"same-volume/node_modules/.modules.yaml": "layoutVersion: 5\nstoreDir: " + store + "\n",
+		"other-volume/package.json":              "",
+		// /dev is devfs (macOS) or devtmpfs (Linux): never the temp dir's volume.
+		"other-volume/node_modules/.modules.yaml": "storeDir: /dev\n",
+		"store-gone/package.json":                 "",
+		"store-gone/node_modules/.modules.yaml":   "storeDir: " + filepath.Join(root, "missing") + "\n",
+		"npm-app/package.json":                    "",
+		"npm-app/node_modules/lodash/index.js":    "",
+	}
+	for p, content := range files {
 		full := filepath.Join(root, filepath.FromSlash(p))
 		mustMkdir(t, filepath.Dir(full))
-		mustWriteFile(t, full, nil)
+		mustWriteFile(t, full, []byte(content))
 	}
 
 	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
@@ -98,10 +112,12 @@ func TestNodeModulesPnpmNote(t *testing.T) {
 		rel, _ := filepath.Rel(root, r.Path)
 		got[filepath.ToSlash(rel)] = r.Recommendation
 	}
-	if !strings.Contains(got["pnpm-app/node_modules"], "pnpm store prune") {
-		t.Errorf("pnpm node_modules recommendation = %q, want a pnpm store prune note", got["pnpm-app/node_modules"])
+	if !strings.Contains(got["same-volume/node_modules"], "pnpm store prune") {
+		t.Errorf("same-volume recommendation = %q, want a pnpm store prune note", got["same-volume/node_modules"])
 	}
-	if rec, ok := got["npm-app/node_modules"]; !ok || rec != "" {
-		t.Errorf("npm node_modules recommendation = %q (found=%v), want empty", rec, ok)
+	for _, p := range []string{"other-volume/node_modules", "store-gone/node_modules", "npm-app/node_modules"} {
+		if rec, ok := got[p]; !ok || rec != "" {
+			t.Errorf("%s recommendation = %q (found=%v), want empty", p, rec, ok)
+		}
 	}
 }
