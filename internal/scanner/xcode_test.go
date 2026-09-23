@@ -14,16 +14,6 @@ import (
 	"github.com/ohing504/devclean/internal/scanner"
 )
 
-func TestXcodeScanner_NameAndEcosystem(t *testing.T) {
-	s := scanner.NewXcodeScanner()
-	if s.Name() != "xcode" {
-		t.Errorf("expected name=xcode, got %s", s.Name())
-	}
-	if s.Ecosystem() != model.EcoXcode {
-		t.Errorf("expected ecosystem=xcode, got %s", s.Ecosystem())
-	}
-}
-
 func TestXcodeScanner_FindsAllArtifacts(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

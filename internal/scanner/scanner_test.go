@@ -2,6 +2,7 @@ package scanner_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -120,6 +121,38 @@ func (f *fakeScanner) Scan(_ context.Context, _ string) ([]model.ScanResult, err
 	return f.results, nil
 }
 
+// TestDefaultRegistry pins every registered scanner's name (the --eco value)
+// and ecosystem, in registration order — the walk table mirrors that order and
+// it decides attribution when rules of several ecosystems match.
+func TestDefaultRegistry(t *testing.T) {
+	want := []struct {
+		name string
+		eco  model.Ecosystem
+	}{
+		{"node", model.EcoNode},
+		{"rust", model.EcoRust},
+		{"ruby", model.EcoRuby},
+		{"python", model.EcoPython},
+		{"go", model.EcoGo},
+		{"flutter", model.EcoFlutter},
+		{"android", model.EcoAndroid},
+		{"xcode", model.EcoXcode},
+		{"docker", model.EcoDocker},
+		{"global", model.EcoGlobal},
+		{"llm", model.EcoLLM},
+	}
+
+	got := scanner.DefaultRegistry().All()
+	if len(got) != len(want) {
+		t.Fatalf("registered %d scanners, want %d", len(got), len(want))
+	}
+	for i, s := range got {
+		if s.Name() != want[i].name || s.Ecosystem() != want[i].eco {
+			t.Errorf("scanner %d = %s/%s, want %s/%s", i, s.Name(), s.Ecosystem(), want[i].name, want[i].eco)
+		}
+	}
+}
+
 func TestRegistryScanAll(t *testing.T) {
 	reg := scanner.NewRegistry()
 	reg.Register(&fakeScanner{
@@ -207,31 +240,6 @@ func TestRegistryEmpty(t *testing.T) {
 	}
 }
 
-func TestDirSize(t *testing.T) {
-	dir := t.TempDir()
-
-	os.WriteFile(filepath.Join(dir, "a.txt"), make([]byte, 1024), 0o644)
-	os.WriteFile(filepath.Join(dir, "b.txt"), make([]byte, 2048), 0o644)
-
-	subdir := filepath.Join(dir, "sub")
-	os.MkdirAll(subdir, 0o755)
-	os.WriteFile(filepath.Join(subdir, "c.txt"), make([]byte, 512), 0o644)
-
-	size := scanner.DirSize(dir)
-	// du reports disk usage (block-aligned), so size >= logical size
-	logicalSize := int64(1024 + 2048 + 512)
-	if size < logicalSize {
-		t.Errorf("DirSize = %d, want >= %d", size, logicalSize)
-	}
-}
-
-func TestDirSizeNonExistent(t *testing.T) {
-	size := scanner.DirSize("/nonexistent/path")
-	if size != 0 {
-		t.Errorf("DirSize of nonexistent = %d, want 0", size)
-	}
-}
-
 func TestModTime(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "test.txt")
@@ -250,13 +258,15 @@ func TestModTimeNonExistent(t *testing.T) {
 	}
 }
 
-func TestRegistryScanAll_ContextCancelled(t *testing.T) {
+// TestRegistryScanWith_ContextCanceled pins that a cancelled scan surfaces
+// ctx's error to the caller instead of returning partial results as complete.
+func TestRegistryScanWith_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	reg := scanner.NewRegistry()
-	reg.Register(&fakeScanner{name: "node", ecosystem: model.EcoNode, results: []model.ScanResult{{Path: "/a"}}})
-	results, err := reg.ScanAll(ctx, "/")
-	// cancelled context should either return error or empty results — both are acceptable
-	_ = results
-	_ = err
+
+	reg := scanner.DefaultRegistry()
+	_, err := reg.ScanWith(ctx, t.TempDir(), reg.ForEcosystems([]model.Ecosystem{model.EcoNode}))
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("ScanWith(cancelled) error = %v, want context.Canceled", err)
+	}
 }

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
-	"github.com/ohing504/devclean/internal/scanner"
 )
 
 func TestNodeWalk(t *testing.T) {
@@ -106,17 +105,4 @@ func TestNodeWalk(t *testing.T) {
 			want: []artifact{safe("app/node_modules", model.CatDeps)},
 		},
 	})
-}
-
-func TestNodeScanner_NameAndEcosystem(t *testing.T) {
-	for _, s := range scanner.DefaultRegistry().All() {
-		if s.Name() != "node" {
-			continue
-		}
-		if s.Ecosystem() != model.EcoNode {
-			t.Errorf("expected ecosystem=node, got %s", s.Ecosystem())
-		}
-		return
-	}
-	t.Error(`expected a registered scanner named "node"`)
 }

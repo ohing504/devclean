@@ -1,206 +1,62 @@
 package scanner_test
 
 import (
-	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
-	"github.com/ohing504/devclean/internal/scanner"
 )
 
-func TestPythonScanner_FindsPycache(t *testing.T) {
-	root := t.TempDir()
-	projDir := filepath.Join(root, "myapp")
-	mustMkdir(t, projDir)
-	mustWriteFile(t, filepath.Join(projDir, "pyproject.toml"), []byte(`[project]`))
-
-	pyc := filepath.Join(projDir, "src", "mypkg", "__pycache__")
-	mustMkdir(t, pyc)
-	mustWriteFile(t, filepath.Join(pyc, "x.cpython-312.pyc"), make([]byte, 1024))
-
-	results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
-	if err != nil {
-		t.Fatalf("Scan error: %v", err)
+func TestPythonWalk(t *testing.T) {
+	py := []model.Ecosystem{model.EcoPython}
+	// Python artifacts sit at any depth, so results carry their project root.
+	art := func(path string, cat model.Category, safety model.SafetyLevel, root string) artifact {
+		return artifact{path, model.EcoPython, cat, safety, root}
 	}
 
-	for _, r := range results {
-		if r.Path == pyc {
-			if r.Category != model.CatBuild {
-				t.Errorf("expected category=build, got %s", r.Category)
-			}
-			if r.ProjectRoot != projDir {
-				t.Errorf("expected project_root=%s, got %s", projDir, r.ProjectRoot)
-			}
-			if r.Safety != model.SafetySafe {
-				t.Errorf("expected safety=safe, got %s", r.Safety)
-			}
-			return
-		}
+	cases := []walkCase{
+		{
+			name: "artifacts at any depth",
+			ecos: py,
+			tree: []string{
+				"app/pyproject.toml", "app/src/mypkg/__pycache__/x.pyc",
+				"app/.pytest_cache/", "app/.mypy_cache/", "app/.ruff_cache/", "app/__pycache__/",
+				"app/mypackage.egg-info/PKG-INFO",
+			},
+			want: []artifact{
+				art("app/src/mypkg/__pycache__", model.CatBuild, model.SafetySafe, "app"),
+				art("app/.pytest_cache", model.CatCache, model.SafetySafe, "app"),
+				art("app/.mypy_cache", model.CatCache, model.SafetySafe, "app"),
+				art("app/.ruff_cache", model.CatCache, model.SafetySafe, "app"),
+				art("app/__pycache__", model.CatBuild, model.SafetySafe, "app"),
+				art("app/mypackage.egg-info", model.CatBuild, model.SafetySafe, "app"),
+			},
+		},
+		{
+			// A venv may hold packages not pinned anywhere (kondo#182).
+			name: "venv is caution",
+			ecos: py,
+			tree: []string{"app/pyproject.toml", "app/.venv/lib/site.py"},
+			want: []artifact{art("app/.venv", model.CatDeps, model.SafetyCaution, "app")},
+		},
+		{
+			name: "no marker, no project",
+			ecos: py,
+			tree: []string{"stray/__pycache__/f.pyc"},
+		},
+		{
+			name: "nested project attributes to the closest root",
+			ecos: py,
+			tree: []string{"outer/pyproject.toml", "outer/sub/pyproject.toml", "outer/sub/__pycache__/x.pyc"},
+			want: []artifact{art("outer/sub/__pycache__", model.CatBuild, model.SafetySafe, "outer/sub")},
+		},
 	}
-	t.Fatalf("expected __pycache__ result at %s", pyc)
-}
-
-func TestPythonScanner_VenvIsCaution(t *testing.T) {
-	root := t.TempDir()
-	projDir := filepath.Join(root, "myapp")
-	mustMkdir(t, projDir)
-	mustWriteFile(t, filepath.Join(projDir, "pyproject.toml"), []byte(`[project]`))
-
-	venv := filepath.Join(projDir, ".venv", "lib")
-	mustMkdir(t, venv)
-	mustWriteFile(t, filepath.Join(venv, "site.py"), make([]byte, 4096))
-
-	results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
-	if err != nil {
-		t.Fatalf("Scan error: %v", err)
-	}
-
-	want := filepath.Join(projDir, ".venv")
-	for _, r := range results {
-		if r.Path == want {
-			if r.Safety != model.SafetyCaution {
-				t.Errorf(".venv: expected safety=caution (kondo#182), got %s", r.Safety)
-			}
-			if r.Category != model.CatDeps {
-				t.Errorf(".venv: expected category=deps, got %s", r.Category)
-			}
-			return
-		}
-	}
-	t.Fatalf("expected .venv result, got %d results", len(results))
-}
-
-func TestPythonScanner_DetectsAllMarkers(t *testing.T) {
-	markers := []string{
-		"pyproject.toml",
-		"setup.py",
-		"setup.cfg",
-		"requirements.txt",
-		"Pipfile",
-		"uv.lock",
-	}
-	for _, marker := range markers {
-		t.Run(marker, func(t *testing.T) {
-			root := t.TempDir()
-			projDir := filepath.Join(root, "proj")
-			mustMkdir(t, projDir)
-			mustWriteFile(t, filepath.Join(projDir, marker), []byte(""))
-
-			cache := filepath.Join(projDir, ".pytest_cache")
-			mustMkdir(t, cache)
-			mustWriteFile(t, filepath.Join(cache, "v"), []byte("1"))
-
-			results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
-			if err != nil {
-				t.Fatalf("Scan error: %v", err)
-			}
-			if len(results) != 1 {
-				t.Errorf("marker %q: expected 1 result, got %d", marker, len(results))
-			}
+	for _, marker := range []string{"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile", "uv.lock"} {
+		cases = append(cases, walkCase{
+			name: "marker " + marker,
+			ecos: py,
+			tree: []string{"proj/" + marker, "proj/.pytest_cache/v"},
+			want: []artifact{art("proj/.pytest_cache", model.CatCache, model.SafetySafe, "proj")},
 		})
 	}
-}
-
-func TestPythonScanner_IgnoresWithoutMarker(t *testing.T) {
-	root := t.TempDir()
-	// __pycache__ without any Python marker → should be ignored
-	pyc := filepath.Join(root, "stray", "__pycache__")
-	mustMkdir(t, pyc)
-	mustWriteFile(t, filepath.Join(pyc, "f.pyc"), []byte("z"))
-
-	results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
-	if err != nil {
-		t.Fatalf("Scan error: %v", err)
-	}
-	if len(results) != 0 {
-		t.Errorf("expected 0 results without marker, got %d", len(results))
-	}
-}
-
-func TestPythonScanner_EggInfoSuffix(t *testing.T) {
-	root := t.TempDir()
-	projDir := filepath.Join(root, "pkg")
-	mustMkdir(t, projDir)
-	mustWriteFile(t, filepath.Join(projDir, "setup.py"), []byte(""))
-
-	egg := filepath.Join(projDir, "mypackage.egg-info")
-	mustMkdir(t, egg)
-	mustWriteFile(t, filepath.Join(egg, "PKG-INFO"), make([]byte, 256))
-
-	results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
-	if err != nil {
-		t.Fatalf("Scan error: %v", err)
-	}
-
-	for _, r := range results {
-		if r.Path == egg && r.Category == model.CatBuild {
-			return
-		}
-	}
-	t.Fatalf("expected mypackage.egg-info result, got %d results", len(results))
-}
-
-func TestPythonScanner_NestedProjectsAttributeToClosestRoot(t *testing.T) {
-	root := t.TempDir()
-	outer := filepath.Join(root, "outer")
-	inner := filepath.Join(outer, "subpkg")
-	mustMkdir(t, inner)
-	mustWriteFile(t, filepath.Join(outer, "pyproject.toml"), []byte(""))
-	mustWriteFile(t, filepath.Join(inner, "pyproject.toml"), []byte(""))
-
-	pyc := filepath.Join(inner, "__pycache__")
-	mustMkdir(t, pyc)
-	mustWriteFile(t, filepath.Join(pyc, "x.pyc"), []byte("y"))
-
-	results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
-	if err != nil {
-		t.Fatalf("Scan error: %v", err)
-	}
-
-	for _, r := range results {
-		if r.Path == pyc {
-			if r.ProjectRoot != inner {
-				t.Errorf("expected project_root=%s (closest), got %s", inner, r.ProjectRoot)
-			}
-			return
-		}
-	}
-	t.Fatalf("expected __pycache__ result")
-}
-
-func TestPythonScanner_MultipleArtifactsInOneProject(t *testing.T) {
-	root := t.TempDir()
-	projDir := filepath.Join(root, "proj")
-	mustMkdir(t, projDir)
-	mustWriteFile(t, filepath.Join(projDir, "pyproject.toml"), []byte(""))
-
-	mustMkdir(t, filepath.Join(projDir, ".pytest_cache"))
-	mustMkdir(t, filepath.Join(projDir, ".mypy_cache"))
-	mustMkdir(t, filepath.Join(projDir, ".ruff_cache"))
-	mustMkdir(t, filepath.Join(projDir, "__pycache__"))
-
-	results, err := scanner.WalkScan(context.Background(), root, model.EcoPython)
-	if err != nil {
-		t.Fatalf("Scan error: %v", err)
-	}
-	if len(results) != 4 {
-		t.Errorf("expected 4 results, got %d", len(results))
-		for _, r := range results {
-			t.Logf("  %s", r.Path)
-		}
-	}
-}
-
-func TestPythonScanner_NameAndEcosystem(t *testing.T) {
-	for _, s := range scanner.DefaultRegistry().All() {
-		if s.Name() != "python" {
-			continue
-		}
-		if s.Ecosystem() != model.EcoPython {
-			t.Errorf("expected ecosystem=python, got %s", s.Ecosystem())
-		}
-		return
-	}
-	t.Error(`expected a registered scanner named "python"`)
+	runWalkCases(t, cases)
 }
