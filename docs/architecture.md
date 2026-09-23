@@ -76,6 +76,13 @@ Tables can also:
 - contribute **per-project extra rules** on root detection — the Node table adds React Native compound artifacts (`ios/Pods`, `android/.gradle`, …) when the project carries `ios/Podfile` or `metro.config.{js,ts,cjs,mjs}`;
 - opt into **`ScanResult.ProjectRoot` attribution** — the Python table sets the matched root on every result because its artifacts sit at arbitrary depth and output grouping needs explicit attribution (nested project roots win over parents).
 
+**Pruned trees** are skipped whole — no artifact matching, no project context, no descent — so nothing inside is ever a deletion target:
+
+- **Installed-package trees**, engine-wide regardless of which ecosystems are active: their marker files belong to shipped packages, not projects. Detected by invariant layout, never install path.
+  - pnpm store version dir (`v<N>` with `files/` and `index/` or `index.db`): v11's `links/` unpacks packages whose `dist/` would match; deleting it corrupts the store every project hard-links from. The store itself is reported by the Global Caches scanner.
+  - macOS app bundle (`*.app` with `Contents/`): apps ship their runtime inside the bundle (e.g. Electron `node_modules` in VS Code update copies under `~/Library/Caches`).
+- **An ecosystem's own SDK checkout**, via the table's `PruneRoot` hook (e.g. the Flutter SDK).
+
 **Deduplication**: a directory matching rules of several active ecosystems is reported once, attributed to the first table in order (node → rust → ruby → python → go), and no scanner descends into another's matched artifact (`__pycache__` inside `node_modules` is not reported separately). Attribution can therefore differ between a full scan and an `--eco` subset scan — a shared `coverage/` goes to node in a full scan, to ruby under `--eco ruby`.
 
 **Symlink policy — never follow**: the walk skips any entry that is a symlink (explicit `os.ModeSymlink` check), so a symlink is never descended into and never matched as an artifact, even when it is named like one (a symlinked `node_modules`, as pnpm and some monorepos produce). This is deliberate: a symlink's target is real content that lives on disk elsewhere, so following it would double-count that space and inflate the reported reclaimable total, and deleting a symlinked artifact reclaims only the link (bytes) while risking a target shared by other projects. No-follow also means symlink cycles can never be walked, so no separate cycle guard is needed. The reclaimable content behind these links is surfaced instead by the Global Caches scanner (e.g. the pnpm store) and hardlink-aware sizing, not by following per-project links.

@@ -66,7 +66,8 @@ type walkEcosystem struct {
 	// ecosystem's own toolchain/SDK checkout (e.g. the Flutter SDK), whose
 	// internal build/.dart_tool dirs are managed by the tool itself and must
 	// never be offered for deletion. names holds dir's direct entries so cheap
-	// gate checks avoid a stat on every directory.
+	// gate checks avoid a stat on every directory. Trees that are no project
+	// for any ecosystem go in isInstalledPackageTree instead.
 	PruneRoot func(dir string, names map[string]bool) bool
 }
 
@@ -195,9 +196,11 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 			names[e.Name()] = true
 		}
 
-		// Prune check: an ecosystem may claim this whole subtree as its own
-		// toolchain/SDK checkout and exclude it — skip before establishing any
-		// context or descending, so nothing inside is ever a deletion target.
+		// Prune before establishing any context or descending, so nothing inside
+		// is ever a deletion target.
+		if isInstalledPackageTree(name, names) {
+			return nil
+		}
 		for i := range tables {
 			if p := tables[i].PruneRoot; p != nil && p(dir, names) {
 				return nil
@@ -279,6 +282,33 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		return results[i].Path < results[j].Path
 	})
 	return results, nil
+}
+
+// isInstalledPackageTree reports whether a directory roots a tree of installed
+// packages, whose marker files belong to shipped packages, not projects.
+// Checked for every ecosystem, so results don't depend on the --eco subset.
+//
+//   - pnpm store version dir: v<N> with files/ and index/ (v10) or index.db
+//     (v11). v11's links/ unpacks packages whose dist/ would match; deleting
+//     it corrupts the store every pnpm project hard-links from.
+//   - macOS app bundle: *.app with Contents/ (e.g. Electron node_modules).
+func isInstalledPackageTree(name string, names map[string]bool) bool {
+	if strings.HasSuffix(name, ".app") && names["Contents"] {
+		return true
+	}
+	return isPnpmStoreVersionDir(name) && names["files"] && (names["index"] || names["index.db"])
+}
+
+func isPnpmStoreVersionDir(name string) bool {
+	if len(name) < 2 || name[0] != 'v' {
+		return false
+	}
+	for _, c := range name[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // sizeWorkerCap bounds concurrent sizing walks so a large scan does not

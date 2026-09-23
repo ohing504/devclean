@@ -36,6 +36,8 @@
 | `coverage` | build | safe | Test coverage reports |
 | `.svelte-kit` | build | safe | SvelteKit cache |
 
+**Installed-package trees are excluded**: `node_modules`/`dist` inside a pnpm store or a macOS `.app` bundle are package content, not project output — see [Walk engine](architecture.md#walk-engine).
+
 **Monorepo support**: artifacts in sub-packages (apps/, packages/) are grouped under the git root project. Sub-packages are displayed with headers showing their path and total size.
 
 **React Native / Expo**: when a Node project also has `ios/Podfile` or `metro.config.{js,ts,cjs,mjs}`, the scanner additionally collects RN-specific artifacts at multi-segment paths under the project root.

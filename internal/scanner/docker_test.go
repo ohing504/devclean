@@ -126,16 +126,3 @@ func TestDockerScanner_SparseAwareSize(t *testing.T) {
 		t.Errorf("disk size %d must not exceed apparent size %d", r.Size, r.ApparentSize)
 	}
 }
-
-func TestDockerScanner_NameAndEcosystem(t *testing.T) {
-	for _, s := range scanner.DefaultRegistry().All() {
-		if s.Name() != "docker" {
-			continue
-		}
-		if s.Ecosystem() != model.EcoDocker {
-			t.Errorf("expected ecosystem=docker, got %s", s.Ecosystem())
-		}
-		return
-	}
-	t.Error(`expected a registered scanner named "docker"`)
-}

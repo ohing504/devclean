@@ -2,8 +2,11 @@ package scanner_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -24,6 +27,91 @@ func mustWriteFile(t *testing.T, path string, data []byte) {
 	}
 }
 
+// artifact is the comparable identity of one walk result. Paths are relative
+// to the scan root; Root is ProjectRoot, empty for ecosystems that don't set it.
+type artifact struct {
+	Path     string
+	Eco      model.Ecosystem
+	Category model.Category
+	Safety   model.SafetyLevel
+	Root     string
+}
+
+func (a artifact) String() string {
+	s := fmt.Sprintf("%s [%s %s %s]", a.Path, a.Eco, a.Category, a.Safety)
+	if a.Root != "" {
+		s += " root=" + a.Root
+	}
+	return s
+}
+
+// walkCase is one WalkScan scenario: build tree under a temp root, scan it
+// with ecos, and expect exactly want — no missing and no extra artifacts.
+type walkCase struct {
+	name string
+	ecos []model.Ecosystem
+	// tree lists paths relative to the root; a trailing "/" makes a directory,
+	// anything else an empty file (parents are created as needed).
+	tree []string
+	want []artifact
+}
+
+func runWalkCases(t *testing.T, cases []walkCase) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			for _, p := range tc.tree {
+				full := filepath.Join(root, filepath.FromSlash(p))
+				if strings.HasSuffix(p, "/") {
+					mustMkdir(t, full)
+					continue
+				}
+				mustMkdir(t, filepath.Dir(full))
+				mustWriteFile(t, full, nil)
+			}
+
+			results, err := scanner.WalkScan(context.Background(), root, tc.ecos...)
+			if err != nil {
+				t.Fatalf("WalkScan: %v", err)
+			}
+			assertArtifacts(t, root, results, tc.want)
+		})
+	}
+}
+
+func assertArtifacts(t *testing.T, root string, results []model.ScanResult, want []artifact) {
+	t.Helper()
+	rel := func(p string) string {
+		if p == "" {
+			return ""
+		}
+		r, err := filepath.Rel(root, p)
+		if err != nil {
+			t.Fatalf("rel %s: %v", p, err)
+		}
+		return filepath.ToSlash(r)
+	}
+
+	// Counted, not a set: a duplicate double-counts reclaimable size.
+	got := make(map[artifact]int, len(results))
+	for _, r := range results {
+		got[artifact{rel(r.Path), r.Ecosystem, r.Category, r.Safety, rel(r.ProjectRoot)}]++
+	}
+	for _, w := range want {
+		if got[w] == 0 {
+			t.Errorf("missing:    %s", w)
+			continue
+		}
+		got[w]--
+	}
+	for a, n := range got {
+		for range n {
+			t.Errorf("unexpected: %s", a)
+		}
+	}
+}
+
 type fakeScanner struct {
 	name      string
 	ecosystem model.Ecosystem
@@ -35,6 +123,36 @@ func (f *fakeScanner) Ecosystem() model.Ecosystem { return f.ecosystem }
 
 func (f *fakeScanner) Scan(_ context.Context, _ string) ([]model.ScanResult, error) {
 	return f.results, nil
+}
+
+// Order matters: it decides attribution when rules of several ecosystems match.
+func TestDefaultRegistry(t *testing.T) {
+	want := []struct {
+		name string
+		eco  model.Ecosystem
+	}{
+		{"node", model.EcoNode},
+		{"rust", model.EcoRust},
+		{"ruby", model.EcoRuby},
+		{"python", model.EcoPython},
+		{"go", model.EcoGo},
+		{"flutter", model.EcoFlutter},
+		{"android", model.EcoAndroid},
+		{"xcode", model.EcoXcode},
+		{"docker", model.EcoDocker},
+		{"global", model.EcoGlobal},
+		{"llm", model.EcoLLM},
+	}
+
+	got := scanner.DefaultRegistry().All()
+	if len(got) != len(want) {
+		t.Fatalf("registered %d scanners, want %d", len(got), len(want))
+	}
+	for i, s := range got {
+		if s.Name() != want[i].name || s.Ecosystem() != want[i].eco {
+			t.Errorf("scanner %d = %s/%s, want %s/%s", i, s.Name(), s.Ecosystem(), want[i].name, want[i].eco)
+		}
+	}
 }
 
 func TestRegistryScanAll(t *testing.T) {
@@ -124,31 +242,6 @@ func TestRegistryEmpty(t *testing.T) {
 	}
 }
 
-func TestDirSize(t *testing.T) {
-	dir := t.TempDir()
-
-	os.WriteFile(filepath.Join(dir, "a.txt"), make([]byte, 1024), 0o644)
-	os.WriteFile(filepath.Join(dir, "b.txt"), make([]byte, 2048), 0o644)
-
-	subdir := filepath.Join(dir, "sub")
-	os.MkdirAll(subdir, 0o755)
-	os.WriteFile(filepath.Join(subdir, "c.txt"), make([]byte, 512), 0o644)
-
-	size := scanner.DirSize(dir)
-	// du reports disk usage (block-aligned), so size >= logical size
-	logicalSize := int64(1024 + 2048 + 512)
-	if size < logicalSize {
-		t.Errorf("DirSize = %d, want >= %d", size, logicalSize)
-	}
-}
-
-func TestDirSizeNonExistent(t *testing.T) {
-	size := scanner.DirSize("/nonexistent/path")
-	if size != 0 {
-		t.Errorf("DirSize of nonexistent = %d, want 0", size)
-	}
-}
-
 func TestModTime(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "test.txt")
@@ -167,13 +260,13 @@ func TestModTimeNonExistent(t *testing.T) {
 	}
 }
 
-func TestRegistryScanAll_ContextCancelled(t *testing.T) {
+func TestRegistryScanWith_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	reg := scanner.NewRegistry()
-	reg.Register(&fakeScanner{name: "node", ecosystem: model.EcoNode, results: []model.ScanResult{{Path: "/a"}}})
-	results, err := reg.ScanAll(ctx, "/")
-	// cancelled context should either return error or empty results — both are acceptable
-	_ = results
-	_ = err
+
+	reg := scanner.DefaultRegistry()
+	_, err := reg.ScanWith(ctx, t.TempDir(), reg.ForEcosystems([]model.Ecosystem{model.EcoNode}))
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("ScanWith(cancelled) error = %v, want context.Canceled", err)
+	}
 }
