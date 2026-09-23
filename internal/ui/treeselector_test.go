@@ -434,3 +434,23 @@ func TestFooterDedupsHardLinkedSelection(t *testing.T) {
 		t.Fatalf("footer = %q, want it to contain %q", got, want)
 	}
 }
+
+// TestArtifactRowShowsRecommendation: the selector is where the user decides
+// what to delete, so a scanner's Recommendation must appear on the artifact
+// row just as it does in the scan table.
+func TestArtifactRowShowsRecommendation(t *testing.T) {
+	results := []model.ScanResult{
+		{Path: "/app/node_modules", Ecosystem: model.EcoNode, Size: 100, Safety: model.SafetySafe, ProjectRoot: "/app", Recommendation: "run pnpm store prune"},
+	}
+	m := treeModel{items: BuildTreeItems(results)}
+	for i, it := range m.items {
+		if it.Type != ItemArtifact {
+			continue
+		}
+		if got := m.renderItem(i, it, false); !strings.Contains(got, "← run pnpm store prune") {
+			t.Fatalf("artifact row = %q, want it to contain the recommendation", got)
+		}
+		return
+	}
+	t.Fatal("no artifact row built")
+}

@@ -507,7 +507,11 @@ func (m treeModel) renderItem(idx int, item TreeItem, isCursor bool) string {
 		safetyIcon := SafetyIcon(item.Result.Safety)
 		cat := DimStyle.Render("(" + string(item.Result.Category) + ")")
 		size := DimStyle.Render(model.HumanSize(item.Size))
-		return fmt.Sprintf("%s    %s %s %s %s  %s", cursor, checkbox, safetyIcon, item.Label, cat, size)
+		rec := ""
+		if item.Result.Recommendation != "" {
+			rec = "  " + RecommendStyle.Render("← "+item.Result.Recommendation)
+		}
+		return fmt.Sprintf("%s    %s %s %s %s  %s%s", cursor, checkbox, safetyIcon, item.Label, cat, size, rec)
 	}
 
 	return ""
