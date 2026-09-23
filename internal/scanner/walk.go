@@ -66,7 +66,9 @@ type walkEcosystem struct {
 	// ecosystem's own toolchain/SDK checkout (e.g. the Flutter SDK), whose
 	// internal build/.dart_tool dirs are managed by the tool itself and must
 	// never be offered for deletion. names holds dir's direct entries so cheap
-	// gate checks avoid a stat on every directory.
+	// gate checks avoid a stat on every directory. Trees that are no project
+	// for any ecosystem belong in isInstalledPackageTree instead, which applies
+	// whichever tables are active.
 	PruneRoot func(dir string, names map[string]bool) bool
 }
 
@@ -195,9 +197,12 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 			names[e.Name()] = true
 		}
 
-		// Prune check: an ecosystem may claim this whole subtree as its own
-		// toolchain/SDK checkout and exclude it — skip before establishing any
+		// Prune check: installed-package trees, or a subtree an ecosystem claims
+		// as its own toolchain/SDK checkout, are skipped before establishing any
 		// context or descending, so nothing inside is ever a deletion target.
+		if isInstalledPackageTree(name, names) {
+			return nil
+		}
 		for i := range tables {
 			if p := tables[i].PruneRoot; p != nil && p(dir, names) {
 				return nil
@@ -279,6 +284,38 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		return results[i].Path < results[j].Path
 	})
 	return results, nil
+}
+
+// isInstalledPackageTree reports whether a directory (base name, direct entry
+// names) roots a tree of installed packages. Their marker files belong to
+// shipped packages, not projects, so every ecosystem skips them — applied
+// engine-wide so the result does not depend on which ecosystems are scanned.
+// Both signatures are invariant layouts, never install paths:
+//
+//   - pnpm store version dir (store/v10, store/v11): named v<N> with a files/
+//     blob dir and an index (index/ up to v10, index.db from v11). v11's links/
+//     unpacks packages whose shipped dist/ would match node's dist rule;
+//     deleting it corrupts the store every pnpm project hard-links from.
+//   - macOS app bundle (*.app with Contents/): apps ship their runtime inside
+//     the bundle, e.g. Electron node_modules in VS Code update copies staged
+//     under ~/Library/Caches.
+func isInstalledPackageTree(name string, names map[string]bool) bool {
+	if strings.HasSuffix(name, ".app") && names["Contents"] {
+		return true
+	}
+	return isPnpmStoreVersionDir(name) && names["files"] && (names["index"] || names["index.db"])
+}
+
+func isPnpmStoreVersionDir(name string) bool {
+	if len(name) < 2 || name[0] != 'v' {
+		return false
+	}
+	for _, c := range name[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // sizeWorkerCap bounds concurrent sizing walks so a large scan does not

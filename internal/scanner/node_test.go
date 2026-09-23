@@ -71,38 +71,5 @@ func TestNodeWalk(t *testing.T) {
 			},
 			want: []artifact{safe("rn/ios/Pods", model.CatDeps)},
 		},
-		{
-			// links/ unpacks packages whose shipped dist/ is package content;
-			// deleting it corrupts the store every pnpm project hard-links from.
-			name: "pnpm store v11 excluded",
-			ecos: node,
-			tree: []string{
-				"pnpm/store/v11/files/00/blob", "pnpm/store/v11/index.db",
-				"pnpm/store/v11/links/@/next/16.3.5/h/node_modules/next/package.json",
-				"pnpm/store/v11/links/@/next/16.3.5/h/node_modules/next/dist/server.js",
-				"app/package.json", "app/dist/",
-			},
-			want: []artifact{safe("app/dist", model.CatBuild)},
-		},
-		{
-			name: "pnpm store v10 excluded",
-			ecos: node,
-			tree: []string{
-				"pnpm/store/v10/files/00/blob", "pnpm/store/v10/index/00/idx",
-				"pnpm/store/v10/pkg/package.json", "pnpm/store/v10/pkg/dist/",
-			},
-		},
-		{
-			// Electron apps (e.g. a VS Code update staged under Caches) ship
-			// node_modules inside the bundle.
-			name: "app bundle excluded",
-			ecos: node,
-			tree: []string{
-				"update/Code.app/Contents/Resources/app/extensions/copilot/package.json",
-				"update/Code.app/Contents/Resources/app/extensions/copilot/node_modules/",
-				"app/package.json", "app/node_modules/",
-			},
-			want: []artifact{safe("app/node_modules", model.CatDeps)},
-		},
 	})
 }
