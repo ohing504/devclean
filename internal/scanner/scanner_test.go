@@ -93,18 +93,23 @@ func assertArtifacts(t *testing.T, root string, results []model.ScanResult, want
 		return filepath.ToSlash(r)
 	}
 
-	got := make(map[artifact]bool, len(results))
+	// Counted, not a set: the same artifact reported twice must fail, since
+	// duplicates double-count reclaimable size.
+	got := make(map[artifact]int, len(results))
 	for _, r := range results {
-		got[artifact{rel(r.Path), r.Ecosystem, r.Category, r.Safety, rel(r.ProjectRoot)}] = true
+		got[artifact{rel(r.Path), r.Ecosystem, r.Category, r.Safety, rel(r.ProjectRoot)}]++
 	}
 	for _, w := range want {
-		if !got[w] {
+		if got[w] == 0 {
 			t.Errorf("missing:    %s", w)
+			continue
 		}
-		delete(got, w)
+		got[w]--
 	}
-	for a := range got {
-		t.Errorf("unexpected: %s", a)
+	for a, n := range got {
+		for range n {
+			t.Errorf("unexpected: %s", a)
+		}
 	}
 }
 
