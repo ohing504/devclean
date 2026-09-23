@@ -8,7 +8,6 @@ import (
 
 func TestGoWalk(t *testing.T) {
 	goEco := []model.Ecosystem{model.EcoGo}
-	// vendor/ is caution: vendoring is an opt-in the project committed to.
 	vendor := func(path string) artifact {
 		return artifact{path, model.EcoGo, model.CatDeps, model.SafetyCaution, ""}
 	}

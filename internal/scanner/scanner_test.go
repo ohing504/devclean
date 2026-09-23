@@ -93,8 +93,7 @@ func assertArtifacts(t *testing.T, root string, results []model.ScanResult, want
 		return filepath.ToSlash(r)
 	}
 
-	// Counted, not a set: the same artifact reported twice must fail, since
-	// duplicates double-count reclaimable size.
+	// Counted, not a set: a duplicate double-counts reclaimable size.
 	got := make(map[artifact]int, len(results))
 	for _, r := range results {
 		got[artifact{rel(r.Path), r.Ecosystem, r.Category, r.Safety, rel(r.ProjectRoot)}]++
@@ -126,9 +125,7 @@ func (f *fakeScanner) Scan(_ context.Context, _ string) ([]model.ScanResult, err
 	return f.results, nil
 }
 
-// TestDefaultRegistry pins every registered scanner's name (the --eco value)
-// and ecosystem, in registration order — the walk table mirrors that order and
-// it decides attribution when rules of several ecosystems match.
+// Order matters: it decides attribution when rules of several ecosystems match.
 func TestDefaultRegistry(t *testing.T) {
 	want := []struct {
 		name string
@@ -263,8 +260,6 @@ func TestModTimeNonExistent(t *testing.T) {
 	}
 }
 
-// TestRegistryScanWith_ContextCanceled pins that a cancelled scan surfaces
-// ctx's error to the caller instead of returning partial results as complete.
 func TestRegistryScanWith_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

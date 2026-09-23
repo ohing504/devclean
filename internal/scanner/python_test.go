@@ -8,7 +8,6 @@ import (
 
 func TestPythonWalk(t *testing.T) {
 	py := []model.Ecosystem{model.EcoPython}
-	// Python artifacts sit at any depth, so results carry their project root.
 	art := func(path string, cat model.Category, safety model.SafetyLevel, root string) artifact {
 		return artifact{path, model.EcoPython, cat, safety, root}
 	}
@@ -32,7 +31,6 @@ func TestPythonWalk(t *testing.T) {
 			},
 		},
 		{
-			// A venv may hold packages not pinned anywhere (kondo#182).
 			name: "venv is caution",
 			ecos: py,
 			tree: []string{"app/pyproject.toml", "app/.venv/lib/site.py"},

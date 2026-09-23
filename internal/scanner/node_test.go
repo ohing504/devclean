@@ -62,7 +62,6 @@ func TestNodeWalk(t *testing.T) {
 			tree: []string{"web/package.json", "web/ios/Pods/stuff/x"},
 		},
 		{
-			// Some Pods ship a package.json; the matched ios/Pods is not descended.
 			name: "no descent into a matched ios/Pods",
 			ecos: node,
 			tree: []string{

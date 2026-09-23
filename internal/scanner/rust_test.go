@@ -25,7 +25,6 @@ func TestRustWalk(t *testing.T) {
 			tree: []string{"random/target/"},
 		},
 		{
-			// Members build into the workspace root's target/.
 			name: "workspace member without its own target",
 			ecos: rust,
 			tree: []string{"ws/Cargo.toml", "ws/target/debug/bin", "ws/crates/core/Cargo.toml"},

@@ -6,16 +6,11 @@ import (
 	"github.com/ohing504/devclean/internal/model"
 )
 
-// TestWalkExcludesInstalledPackageTrees pins that installed-package trees are
-// skipped by every ecosystem, whichever subset is scanned: their marker roots
-// are shipped packages, not projects.
 func TestWalkExcludesInstalledPackageTrees(t *testing.T) {
 	node := []model.Ecosystem{model.EcoNode}
 
 	runWalkCases(t, []walkCase{
 		{
-			// links/ unpacks packages whose shipped dist/ is package content;
-			// deleting it corrupts the store every pnpm project hard-links from.
 			name: "pnpm store v11",
 			ecos: node,
 			tree: []string{
@@ -35,8 +30,6 @@ func TestWalkExcludesInstalledPackageTrees(t *testing.T) {
 			},
 		},
 		{
-			// Electron apps (e.g. a VS Code update staged under Caches) ship
-			// node_modules inside the bundle.
 			name: "app bundle",
 			ecos: node,
 			tree: []string{
