@@ -3,6 +3,7 @@ package scanner_test
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -401,9 +402,9 @@ func TestGlobalScanner_InstalledToolSafety(t *testing.T) {
 		recHas    string
 	}{
 		{"owning tool installed", ".npm", []string{"npm"}, model.SafetyCaution, "npm is installed"},
-		{"owning tool absent", ".npm", nil, model.SafetySafe, "npm not found in PATH"},
+		{"owning tool absent", ".npm", nil, model.SafetySafe, "npm not installed"},
 		{"fallback executable installed", ".cache/pip", []string{"pip3"}, model.SafetyCaution, "pip3 is installed"},
-		{"all candidates absent", ".cache/pip", nil, model.SafetySafe, "pip/pip3 not found in PATH"},
+		{"all candidates absent", ".cache/pip", nil, model.SafetySafe, "pip/pip3 not installed"},
 		{"no owning executable", "Library/Caches/electron", []string{"npm", "node"}, model.SafetySafe, ""},
 		{"declared caution keeps its note", "Library/pnpm/store", []string{"pnpm"}, model.SafetyCaution, "hard-linked"},
 	}
@@ -513,29 +514,28 @@ func TestGlobalScanner_HomebrewCleanupItem(t *testing.T) {
 				t.Fatalf("expected one brew command, got %v", brew.calls)
 			}
 			call := brew.calls[0]
-			if !slices.Contains(call, "HOMEBREW_NO_AUTOREMOVE=1") || !strings.HasSuffix(strings.Join(call, " "), "brew cleanup -s") {
-				t.Errorf("delete ran %v, want HOMEBREW_NO_AUTOREMOVE=1 ... brew cleanup -s", call)
+			if !slices.Contains(call, "HOMEBREW_NO_AUTOREMOVE=1") || !strings.HasSuffix(strings.Join(call, " "), "brew cleanup") {
+				t.Errorf("delete ran %v, want HOMEBREW_NO_AUTOREMOVE=1 ... brew cleanup", call)
 			}
 		})
 	}
 }
 
 // TestGlobalScanner_HomebrewWithoutCleanupItem covers the cases where brew
-// yields no cleanup item: nothing to free reports nothing, a failing dry-run
-// falls back to the measured cache directory (caution, since brew uses it)
-// carrying the error, and without brew the directory is a plain catalog entry.
+// yields no cleanup item. The cache directory is then reported as a measured
+// path item: caution while brew is installed (brew uses it), carrying the
+// error when the dry-run failed, and a plain safe catalog entry without brew.
 func TestGlobalScanner_HomebrewWithoutCleanupItem(t *testing.T) {
 	cases := []struct {
 		name      string
 		installed []string
 		brew      *fakeBrew
-		want      bool // cache directory reported as a path item
 		safety    model.SafetyLevel
 		recHas    string
 	}{
-		{"nothing to free", []string{"brew"}, &fakeBrew{dryRun: brewDryRun("")}, false, "", ""},
-		{"dry-run fails", []string{"brew"}, &fakeBrew{dryRunErr: errors.New("exit status 1")}, true, model.SafetyCaution, "exit status 1"},
-		{"brew absent", nil, nil, true, model.SafetySafe, "brew not found in PATH"},
+		{"nothing to free", []string{"brew"}, &fakeBrew{dryRun: brewDryRun("")}, model.SafetyCaution, "brew is installed"},
+		{"dry-run fails", []string{"brew"}, &fakeBrew{dryRunErr: errors.New("exit status 1")}, model.SafetyCaution, "exit status 1"},
+		{"brew absent", nil, nil, model.SafetySafe, "brew not installed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -554,12 +554,6 @@ func TestGlobalScanner_HomebrewWithoutCleanupItem(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Scan error: %v", err)
 			}
-			if !tc.want {
-				if len(results) != 0 {
-					t.Fatalf("expected no results, got %+v", results)
-				}
-				return
-			}
 			if len(results) != 1 || results[0].Path != cache {
 				t.Fatalf("expected only %s, got %+v", cache, results)
 			}
@@ -572,6 +566,74 @@ func TestGlobalScanner_HomebrewWithoutCleanupItem(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGlobalScanner_HomebrewCacheElsewhere: when HOMEBREW_CACHE points outside
+// home, the cleanup item is reported at brew's cache path and the directory in
+// home is still reported on its own, not hidden behind the item.
+func TestGlobalScanner_HomebrewCacheElsewhere(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	homeCache := filepath.Join(home, "Library", "Caches", "Homebrew")
+	mustMkdir(t, homeCache)
+	mustWriteFile(t, filepath.Join(homeCache, "blob"), make([]byte, 4096))
+	external := t.TempDir()
+
+	s := newIsolatedGlobalScanner(t, "brew")
+	s.RunCommand = (&fakeBrew{cacheDir: external, dryRun: brewDryRun("1.2GB")}).run
+	results, err := s.Scan(context.Background(), home)
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+	byPath := make(map[string]model.ScanResult, len(results))
+	for _, r := range results {
+		byPath[r.Path] = r
+	}
+	if r, ok := byPath[external]; !ok || r.Delete == nil {
+		t.Errorf("expected the cleanup item at %s, got %+v", external, results)
+	}
+	if r, ok := byPath[homeCache]; !ok || r.Delete != nil || r.Safety != model.SafetyCaution {
+		t.Errorf("expected %s as a caution path item, got %+v", homeCache, results)
+	}
+}
+
+// TestGlobalScanner_FindsToolOutsidePATH: a scan started without the user's
+// login PATH (launchd, cron, an agent's non-login shell) must still see tools
+// installed to user-level bin directories, or their in-use caches would be
+// reported as safe.
+func TestGlobalScanner_FindsToolOutsidePATH(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "")
+	mustMkdir(t, filepath.Join(home, ".bun", "bin"))
+	mustWriteFile(t, filepath.Join(home, ".bun", "bin", "bun"), []byte("#!/bin/sh\n"))
+	if err := os.Chmod(filepath.Join(home, ".bun", "bin", "bun"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(home, ".bun", "install", "cache")
+	mustMkdir(t, cache)
+	mustWriteFile(t, filepath.Join(cache, "blob"), make([]byte, 1024))
+
+	s := scanner.NewGlobalScanner()
+	s.TmpRoot = t.TempDir()
+	// brew in the Homebrew prefix is found too on a machine that has it;
+	// fail its commands so the result does not depend on the host.
+	s.RunCommand = func(context.Context, []string, string, ...string) ([]byte, error) {
+		return nil, errors.New("not run in tests")
+	}
+	results, err := s.Scan(context.Background(), home)
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+	for _, r := range results {
+		if r.Path == cache {
+			if r.Safety != model.SafetyCaution || !strings.Contains(r.Recommendation, "bun is installed") {
+				t.Errorf("got safety=%s rec=%q, want caution with a bun note", r.Safety, r.Recommendation)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected %s to be detected, got %+v", cache, results)
 }
 
 // newIsolatedGlobalScanner returns a GlobalScanner that sees only the given

@@ -8,20 +8,29 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ohing504/devclean/internal/model"
 )
 
 // homebrewCacheRelPath is Homebrew's default download cache, relative to home.
-// With brew in PATH, `brew cleanup` reclaims it; without brew it is reported
-// as a plain catalog directory.
+// It is a catalog entry like any other cache; with brew installed, the
+// Homebrew cleanup item replaces it when brew reports reclaimable space there.
 const homebrewCacheRelPath = "Library/Caches/Homebrew"
 
-// homebrewCleanupArgs is the cleanup the Homebrew item runs. -s additionally
-// scrubs downloads of installed versions, which brew fetches again only when
-// it reinstalls them. The dry-run appends --dry-run to the same arguments so
-// the reported size matches what the delete frees.
-var homebrewCleanupArgs = []string{"cleanup", "-s"}
+// homebrewCleanupArgs is the cleanup the Homebrew item runs: the same cleanup
+// brew runs by itself after install and upgrade (HOMEBREW_CLEANUP_PERIODIC),
+// except that casks are cleaned only by that periodic run. It removes formula
+// versions older than the installed one and downloads older than
+// HOMEBREW_CLEANUP_MAX_AGE_DAYS. -s (scrub) is deliberately not passed: it
+// also deletes the formula API cache and downloads brew still uses, which it
+// fetches again on the next command. The dry-run appends --dry-run to the
+// same arguments so the reported size matches what the delete frees.
+var homebrewCleanupArgs = []string{"cleanup"}
+
+// homebrewTimeout bounds each brew command of the scan, so a brew that waits
+// on a lock cannot stall the scan indefinitely.
+const homebrewTimeout = 2 * time.Minute
 
 // homebrewEnv applies to both the dry-run and the cleanup.
 // HOMEBREW_NO_AUTOREMOVE=1 disables the autoremove step `brew cleanup` runs by
@@ -68,24 +77,17 @@ func (s *GlobalScanner) startHomebrewScan(ctx context.Context, brew string) <-ch
 	return ch
 }
 
-// scanHomebrew builds the Homebrew cleanup item from `brew cleanup -s
-// --dry-run`. The size is brew's own estimate of what the cleanup frees:
-// outdated formula and cask versions under the Homebrew prefix, stale
-// downloads and logs. The prefix lies outside the cache directory, so
-// measuring the directory would both miss those and count downloads brew
-// keeps.
+// scanHomebrew builds the Homebrew cleanup item from `brew cleanup
+// --dry-run`. The size is brew's own estimate of what the cleanup frees: old
+// formula versions under the Homebrew prefix, stale downloads and logs. The
+// prefix lies outside the cache directory, so measuring the directory would
+// both miss those and count downloads brew keeps.
 func (s *GlobalScanner) scanHomebrew(ctx context.Context, brew string) (*model.ScanResult, error) {
-	out, err := s.runCommand(ctx, homebrewEnv, brew, "--cache")
-	if err != nil {
-		return nil, err
-	}
-	cacheDir := strings.TrimSpace(string(out))
-	if cacheDir == "" || !filepath.IsAbs(cacheDir) {
-		return nil, fmt.Errorf("brew --cache printed %q, want an absolute path", cacheDir)
-	}
+	ctx, cancel := context.WithTimeout(ctx, homebrewTimeout)
+	defer cancel()
 
 	dryRunArgs := append(append([]string{}, homebrewCleanupArgs...), "--dry-run")
-	out, err = s.runCommand(ctx, homebrewEnv, brew, dryRunArgs...)
+	out, err := s.runCommand(ctx, homebrewEnv, brew, dryRunArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +97,17 @@ func (s *GlobalScanner) scanHomebrew(ctx context.Context, brew string) (*model.S
 	}
 	if !found {
 		return nil, nil // brew has nothing to clean up
+	}
+
+	// The item's path is brew's cache directory, which HOMEBREW_CACHE can
+	// move out of home.
+	out, err = s.runCommand(ctx, homebrewEnv, brew, "--cache")
+	if err != nil {
+		return nil, err
+	}
+	cacheDir := strings.TrimSpace(string(out))
+	if cacheDir == "" || !filepath.IsAbs(cacheDir) {
+		return nil, fmt.Errorf("brew --cache printed %q, want an absolute path", cacheDir)
 	}
 
 	run := s.runCommand
@@ -108,8 +121,8 @@ func (s *GlobalScanner) scanHomebrew(ctx context.Context, brew string) (*model.S
 		LastMod:        ModTime(cacheDir),
 		Safety:         model.SafetySafe,
 		ProjectRoot:    filepath.Dir(cacheDir),
-		Label:          "Homebrew cleanup (outdated versions, stale downloads, logs)",
-		Recommendation: "size is brew's own dry-run estimate; installed formulae and casks are kept, and dependency autoremove is disabled",
+		Label:          "Homebrew cleanup (old formula versions, stale downloads, logs)",
+		Recommendation: "size is brew's own dry-run estimate; the same cleanup brew runs after upgrades — installed versions and current downloads are kept, dependency autoremove is disabled",
 		Delete: &model.DeleteMethod{
 			Kind:    model.DeleteKindCommand,
 			Display: "HOMEBREW_NO_AUTOREMOVE=1 brew " + strings.Join(args, " "),
@@ -119,6 +132,33 @@ func (s *GlobalScanner) scanHomebrew(ctx context.Context, brew string) (*model.S
 			},
 		},
 	}, nil
+}
+
+// mergeHomebrew adds the Homebrew dry-run outcome to the sized catalog
+// results. The cleanup item replaces the catalog entry for the same
+// directory, since both would reclaim it; a cache directory elsewhere stays
+// as its own entry. When the dry-run failed, the catalog entry for brew's
+// default cache (defaultCache) carries the error, so the user sees why no cleanup item is
+// offered.
+func mergeHomebrew(results []model.ScanResult, hs homebrewScan, defaultCache string) []model.ScanResult {
+	if hs.err != nil {
+		for i := range results {
+			if results[i].Path == defaultCache {
+				results[i].Recommendation = fmt.Sprintf("brew cleanup dry-run failed (%v); deleting this directory removes every Homebrew download, which brew downloads again when it needs one", hs.err)
+			}
+		}
+		return results
+	}
+	if hs.item == nil {
+		return results
+	}
+	for i := range results {
+		if results[i].Path == hs.item.Path {
+			results[i] = *hs.item
+			return results
+		}
+	}
+	return append(results, *hs.item)
 }
 
 // parseHomebrewFreeSize extracts the byte count from brew cleanup dry-run

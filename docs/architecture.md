@@ -123,7 +123,7 @@ Delete *DeleteMethod `json:"delete,omitempty"` // nil = path removal
 
 The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached, otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal; command/api items follow the vendor's own recovery semantics. `clean` shows this to the user: `--dry-run` prints `runs: <Display>` under each command item, and the interactive prompt asks for trash/permanent only when path items are selected. The prompt's description counts the command items that run regardless of that choice. When every selected item is a command item, the prompt is a Run/Cancel confirmation instead.
 
-The first per-item command item is the global scanner's Homebrew cleanup (`brew cleanup -s`, sized by its dry-run).
+The first per-item command item is the global scanner's Homebrew cleanup (`brew cleanup`, sized by its dry-run).
 
 In JSON output, non-path items serialize as `"delete": {"kind": "command", "display": "..."}` (`Run` never serializes), so agents can tell strategies apart; absence of the key means path removal.
 

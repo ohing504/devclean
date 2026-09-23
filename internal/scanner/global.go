@@ -22,9 +22,9 @@ import (
 // so a user — or an AI agent reading --json — can decide without external knowledge.
 //
 // tools lists the executables that read and write the cache, in preference
-// order. When one of them is in PATH the cache is in use: deleting it only
+// order. When one of them is installed (findExecutable) the cache is in use: deleting it only
 // makes the tool download the same content again, so the entry is reported as
-// caution and --yes skips it. When none is in PATH the entry keeps its declared
+// caution and --yes skips it. When none is installed the entry keeps its declared
 // safety and is reported as a cache no installed tool uses. tools is set only
 // on entries declared safe (a caution entry already needs explicit opt-in) and
 // left empty for caches whose owner has no executable of its own in PATH
@@ -77,8 +77,8 @@ var globalCaches = []globalCache{
 	{"Library/pnpm/store", model.CatCache, model.SafetyCaution, "pnpm content-addressable store", "every project re-downloads dependencies on next install (store is hard-linked)", nil},
 	{"Library/Caches/pnpm", model.CatCache, model.SafetySafe, "pnpm download cache", "", []string{"pnpm"}},
 	{"Library/Caches/pip", model.CatCache, model.SafetySafe, "pip download cache", "", []string{"pip", "pip3"}},
-	// Reported as a directory only when brew is not in PATH or its dry-run
-	// fails; otherwise the Homebrew cleanup item (global_homebrew.go) covers it.
+	// With brew installed, the Homebrew cleanup item (global_homebrew.go)
+	// replaces this entry when brew reports reclaimable space here.
 	{homebrewCacheRelPath, model.CatCache, model.SafetySafe, "Homebrew download cache", "", []string{"brew"}},
 	{"Library/Caches/CocoaPods", model.CatCache, model.SafetySafe, "CocoaPods spec & pod cache", "", []string{"pod"}},
 	{"Library/Caches/go-build", model.CatCache, model.SafetySafe, "Go build cache", "", []string{"go"}},
@@ -144,7 +144,8 @@ type GlobalScanner struct {
 	// is currently running (default: pgrep -x). A field so tests can stub
 	// browser run state.
 	ProcessRunning func(processName string) bool
-	// LookPath resolves an executable in PATH (default: exec.LookPath). It
+	// LookPath resolves an installed executable (default: findExecutable,
+	// which searches PATH and then user-level install directories). It
 	// decides which caches are in use by an installed tool, whether the
 	// Homebrew cleanup item applies, and which VendorCleanups are offered. A
 	// field so tests can stub which tools are installed.
@@ -159,7 +160,7 @@ func NewGlobalScanner() *GlobalScanner {
 	return &GlobalScanner{
 		TmpRoot:        "/private/var/folders",
 		ProcessRunning: processRunning,
-		LookPath:       exec.LookPath,
+		LookPath:       findExecutable,
 		RunCommand:     execCommand,
 	}
 }
@@ -185,18 +186,69 @@ func execCommand(ctx context.Context, env []string, name string, args ...string)
 func (s *GlobalScanner) Name() string               { return "global" }
 func (s *GlobalScanner) Ecosystem() model.Ecosystem { return model.EcoGlobal }
 
-// installedTool returns the first of tools found in PATH, or "" when none is.
-func (s *GlobalScanner) installedTool(tools []string) string {
-	for _, t := range tools {
-		if _, err := s.lookPath(t); err == nil {
-			return t
+// userToolDirs lists directories that installers put executables in and
+// that a login shell adds to PATH through profile scripts. A scan started
+// without those scripts (launchd, cron, an agent's non-login shell) lacks
+// them in PATH, and a tool missed there would make its in-use cache look
+// unused.
+func userToolDirs(home string) []string {
+	dirs := []string{
+		"/opt/homebrew/bin", // Homebrew on Apple silicon
+		"/usr/local/bin",    // Homebrew on Intel macOS, manual installs
+		"/usr/local/go/bin", // official Go installer
+		"/home/linuxbrew/.linuxbrew/bin",
+		filepath.Join(home, ".local", "bin"), // pipx, uv and Poetry installers
+		filepath.Join(home, ".cargo", "bin"),
+		filepath.Join(home, ".bun", "bin"),
+		filepath.Join(home, ".deno", "bin"),
+		filepath.Join(home, ".volta", "bin"),
+		filepath.Join(home, "Library", "pnpm"),                  // pnpm standalone installer (macOS)
+		filepath.Join(home, ".local", "share", "pnpm"),          // pnpm standalone installer (Linux)
+		filepath.Join(home, ".pyenv", "shims"),                  // pip of pyenv Pythons
+		filepath.Join(home, ".rbenv", "shims"),                  // pod of rbenv Rubies
+		filepath.Join(home, ".asdf", "shims"),                   // asdf-managed runtimes
+		filepath.Join(home, ".local", "share", "mise", "shims"), // mise-managed runtimes
+	}
+	// nvm keeps one bin directory per installed Node.js version, each with
+	// its own npm (and yarn/pnpm when installed globally).
+	if nvm, err := filepath.Glob(filepath.Join(home, ".nvm", "versions", "node", "*", "bin")); err == nil {
+		dirs = append(dirs, nvm...)
+	}
+	return dirs
+}
+
+// findExecutable resolves file in PATH, then in userToolDirs. It is
+// GlobalScanner.LookPath's default.
+func findExecutable(file string) (string, error) {
+	if p, err := exec.LookPath(file); err == nil {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", exec.ErrNotFound
+	}
+	for _, dir := range userToolDirs(home) {
+		p := filepath.Join(dir, file)
+		if info, err := os.Stat(p); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+			return p, nil
 		}
 	}
-	return ""
+	return "", exec.ErrNotFound
+}
+
+// installedTool returns the first of tools that is installed, as its name
+// and resolved path, or "" and "" when none is.
+func (s *GlobalScanner) installedTool(tools []string) (name, path string) {
+	for _, t := range tools {
+		if p, err := s.lookPath(t); err == nil {
+			return t, p
+		}
+	}
+	return "", ""
 }
 
 // globalVendorCleanup describes a package manager's native cache-prune command.
-// tools lists candidate executables in preference order (first one found in PATH
+// tools lists candidate executables in preference order (first one installed
 // is used), so pip3-only machines still match the pip entry.
 type globalVendorCleanup struct {
 	id    string
@@ -225,7 +277,7 @@ var globalVendorCleanups = []globalVendorCleanup{
 func (s *GlobalScanner) VendorCleanups() []VendorCleanup {
 	var out []VendorCleanup
 	for _, v := range globalVendorCleanups {
-		tool := s.installedTool(v.tools)
+		tool, toolPath := s.installedTool(v.tools)
 		if tool == "" {
 			continue // none of the candidate executables are installed
 		}
@@ -237,7 +289,7 @@ func (s *GlobalScanner) VendorCleanups() []VendorCleanup {
 				Kind:    model.DeleteKindCommand,
 				Display: tool + " " + strings.Join(args, " "),
 				Run: func(ctx context.Context) error {
-					return exec.CommandContext(ctx, tool, args...).Run()
+					return exec.CommandContext(ctx, toolPath, args...).Run()
 				},
 			},
 		})
@@ -261,29 +313,18 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 	// the scan root covers home. Its dry-run takes seconds, so it runs
 	// concurrently with the catalog stat and sizing below.
 	var homebrew <-chan homebrewScan
-	brewPath := ""
 	if isUnderRoot(home, absRoot) {
-		if p, err := s.lookPath("brew"); err == nil {
-			brewPath = p
-			homebrew = s.startHomebrewScan(ctx, brewPath)
+		if brew, err := s.lookPath("brew"); err == nil {
+			homebrew = s.startHomebrewScan(ctx, brew)
 		}
 	}
 
 	var results []model.ScanResult
-	var homebrewCache *globalCache
-	for i, c := range globalCaches {
+	for _, c := range globalCaches {
 		select {
 		case <-ctx.Done():
 			return results, ctx.Err()
 		default:
-		}
-
-		if c.relPath == homebrewCacheRelPath && brewPath != "" {
-			// Decided after the brew dry-run: normally covered by the
-			// Homebrew cleanup item, reported as a directory only if the
-			// dry-run fails.
-			homebrewCache = &globalCaches[i]
-			continue
 		}
 
 		full := filepath.Join(home, c.relPath)
@@ -310,23 +351,7 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 	}
 
 	if homebrew != nil {
-		hs := <-homebrew
-		switch {
-		case hs.err == nil && hs.item != nil:
-			results = append(results, *hs.item)
-		case hs.err != nil && homebrewCache != nil:
-			// brew is installed but its dry-run failed, so the reclaimable
-			// size is unknown. Fall back to the cache directory so the space
-			// stays visible; the note carries the brew error.
-			full := filepath.Join(home, homebrewCache.relPath)
-			if isDir(full) {
-				r := s.catalogResult(*homebrewCache, full)
-				r.Recommendation = fmt.Sprintf("brew cleanup dry-run failed (%v); deleting this directory removes every Homebrew download, which brew downloads again when it needs one", hs.err)
-				st := Measure(full)
-				r.Size, r.ApparentSize, r.Links = st.Disk, st.Apparent, st.Links
-				results = append(results, r)
-			}
-		}
+		results = mergeHomebrew(results, <-homebrew, filepath.Join(home, homebrewCacheRelPath))
 		ReportProgress(ctx, len(results))
 	}
 	return results, nil
@@ -356,13 +381,13 @@ func (s *GlobalScanner) runCommand(ctx context.Context, env []string, name strin
 func (s *GlobalScanner) catalogResult(c globalCache, full string) model.ScanResult {
 	safety, rec := c.safety, c.rec
 	if len(c.tools) > 0 {
-		if tool := s.installedTool(c.tools); tool != "" {
+		if tool, _ := s.installedTool(c.tools); tool != "" {
 			safety = model.SafetyCaution
 			if rec == "" {
 				rec = fmt.Sprintf("%s is installed and uses this cache; deleting it only makes %s download the same content again", tool, tool)
 			}
 		} else if rec == "" {
-			rec = fmt.Sprintf("%s not found in PATH, so no installed tool is known to use this cache", strings.Join(c.tools, "/"))
+			rec = fmt.Sprintf("%s not installed, so no installed tool is known to use this cache", strings.Join(c.tools, "/"))
 		}
 	}
 	return model.ScanResult{
