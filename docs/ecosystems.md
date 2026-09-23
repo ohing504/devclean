@@ -211,13 +211,16 @@ Shared, home-rooted developer caches that are not tied to any single project. Un
 
 Each entry that is `caution` carries a consequence-of-deletion note in `recommendation` (e.g. "every project re-downloads dependencies on next install") so a user — or an AI agent reading `--json` — can decide without external knowledge. Missing paths are skipped, so macOS (`~/Library/Caches/*`, `~/Library/pnpm/store`) and Linux (`~/.cache/*`) variants coexist in the catalog.
 
+**Installed tool raises safety to `caution`.** A `safe` cache is mapped to the executables that use it (`~/.npm` → `npm`, `~/.cache/uv` → `uv`, pip caches → `pip` or `pip3`, …). When one of them is in PATH, the cache is in use: deleting it only makes the tool download the same content again. So the entry is reported as `caution` with that note, and `clean --yes` skips it unless `--include-caution` is passed. When none is in PATH, the entry stays `safe`, with a note that no installed tool is known to use it. The rule never lowers a declared `caution`. Caches without an owning executable (Puppeteer, Electron, node-gyp, TypeScript, Cypress, Cursor) are not affected.
+
 | Path | Category | Safety |
 |------|----------|--------|
 | `~/.npm` | cache | safe |
 | `~/.bun/install/cache` | cache | safe |
 | `~/.cocoapods` | cache | safe |
 | `~/.cache/uv`, `~/.cache/puppeteer` | cache | safe (XDG paths, used on macOS too) |
-| `~/Library/Caches/{Yarn,pnpm,pip,Homebrew,CocoaPods,go-build,electron,node-gyp,typescript,uv,Cypress,deno,pypoetry}` | cache | safe |
+| `~/Library/Caches/{Yarn,pnpm,pip,CocoaPods,go-build,electron,node-gyp,typescript,uv,Cypress,deno,pypoetry}` | cache | safe |
+| `~/Library/Caches/Homebrew` | cache | safe (only when `brew` is not in PATH — see Homebrew below) |
 | `~/.cache/{go-build,pip,node-gyp,yarn,pnpm,electron,Cypress,deno,pypoetry}` | cache | safe |
 | `~/Library/pnpm/store` | cache | caution (hard-linked store) |
 | `~/.gradle/caches`, `~/.gradle/wrapper/dists` | cache | caution |
@@ -247,6 +250,14 @@ Each entry that is `caution` carries a consequence-of-deletion note in `recommen
 | `~/.android/avd` | emulator user data |
 
 Only genuine caches under those trees (e.g. `~/.cargo/registry`, `~/Library/Application Support/Cursor/Cache`) or dedicated cache dirs remain eligible.
+
+**Homebrew**: with `brew` in PATH, Homebrew is reported as one item, `Homebrew cleanup (outdated versions, stale downloads, logs)`, and reclaimed by running brew instead of deleting a directory.
+
+- **Size**: brew's own estimate from `brew cleanup -s --dry-run` (the `would free approximately …` line). This covers outdated formula and cask versions under the Homebrew prefix, which lie outside the cache directory, and excludes cache files brew keeps.
+- **Delete**: `HOMEBREW_NO_AUTOREMOVE=1 brew cleanup -s` (`delete.kind` `command`). The trash/permanent choice does not apply. `HOMEBREW_NO_AUTOREMOVE=1` disables the autoremove step `brew cleanup` runs by default, which uninstalls formulae installed only as dependencies. That step removes installed software rather than cache, and the dry-run size does not include it.
+- **Nothing to free**: brew prints no summary line, so no item is reported.
+- **Dry-run fails**: the cache directory is reported as a measured path item (`caution`), with the brew error in `recommendation`.
+- **Scope**: the item is reported only when the scan root covers the home directory, like Browser Temp.
 
 **Browser Temp (macOS)**: Chromium-family browsers (Chrome, Brave, Edge, Arc, Vivaldi, …) copy their own bundle to `/private/var/folders/<xx>/<yyy>/X/<bundle-id>.code_sign_clone/` on launch to verify their code signature, removing it on normal exit. Force-killed processes — typically headless automation like lighthouse or puppeteer — leave zombie copies that accumulate (observed: 92 copies / 156 GB).
 

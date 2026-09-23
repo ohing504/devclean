@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -20,6 +21,15 @@ import (
 // for caution entries it states what breaks ("re-downloaded on next install"),
 // so a user — or an AI agent reading --json — can decide without external knowledge.
 //
+// tools lists the executables that read and write the cache, in preference
+// order. When one of them is in PATH the cache is in use: deleting it only
+// makes the tool download the same content again, so the entry is reported as
+// caution and --yes skips it. When none is in PATH the entry keeps its declared
+// safety and is reported as a cache no installed tool uses. tools is set only
+// on entries declared safe (a caution entry already needs explicit opt-in) and
+// left empty for caches whose owner has no executable of its own in PATH
+// (libraries such as Puppeteer or Electron, and app caches such as Cursor's).
+//
 // Paths owned by a dedicated scanner are intentionally excluded to avoid
 // double-counting: Xcode's DerivedData / DeviceSupport / Archives / CoreSimulator
 // belong to the xcode ecosystem, not here.
@@ -29,6 +39,7 @@ type globalCache struct {
 	safety      model.SafetyLevel
 	description string
 	rec         string
+	tools       []string
 }
 
 // globalCaches lists shared caches as home-relative paths. Entries whose path
@@ -36,68 +47,70 @@ type globalCache struct {
 // (~/Library/Caches/*) and Linux (~/.cache/*) variants can coexist here.
 var globalCaches = []globalCache{
 	// --- Package managers (cross-platform) ---
-	{".npm", model.CatCache, model.SafetySafe, "npm package cache", ""},
-	{".bun/install/cache", model.CatCache, model.SafetySafe, "Bun install cache", ""},
-	{".gradle/caches", model.CatCache, model.SafetyCaution, "Gradle dependency & build cache", "Gradle re-downloads dependencies and rebuilds on next run"},
-	{".gradle/wrapper/dists", model.CatCache, model.SafetyCaution, "Gradle wrapper distributions", "Gradle re-downloads its distribution on next run"},
-	{".cargo/registry", model.CatCache, model.SafetyCaution, "Cargo registry cache", "Cargo re-downloads crate sources on next build"},
-	{".cargo/git", model.CatCache, model.SafetyCaution, "Cargo git dependency cache", "Cargo re-clones git dependencies on next build"},
-	{"go/pkg/mod", model.CatDeps, model.SafetyCaution, "Go module cache", "use 'go clean -modcache' — read-only files make --force fail; Go re-downloads on next build"},
-	{".pub-cache", model.CatDeps, model.SafetyCaution, "Dart/Flutter pub package cache", "shared by every Flutter project; packages re-download on next 'flutter pub get'"},
-	{".rustup/toolchains", model.CatRuntime, model.SafetyCaution, "Rust toolchains", "installed toolchains must be reinstalled with 'rustup toolchain install'"},
-	{".nvm/versions", model.CatRuntime, model.SafetyCaution, "nvm-installed Node.js runtimes", "deletes installed Node.js versions, not a cache — reinstall with 'nvm install'"},
-	{".pyenv/versions", model.CatRuntime, model.SafetyCaution, "pyenv-installed Python runtimes", "deletes installed Python versions, not a cache — reinstall with 'pyenv install'"},
-	{".rbenv/versions", model.CatRuntime, model.SafetyCaution, "rbenv-installed Ruby runtimes", "deletes installed Ruby versions, not a cache — reinstall with 'rbenv install'"},
-	{".local/pipx", model.CatDeps, model.SafetyCaution, "pipx-installed CLI tools", "deletes the installed CLI tools themselves — each must be reinstalled with 'pipx install'"},
-	{".m2/repository", model.CatDeps, model.SafetyCaution, "Maven local repository", "shared by every Maven project; dependencies re-download on next build"},
+	{".npm", model.CatCache, model.SafetySafe, "npm package cache", "", []string{"npm"}},
+	{".bun/install/cache", model.CatCache, model.SafetySafe, "Bun install cache", "", []string{"bun"}},
+	{".gradle/caches", model.CatCache, model.SafetyCaution, "Gradle dependency & build cache", "Gradle re-downloads dependencies and rebuilds on next run", nil},
+	{".gradle/wrapper/dists", model.CatCache, model.SafetyCaution, "Gradle wrapper distributions", "Gradle re-downloads its distribution on next run", nil},
+	{".cargo/registry", model.CatCache, model.SafetyCaution, "Cargo registry cache", "Cargo re-downloads crate sources on next build", nil},
+	{".cargo/git", model.CatCache, model.SafetyCaution, "Cargo git dependency cache", "Cargo re-clones git dependencies on next build", nil},
+	{"go/pkg/mod", model.CatDeps, model.SafetyCaution, "Go module cache", "use 'go clean -modcache' — read-only files make --force fail; Go re-downloads on next build", nil},
+	{".pub-cache", model.CatDeps, model.SafetyCaution, "Dart/Flutter pub package cache", "shared by every Flutter project; packages re-download on next 'flutter pub get'", nil},
+	{".rustup/toolchains", model.CatRuntime, model.SafetyCaution, "Rust toolchains", "installed toolchains must be reinstalled with 'rustup toolchain install'", nil},
+	{".nvm/versions", model.CatRuntime, model.SafetyCaution, "nvm-installed Node.js runtimes", "deletes installed Node.js versions, not a cache — reinstall with 'nvm install'", nil},
+	{".pyenv/versions", model.CatRuntime, model.SafetyCaution, "pyenv-installed Python runtimes", "deletes installed Python versions, not a cache — reinstall with 'pyenv install'", nil},
+	{".rbenv/versions", model.CatRuntime, model.SafetyCaution, "rbenv-installed Ruby runtimes", "deletes installed Ruby versions, not a cache — reinstall with 'rbenv install'", nil},
+	{".local/pipx", model.CatDeps, model.SafetyCaution, "pipx-installed CLI tools", "deletes the installed CLI tools themselves — each must be reinstalled with 'pipx install'", nil},
+	{".m2/repository", model.CatDeps, model.SafetyCaution, "Maven local repository", "shared by every Maven project; dependencies re-download on next build", nil},
 	// NOTE: `~/.gem` is NOT listed — it is a config root, not a cache. It holds
 	// `~/.gem/credentials` (the RubyGems push API key) alongside installed gems.
 	// Deleting it would leak-by-loss a credential and remove installed gems, so
 	// it must never be a deletion target. (RubyGems' download cache lives under
 	// `~/Library/Caches/CocoaPods`-style OS cache dirs, listed below where safe.)
-	{".cocoapods", model.CatCache, model.SafetySafe, "CocoaPods spec repos", ""},
+	{".cocoapods", model.CatCache, model.SafetySafe, "CocoaPods spec repos", "", []string{"pod"}},
 	// uv and Puppeteer (v19+) use the XDG ~/.cache path on macOS too, so these
 	// live here rather than in the Linux section.
-	{".cache/uv", model.CatCache, model.SafetySafe, "uv package cache", ""},
-	{".cache/puppeteer", model.CatCache, model.SafetySafe, "Puppeteer browser cache", ""},
+	{".cache/uv", model.CatCache, model.SafetySafe, "uv package cache", "", []string{"uv"}},
+	{".cache/puppeteer", model.CatCache, model.SafetySafe, "Puppeteer browser cache", "", nil},
 
 	// --- Package managers / dev tools (macOS) ---
-	{"Library/Caches/Yarn", model.CatCache, model.SafetySafe, "Yarn cache", ""},
-	{"Library/pnpm/store", model.CatCache, model.SafetyCaution, "pnpm content-addressable store", "every project re-downloads dependencies on next install (store is hard-linked)"},
-	{"Library/Caches/pnpm", model.CatCache, model.SafetySafe, "pnpm download cache", ""},
-	{"Library/Caches/pip", model.CatCache, model.SafetySafe, "pip download cache", ""},
-	{"Library/Caches/Homebrew", model.CatCache, model.SafetySafe, "Homebrew download cache", ""},
-	{"Library/Caches/CocoaPods", model.CatCache, model.SafetySafe, "CocoaPods spec & pod cache", ""},
-	{"Library/Caches/go-build", model.CatCache, model.SafetySafe, "Go build cache", ""},
-	{"Library/Caches/ms-playwright", model.CatCache, model.SafetyCaution, "Playwright browser binaries", "Playwright re-downloads browsers on next install"},
-	{"Library/Caches/electron", model.CatCache, model.SafetySafe, "Electron binary cache", ""},
-	{"Library/Caches/node-gyp", model.CatCache, model.SafetySafe, "node-gyp header cache", ""},
-	{"Library/Caches/typescript", model.CatCache, model.SafetySafe, "TypeScript installer cache", ""},
-	{"Library/Caches/uv", model.CatCache, model.SafetySafe, "uv package cache", ""},
-	{"Library/Caches/Cypress", model.CatCache, model.SafetySafe, "Cypress binary cache", ""},
-	{"Library/Caches/deno", model.CatCache, model.SafetySafe, "Deno cache", ""},
-	{"Library/Caches/pypoetry", model.CatCache, model.SafetySafe, "Poetry cache", ""},
+	{"Library/Caches/Yarn", model.CatCache, model.SafetySafe, "Yarn cache", "", []string{"yarn"}},
+	{"Library/pnpm/store", model.CatCache, model.SafetyCaution, "pnpm content-addressable store", "every project re-downloads dependencies on next install (store is hard-linked)", nil},
+	{"Library/Caches/pnpm", model.CatCache, model.SafetySafe, "pnpm download cache", "", []string{"pnpm"}},
+	{"Library/Caches/pip", model.CatCache, model.SafetySafe, "pip download cache", "", []string{"pip", "pip3"}},
+	// Reported as a directory only when brew is not in PATH or its dry-run
+	// fails; otherwise the Homebrew cleanup item (global_homebrew.go) covers it.
+	{homebrewCacheRelPath, model.CatCache, model.SafetySafe, "Homebrew download cache", "", []string{"brew"}},
+	{"Library/Caches/CocoaPods", model.CatCache, model.SafetySafe, "CocoaPods spec & pod cache", "", []string{"pod"}},
+	{"Library/Caches/go-build", model.CatCache, model.SafetySafe, "Go build cache", "", []string{"go"}},
+	{"Library/Caches/ms-playwright", model.CatCache, model.SafetyCaution, "Playwright browser binaries", "Playwright re-downloads browsers on next install", nil},
+	{"Library/Caches/electron", model.CatCache, model.SafetySafe, "Electron binary cache", "", nil},
+	{"Library/Caches/node-gyp", model.CatCache, model.SafetySafe, "node-gyp header cache", "", nil},
+	{"Library/Caches/typescript", model.CatCache, model.SafetySafe, "TypeScript installer cache", "", nil},
+	{"Library/Caches/uv", model.CatCache, model.SafetySafe, "uv package cache", "", []string{"uv"}},
+	{"Library/Caches/Cypress", model.CatCache, model.SafetySafe, "Cypress binary cache", "", nil},
+	{"Library/Caches/deno", model.CatCache, model.SafetySafe, "Deno cache", "", []string{"deno"}},
+	{"Library/Caches/pypoetry", model.CatCache, model.SafetySafe, "Poetry cache", "", []string{"poetry"}},
 
 	// --- Dev tools (Linux ~/.cache equivalents) ---
-	{".cache/go-build", model.CatCache, model.SafetySafe, "Go build cache", ""},
-	{".cache/pip", model.CatCache, model.SafetySafe, "pip download cache", ""},
-	{".cache/ms-playwright", model.CatCache, model.SafetyCaution, "Playwright browser binaries", "Playwright re-downloads browsers on next install"},
-	{".cache/node-gyp", model.CatCache, model.SafetySafe, "node-gyp header cache", ""},
-	{".cache/yarn", model.CatCache, model.SafetySafe, "Yarn cache", ""},
-	{".cache/pnpm", model.CatCache, model.SafetySafe, "pnpm download cache", ""},
-	{".cache/electron", model.CatCache, model.SafetySafe, "Electron binary cache", ""},
-	{".cache/Cypress", model.CatCache, model.SafetySafe, "Cypress binary cache", ""},
-	{".cache/deno", model.CatCache, model.SafetySafe, "Deno cache", ""},
-	{".cache/pypoetry", model.CatCache, model.SafetySafe, "Poetry cache", ""},
+	{".cache/go-build", model.CatCache, model.SafetySafe, "Go build cache", "", []string{"go"}},
+	{".cache/pip", model.CatCache, model.SafetySafe, "pip download cache", "", []string{"pip", "pip3"}},
+	{".cache/ms-playwright", model.CatCache, model.SafetyCaution, "Playwright browser binaries", "Playwright re-downloads browsers on next install", nil},
+	{".cache/node-gyp", model.CatCache, model.SafetySafe, "node-gyp header cache", "", nil},
+	{".cache/yarn", model.CatCache, model.SafetySafe, "Yarn cache", "", []string{"yarn"}},
+	{".cache/pnpm", model.CatCache, model.SafetySafe, "pnpm download cache", "", []string{"pnpm"}},
+	{".cache/electron", model.CatCache, model.SafetySafe, "Electron binary cache", "", nil},
+	{".cache/Cypress", model.CatCache, model.SafetySafe, "Cypress binary cache", "", nil},
+	{".cache/deno", model.CatCache, model.SafetySafe, "Deno cache", "", []string{"deno"}},
+	{".cache/pypoetry", model.CatCache, model.SafetySafe, "Poetry cache", "", []string{"poetry"}},
 
 	// --- Android SDK (home-rooted, large; no dedicated scanner yet) ---
 	// NOTE: `~/.android/avd` is deliberately excluded. An emulator's virtual disk
 	// can hold user-created state (installed apps, files written inside the
 	// emulated device) that a fresh AVD does not restore — irreplaceable data,
 	// not regenerable cache. Only re-downloadable SDK artifacts are listed below.
-	{"Library/Android/sdk/system-images", model.CatRuntime, model.SafetyCaution, "Android emulator system images", "emulators won't start until images are re-downloaded"},
-	{"Library/Android/sdk/ndk", model.CatDeps, model.SafetyCaution, "Android NDK installations", "NDK is re-downloaded on next native build"},
-	{"Library/Android/sdk/build-tools", model.CatRuntime, model.SafetyCaution, "Android SDK build tools", "builds fail until build-tools are re-downloaded via the SDK manager"},
+	{"Library/Android/sdk/system-images", model.CatRuntime, model.SafetyCaution, "Android emulator system images", "emulators won't start until images are re-downloaded", nil},
+	{"Library/Android/sdk/ndk", model.CatDeps, model.SafetyCaution, "Android NDK installations", "NDK is re-downloaded on next native build", nil},
+	{"Library/Android/sdk/build-tools", model.CatRuntime, model.SafetyCaution, "Android SDK build tools", "builds fail until build-tools are re-downloaded via the SDK manager", nil},
 
 	// --- AI tools ---
 	// NOTE: AI coding-tool home directories are deliberately NOT in this
@@ -112,15 +125,16 @@ var globalCaches = []globalCache{
 	//
 	// Only Cursor's cache subdirectories — Application Support/Cursor itself
 	// holds settings and must never be offered for deletion.
-	{"Library/Application Support/Cursor/Cache", model.CatCache, model.SafetySafe, "Cursor cache", ""},
-	{"Library/Application Support/Cursor/CachedData", model.CatCache, model.SafetySafe, "Cursor cached data", ""},
-	{"Library/Application Support/Cursor/Code Cache", model.CatCache, model.SafetySafe, "Cursor code cache", ""},
+	{"Library/Application Support/Cursor/Cache", model.CatCache, model.SafetySafe, "Cursor cache", "", nil},
+	{"Library/Application Support/Cursor/CachedData", model.CatCache, model.SafetySafe, "Cursor cached data", "", nil},
+	{"Library/Application Support/Cursor/Code Cache", model.CatCache, model.SafetySafe, "Cursor code cache", "", nil},
 }
 
 // GlobalScanner scans for shared, home-rooted developer caches that are not
-// owned by any single project (package-manager and dev-tool caches). On macOS
-// it additionally reports leftover browser code-sign clones under the per-user
-// system temp root.
+// owned by any single project (package-manager and dev-tool caches). With brew
+// installed it reports a Homebrew cleanup item reclaimed by `brew cleanup`. On
+// macOS it additionally reports leftover browser code-sign clones under the
+// per-user system temp root.
 type GlobalScanner struct {
 	// TmpRoot is the per-user system temp root searched for browser
 	// code-sign clones (macOS: /private/var/folders). A field so tests can
@@ -130,10 +144,15 @@ type GlobalScanner struct {
 	// is currently running (default: pgrep -x). A field so tests can stub
 	// browser run state.
 	ProcessRunning func(processName string) bool
-	// LookPath resolves an executable in PATH (default: exec.LookPath). A field
-	// so VendorCleanups only offers commands for tools actually installed, and
-	// tests can stub which tools are present.
+	// LookPath resolves an executable in PATH (default: exec.LookPath). It
+	// decides which caches are in use by an installed tool, whether the
+	// Homebrew cleanup item applies, and which VendorCleanups are offered. A
+	// field so tests can stub which tools are installed.
 	LookPath func(file string) (string, error)
+	// RunCommand runs an external tool with extra environment variables and
+	// returns its standard output (default: execCommand). A field so tests can
+	// stub tool output and record the commands a delete would run.
+	RunCommand func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
 }
 
 func NewGlobalScanner() *GlobalScanner {
@@ -141,18 +160,40 @@ func NewGlobalScanner() *GlobalScanner {
 		TmpRoot:        "/private/var/folders",
 		ProcessRunning: processRunning,
 		LookPath:       exec.LookPath,
+		RunCommand:     execCommand,
 	}
 }
 
-// processRunning reports whether a process with exactly the given name is
-// running, via pgrep -x. Any failure (pgrep missing, no match) counts as not
-// running.
-func processRunning(name string) bool {
-	return exec.Command("pgrep", "-x", name).Run() == nil
+// execCommand runs name with args, adding env to the current environment, and
+// returns standard output. A non-zero exit is returned as an error that
+// includes the command's standard error, so the cause reaches the user.
+func execCommand(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = append(os.Environ(), env...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return out, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, msg)
+		}
+		return out, fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return out, nil
 }
 
 func (s *GlobalScanner) Name() string               { return "global" }
 func (s *GlobalScanner) Ecosystem() model.Ecosystem { return model.EcoGlobal }
+
+// installedTool returns the first of tools found in PATH, or "" when none is.
+func (s *GlobalScanner) installedTool(tools []string) string {
+	for _, t := range tools {
+		if _, err := s.lookPath(t); err == nil {
+			return t
+		}
+	}
+	return ""
+}
 
 // globalVendorCleanup describes a package manager's native cache-prune command.
 // tools lists candidate executables in preference order (first one found in PATH
@@ -166,9 +207,10 @@ type globalVendorCleanup struct {
 
 // globalVendorCleanups are vendor-native prune commands for the global caches.
 // All are non-destructive — they only reclaim regenerable download/store caches,
-// so no destructive-action gate is needed here.
+// so no destructive-action gate is needed here. Homebrew is not listed: its
+// cleanup is a scan item of its own (global_homebrew.go), selected and sized
+// like any other item.
 var globalVendorCleanups = []globalVendorCleanup{
-	{"brew-cleanup", []string{"brew"}, []string{"cleanup", "-s"}, "Remove stale Homebrew downloads and old versions"},
 	{"npm-cache-clean", []string{"npm"}, []string{"cache", "clean", "--force"}, "Clear the npm package cache"},
 	{"yarn-cache-clean", []string{"yarn"}, []string{"cache", "clean"}, "Clear the Yarn cache"},
 	{"pnpm-store-prune", []string{"pnpm"}, []string{"store", "prune"}, "Remove unreferenced packages from the pnpm store"},
@@ -181,20 +223,9 @@ var globalVendorCleanups = []globalVendorCleanup{
 // can actually run. Since every global cache shares the one ecosystem, these run
 // together whenever the global ecosystem is in a --vendor-cleanup scope.
 func (s *GlobalScanner) VendorCleanups() []VendorCleanup {
-	lookPath := s.LookPath
-	if lookPath == nil {
-		lookPath = exec.LookPath
-	}
-
 	var out []VendorCleanup
 	for _, v := range globalVendorCleanups {
-		var tool string
-		for _, cand := range v.tools {
-			if _, err := lookPath(cand); err == nil {
-				tool = cand
-				break
-			}
-		}
+		tool := s.installedTool(v.tools)
 		if tool == "" {
 			continue // none of the candidate executables are installed
 		}
@@ -225,33 +256,41 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 		absRoot = root
 	}
 
+	// The Homebrew cleanup reaches outside home (old versions under the
+	// Homebrew prefix), so like the code-sign clones it is included only when
+	// the scan root covers home. Its dry-run takes seconds, so it runs
+	// concurrently with the catalog stat and sizing below.
+	var homebrew <-chan homebrewScan
+	brewPath := ""
+	if isUnderRoot(home, absRoot) {
+		if p, err := s.lookPath("brew"); err == nil {
+			brewPath = p
+			homebrew = s.startHomebrewScan(ctx, brewPath)
+		}
+	}
+
 	var results []model.ScanResult
-	for _, c := range globalCaches {
+	var homebrewCache *globalCache
+	for i, c := range globalCaches {
 		select {
 		case <-ctx.Done():
 			return results, ctx.Err()
 		default:
 		}
 
-		full := filepath.Join(home, c.relPath)
-		if !isUnderRoot(full, absRoot) {
-			continue
-		}
-		info, err := os.Stat(full)
-		if err != nil || !info.IsDir() {
+		if c.relPath == homebrewCacheRelPath && brewPath != "" {
+			// Decided after the brew dry-run: normally covered by the
+			// Homebrew cleanup item, reported as a directory only if the
+			// dry-run fails.
+			homebrewCache = &globalCaches[i]
 			continue
 		}
 
-		results = append(results, model.ScanResult{
-			Path:           full,
-			Ecosystem:      model.EcoGlobal,
-			Category:       c.category,
-			LastMod:        ModTime(full),
-			Safety:         c.safety,
-			ProjectRoot:    filepath.Dir(full),
-			Label:          c.description,
-			Recommendation: c.rec,
-		})
+		full := filepath.Join(home, c.relPath)
+		if !isUnderRoot(full, absRoot) || !isDir(full) {
+			continue
+		}
+		results = append(results, s.catalogResult(c, full))
 		ReportProgress(ctx, len(results))
 	}
 
@@ -269,138 +308,77 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 	if err := sizePending(ctx, results); err != nil {
 		return results, err
 	}
+
+	if homebrew != nil {
+		hs := <-homebrew
+		switch {
+		case hs.err == nil && hs.item != nil:
+			results = append(results, *hs.item)
+		case hs.err != nil && homebrewCache != nil:
+			// brew is installed but its dry-run failed, so the reclaimable
+			// size is unknown. Fall back to the cache directory so the space
+			// stays visible; the note carries the brew error.
+			full := filepath.Join(home, homebrewCache.relPath)
+			if isDir(full) {
+				r := s.catalogResult(*homebrewCache, full)
+				r.Recommendation = fmt.Sprintf("brew cleanup dry-run failed (%v); deleting this directory removes every Homebrew download, which brew downloads again when it needs one", hs.err)
+				st := Measure(full)
+				r.Size, r.ApparentSize, r.Links = st.Disk, st.Apparent, st.Links
+				results = append(results, r)
+			}
+		}
+		ReportProgress(ctx, len(results))
+	}
 	return results, nil
 }
 
-// Recommendation notes for code-sign clones, keyed by browser run state:
-// clones of a browser that is not running are true zombies (safe); while the
-// browser runs, its newest copy may be in use (caution); for bundle IDs we
-// cannot map to a process name the run state is unknowable (caution).
-const (
-	codeSignCloneRec        = "zombie copies from killed browser processes (headless automation like lighthouse/puppeteer); the browser cleans these on next normal exit. Size may overstate if copies are APFS clones."
-	codeSignCloneRunningRec = "browser is currently running — newest copy may be in use; it cleans up leftovers on normal exit"
-	codeSignCloneUnknownRec = "unrecognized browser — cannot check whether it is running (newest copy may be in use); it cleans up leftovers on normal exit"
-)
-
-// codeSignCloneBrowser describes a known Chromium-family browser: the display
-// name used in labels and the process name checked (pgrep -x) to tell whether
-// the browser is currently running.
-type codeSignCloneBrowser struct {
-	displayName string
-	processName string
+// lookPath resolves an executable with the scanner's LookPath.
+func (s *GlobalScanner) lookPath(file string) (string, error) {
+	if s.LookPath == nil {
+		return exec.LookPath(file)
+	}
+	return s.LookPath(file)
 }
 
-// codeSignCloneBrowsers maps Chromium-family bundle IDs to browser info.
-// Unknown bundle IDs fall back to the raw bundle ID and a caution rating, so
-// detection is never limited to this list — matching is done by the
-// *.code_sign_clone glob.
-var codeSignCloneBrowsers = map[string]codeSignCloneBrowser{
-	"com.google.Chrome":          {"Chrome", "Google Chrome"},
-	"com.google.Chrome.canary":   {"Chrome Canary", "Google Chrome Canary"},
-	"com.brave.Browser":          {"Brave", "Brave Browser"},
-	"com.microsoft.edgemac":      {"Edge", "Microsoft Edge"},
-	"company.thebrowser.Browser": {"Arc", "Arc"},
-	"com.vivaldi.Vivaldi":        {"Vivaldi", "Vivaldi"},
-	"org.chromium.Chromium":      {"Chromium", "Chromium"},
-	"com.naver.Whale":            {"Whale", "Whale"},
+// runCommand runs an external tool with the scanner's RunCommand.
+func (s *GlobalScanner) runCommand(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
+	if s.RunCommand == nil {
+		return execCommand(ctx, env, name, args...)
+	}
+	return s.RunCommand(ctx, env, name, args...)
 }
 
-// scanCodeSignClones finds leftover browser code-sign clones under the
-// per-user system temp root (macOS only). Chromium-family browsers copy their
-// own bundle to /private/var/folders/<xx>/<yyy>/X/<bundle-id>.code_sign_clone/
-// on launch to verify their code signature and remove the copy on normal exit.
-// Force-killed processes — typically headless automation such as lighthouse or
-// puppeteer — leave the copies behind, and they accumulate (observed in the
-// wild: 92 copies / 156 GB).
-//
-// found is the number of results already reported so progress keeps counting up.
-//
-// Safety depends on run state: clones of a browser that is not running are
-// safe zombies; while the browser runs (checked once per browser via
-// ProcessRunning) or when the bundle ID is unrecognized, they are caution.
-//
-// Sizes come from allocated blocks (Measure) and still overstate real disk
-// usage when the copies are APFS clones of the installed app bundle: clones
-// have distinct inodes and each reports full blocks, so neither block counting
-// nor inode dedup catches the sharing. Clone-aware measurement is a planned
-// follow-up (needs APFS extent-level accounting).
-func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []model.ScanResult {
-	matches, err := filepath.Glob(filepath.Join(s.TmpRoot, "*", "*", "X", "*.code_sign_clone"))
-	if err != nil {
-		return nil
-	}
-
-	// Memoize run-state checks: one pgrep per browser, not per clone dir.
-	running := make(map[string]bool)
-	isRunning := func(processName string) bool {
-		if v, ok := running[processName]; ok {
-			return v
-		}
-		v := s.ProcessRunning(processName)
-		running[processName] = v
-		return v
-	}
-
-	var out []model.ScanResult
-	for _, m := range matches {
-		select {
-		case <-ctx.Done():
-			return out
-		default:
-		}
-		info, err := os.Stat(m)
-		if err != nil || !info.IsDir() {
-			continue
-		}
-
-		bundleID := strings.TrimSuffix(filepath.Base(m), ".code_sign_clone")
-		browser, known := codeSignCloneBrowsers[bundleID]
-
-		// Default: unrecognized bundle — no process name to check, so the
-		// run state is unknowable; stay conservative.
-		name := bundleID
-		safety := model.SafetyCaution
-		rec := codeSignCloneUnknownRec
-		if known {
-			name = browser.displayName
-			if isRunning(browser.processName) {
-				rec = codeSignCloneRunningRec
-			} else {
-				safety = model.SafetySafe
-				rec = codeSignCloneRec
+// catalogResult builds the unsized result for a catalog entry found at full.
+// An installed tool that uses the cache raises the entry to caution; an entry
+// whose tools are all absent keeps its declared safety with a note saying no
+// installed tool uses it. A declared rec always takes precedence over these
+// generated notes.
+func (s *GlobalScanner) catalogResult(c globalCache, full string) model.ScanResult {
+	safety, rec := c.safety, c.rec
+	if len(c.tools) > 0 {
+		if tool := s.installedTool(c.tools); tool != "" {
+			safety = model.SafetyCaution
+			if rec == "" {
+				rec = fmt.Sprintf("%s is installed and uses this cache; deleting it only makes %s download the same content again", tool, tool)
 			}
+		} else if rec == "" {
+			rec = fmt.Sprintf("%s not found in PATH, so no installed tool is known to use this cache", strings.Join(c.tools, "/"))
 		}
-
-		out = append(out, model.ScanResult{
-			Path:           m,
-			Ecosystem:      model.EcoGlobal,
-			Category:       model.CatCache,
-			LastMod:        ModTime(m),
-			Safety:         safety,
-			ProjectRoot:    filepath.Dir(m),
-			Label:          codeSignCloneLabel(m, name),
-			Recommendation: rec,
-		})
-		ReportProgress(ctx, found+len(out))
 	}
-	return out
+	return model.ScanResult{
+		Path:           full,
+		Ecosystem:      model.EcoGlobal,
+		Category:       c.category,
+		LastMod:        ModTime(full),
+		Safety:         safety,
+		ProjectRoot:    filepath.Dir(full),
+		Label:          c.description,
+		Recommendation: rec,
+	}
 }
 
-// codeSignCloneLabel derives e.g. "Chrome code-sign clones (92 copies)" from
-// the clone directory: browser display name plus the number of immediate child
-// directories (one copy per killed process).
-func codeSignCloneLabel(dir, name string) string {
-	copies := 0
-	if entries, err := os.ReadDir(dir); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				copies++
-			}
-		}
-	}
-	unit := "copies"
-	if copies == 1 {
-		unit = "copy"
-	}
-	return fmt.Sprintf("%s code-sign clones (%d %s)", name, copies, unit)
+// isDir reports whether path exists and is a directory.
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }

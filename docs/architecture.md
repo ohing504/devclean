@@ -121,7 +121,9 @@ type DeleteMethod struct {
 Delete *DeleteMethod `json:"delete,omitempty"` // nil = path removal
 ```
 
-The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached, otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal; command/api items follow the vendor's own recovery semantics (surfacing that in the selection UI belongs to the first ecosystem that ships such items).
+The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached, otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal; command/api items follow the vendor's own recovery semantics. `clean` shows this to the user: `--dry-run` prints `runs: <Display>` under each command item, and the interactive prompt asks for trash/permanent only when path items are selected. The prompt's description counts the command items that run regardless of that choice. When every selected item is a command item, the prompt is a Run/Cancel confirmation instead.
+
+The first per-item command item is the global scanner's Homebrew cleanup (`brew cleanup -s`, sized by its dry-run).
 
 In JSON output, non-path items serialize as `"delete": {"kind": "command", "display": "..."}` (`Run` never serializes), so agents can tell strategies apart; absence of the key means path removal.
 
@@ -141,13 +143,13 @@ type VendorCleanup struct {
 }
 ```
 
-`VendorCleanup` is the ecosystem-level **bulk** counterpart of a per-item `ScanResult.Delete`: both share the `model.DeleteMethod` execution contract. Bulk actions (e.g. `brew cleanup`) register here; per-item non-path reclaims (e.g. `docker rmi <id>`) attach a `DeleteMethod` to their `ScanResult`.
+`VendorCleanup` is the ecosystem-level **bulk** counterpart of a per-item `ScanResult.Delete`: both share the `model.DeleteMethod` execution contract. Bulk actions (e.g. `pnpm store prune`) register here; per-item non-path reclaims (e.g. `docker rmi <id>`) attach a `DeleteMethod` to their `ScanResult`.
 
 `devclean clean --vendor-cleanup` collects cleanups from selected ecosystems and runs them alongside path-based deletion. Vendor commands keep the ecosystem's internal state consistent (e.g. `xcrun simctl delete unavailable` removes simulator devices and updates CoreSimulator's database in one step). Dry-run prints the command without executing.
 
 Current implementations:
 - `xcode`: `xcrun simctl delete unavailable`
-- `global`: `brew cleanup`, `npm`/`yarn cache clean`, `pnpm store prune`, `pip`/`uv cache prune` — tools absent from PATH are skipped, so only installed managers are offered
+- `global`: `npm`/`yarn cache clean`, `pnpm store prune`, `pip`/`uv cache prune` — tools absent from PATH are skipped, so only installed managers are offered
 
 Natural future fits: Docker `system prune`, Gradle `--stop`.
 

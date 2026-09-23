@@ -142,7 +142,6 @@ They are scoped to the ecosystems you target: the `--eco` selection, or — when
 | Ecosystem | Command | What it does |
 |-----------|---------|--------------|
 | xcode | `xcrun simctl delete unavailable` | Removes simulator devices whose iOS/watchOS/tvOS runtime was uninstalled. |
-| global | `brew cleanup -s` | Removes stale Homebrew downloads and old versions. |
 | global | `npm cache clean --force` | Clears the npm package cache. |
 | global | `yarn cache clean` | Clears the Yarn cache. |
 | global | `pnpm store prune` | Removes unreferenced packages from the pnpm store. |
@@ -152,6 +151,8 @@ They are scoped to the ecosystems you target: the `--eco` selection, or — when
 Commands for tools not installed on the machine are skipped (detected via PATH
 lookup). The `global` ecosystem runs every installed manager's prune together;
 individual tools can't be targeted separately since they share one ecosystem.
+
+Homebrew is not a vendor cleanup. `brew cleanup` is a scan item of its own, sized by brew's dry-run and selected like any other item (see [Global Caches](ecosystems.md#global-caches)).
 
 `--dry-run` prints the commands without executing. `--vendor-cleanup` is
 additive — combine with `--safe`, `--status`, `--yes` as usual.
