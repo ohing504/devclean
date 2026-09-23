@@ -52,6 +52,13 @@ type treeModel struct {
 	aborted  bool
 	viewport viewport.Model
 	ready    bool
+
+	// selCount and selSize cache the footer's selection summary. They are
+	// recomputed only when the selection changes (refreshSelection), since
+	// DedupedTotal walks every hard-linked inode of every selected artifact
+	// and View runs on every keypress, including plain cursor moves.
+	selCount int
+	selSize  int64
 }
 
 // BuildTreeItems constructs the flat item list from grouped scan results.
@@ -170,14 +177,26 @@ func RunTreeSelector(results []model.ScanResult) TreeSelectorResult {
 		return TreeSelectorResult{Aborted: true}
 	}
 
+	return TreeSelectorResult{Selected: fm.selectedResults()}
+}
+
+// selectedResults returns the scan results of every selected artifact row.
+func (m treeModel) selectedResults() []model.ScanResult {
 	var selected []model.ScanResult
-	for _, item := range fm.items {
+	for _, item := range m.items {
 		if item.Type == ItemArtifact && item.Selected && item.Result != nil {
 			selected = append(selected, *item.Result)
 		}
 	}
+	return selected
+}
 
-	return TreeSelectorResult{Selected: selected}
+// refreshSelection recomputes the cached footer summary from the current
+// selection, counting hard-linked blocks shared across artifacts once.
+func (m *treeModel) refreshSelection() {
+	selected := m.selectedResults()
+	m.selCount = len(selected)
+	m.selSize = model.DedupedTotal(selected)
 }
 
 func (m treeModel) Init() tea.Cmd {
@@ -213,6 +232,7 @@ func (m treeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.jumpProject(1)
 		case " ":
 			m.toggleCurrent()
+			m.refreshSelection()
 		case "enter":
 			return m, tea.Quit
 		case "q", "esc", "ctrl+c":
@@ -220,12 +240,16 @@ func (m treeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "a":
 			m.selectAll()
+			m.refreshSelection()
 		case "n":
 			m.selectNone()
+			m.refreshSelection()
 		case "s":
 			m.selectBySafety(model.SafetySafe)
+			m.refreshSelection()
 		case "d":
 			m.selectByActivity(model.StatusDormant)
+			m.refreshSelection()
 		}
 		m.syncViewport()
 		return m, nil
@@ -437,15 +461,8 @@ func (m treeModel) renderHeader() string {
 // renderFooter renders the selection summary and legend below the
 // scrollable item viewport. Must stay at 4 lines to match chromeLines.
 func (m treeModel) renderFooter() string {
-	var selected []model.ScanResult
-	for _, item := range m.items {
-		if item.Type == ItemArtifact && item.Selected && item.Result != nil {
-			selected = append(selected, *item.Result)
-		}
-	}
-
 	var b strings.Builder
-	b.WriteString(InfoStyle.Render(fmt.Sprintf("Selected: %d items (%s)", len(selected), model.HumanSize(model.DedupedTotal(selected)))))
+	b.WriteString(InfoStyle.Render(fmt.Sprintf("Selected: %d items (%s)", m.selCount, model.HumanSize(m.selSize))))
 	b.WriteString("\n\n")
 	fmt.Fprintf(&b, "%s  %s safe  %s caution  %s protected   %s Active  %s Recent  %s Stale  %s Dormant\n",
 		DimStyle.Render("Legend:"),

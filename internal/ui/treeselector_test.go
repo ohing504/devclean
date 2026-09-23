@@ -426,8 +426,8 @@ func TestFooterDedupsHardLinkedSelection(t *testing.T) {
 		{Path: "/store", Ecosystem: model.EcoNode, Size: 3000, Safety: model.SafetySafe, ProjectRoot: "/store", Links: map[model.InodeKey]int64{shared: 1000}},
 		{Path: "/app/node_modules", Ecosystem: model.EcoNode, Size: 2000, Safety: model.SafetySafe, ProjectRoot: "/app", Links: map[model.InodeKey]int64{shared: 1000}},
 	}
-	m := treeModel{items: BuildTreeItems(results)}
-	m.selectAll()
+	next, _ := treeModel{items: BuildTreeItems(results)}.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m := next.(treeModel)
 
 	want := "Selected: 2 items (" + model.HumanSize(4000) + ")"
 	if got := m.renderFooter(); !strings.Contains(got, want) {
