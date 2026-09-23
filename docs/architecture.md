@@ -202,6 +202,6 @@ Table output groups results by: **ecosystem → project → sub-package → arti
    - Protected projects hidden with explanation
 3. Choose: Move to Trash / Permanently delete / Cancel
 4. Execute with per-artifact status output — items with an attached `DeleteMethod` run it instead of path removal (see Deletion Strategy)
-5. Summary: items cleaned, space freed
+5. Summary: items cleaned and their total size, hard-linked blocks counted once (as in the selector footer and confirm prompt) — reported as `moved to Trash` for trash moves and `freed` for permanent deletes and `DeleteMethod` items (which run regardless of the trash/force choice)
 
 Trash moves use `os.Rename` into the Trash dir on the home volume. When the artifact lives on a different filesystem (external drive, separate partition), `os.Rename` fails with `EXDEV`; the cleaner falls back to a recursive copy followed by removing the original. The copy recreates directories, regular files (contents + permission bits), and symlinks (as links, never followed). The original is removed only after the copy fully succeeds — a mid-copy failure leaves the original intact and discards the partial copy, so a cross-device move can never lose data.

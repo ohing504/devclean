@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/ohing504/devclean/internal/cleaner"
@@ -93,10 +94,7 @@ func newCleanCmd() *cobra.Command {
 			}
 
 			// Show summary
-			var totalSize int64
-			for _, r := range toClean {
-				totalSize += r.Size
-			}
+			totalSize := model.DedupedTotal(toClean)
 
 			if dryRun {
 				fmt.Printf(
@@ -147,8 +145,10 @@ func newCleanCmd() *cobra.Command {
 			// Execute cleanup
 			c := cleaner.New(cleaner.Options{Force: force})
 
-			var cleaned int
-			var freedSize int64
+			// Path removal in trash mode leaves the space on disk until the Trash
+			// is emptied; permanent deletes and DeleteMethod items (which run
+			// regardless of the trash/force choice) reclaim it now.
+			var trashed, freed []model.ScanResult
 			var failed int
 
 			groups := model.GroupByProject(toClean)
@@ -166,17 +166,28 @@ func newCleanCmd() *cobra.Command {
 						failed++
 						fmt.Printf("    %s %s — %v\n", ui.ErrStyle.Render("✗"), relPath, err)
 					} else {
-						cleaned++
-						freedSize += r.Size
+						if r.Delete == nil && !force {
+							trashed = append(trashed, r)
+						} else {
+							freed = append(freed, r)
+						}
 						fmt.Printf("    %s %s (%s)\n", ui.SafeStyle.Render("✔"), relPath, model.HumanSize(r.Size))
 					}
 				}
 			}
 
-			fmt.Printf(
-				"\n%s\n",
-				ui.SafeStyle.Render(fmt.Sprintf("Cleaned %d items (%s freed)", cleaned, model.HumanSize(freedSize))),
-			)
+			var reclaimed []string
+			if len(freed) > 0 {
+				reclaimed = append(reclaimed, model.HumanSize(model.DedupedTotal(freed))+" freed")
+			}
+			if len(trashed) > 0 {
+				reclaimed = append(reclaimed, model.HumanSize(model.DedupedTotal(trashed))+" moved to Trash")
+			}
+			summary := fmt.Sprintf("Cleaned %d items", len(freed)+len(trashed))
+			if len(reclaimed) > 0 {
+				summary += " (" + strings.Join(reclaimed, ", ") + ")"
+			}
+			fmt.Printf("\n%s\n", ui.SafeStyle.Render(summary))
 			if failed > 0 {
 				fmt.Printf("%s\n", ui.ErrStyle.Render(fmt.Sprintf("%d items failed", failed)))
 			}

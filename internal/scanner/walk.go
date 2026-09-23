@@ -27,6 +27,9 @@ type artifactRule struct {
 	Suffix   string
 	Category model.Category
 	Safety   model.SafetyLevel
+	// Recommend optionally derives ScanResult.Recommendation from the matched
+	// directory (e.g. how the tool that populated it affects reclaim).
+	Recommend func(dir string) string
 }
 
 // matches reports whether a directory matches this rule. rel is the
@@ -177,6 +180,9 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 			}
 			if tables[tableIdx].SetProjectRoot {
 				result.ProjectRoot = projRoot
+			}
+			if rule.Recommend != nil {
+				result.Recommendation = rule.Recommend(dir)
 			}
 			results = append(results, result)
 			ReportProgress(ctx, len(results))

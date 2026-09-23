@@ -4,6 +4,7 @@ package ui
 // file uses the internal package instead of the usual ui_test convention.
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -414,4 +415,42 @@ func TestCursorStaysWithinViewport(t *testing.T) {
 	if m.viewport.YOffset != 0 {
 		t.Fatalf("YOffset = %d after scrolling back to the first row, want 0", m.viewport.YOffset)
 	}
+}
+
+// TestFooterDedupsHardLinkedSelection: selecting two artifacts that share a
+// hard-linked inode (pnpm store ↔ node_modules) must count the shared blocks
+// once, matching the scan total, instead of summing each artifact's Size.
+func TestFooterDedupsHardLinkedSelection(t *testing.T) {
+	shared := model.InodeKey{Dev: 1, Ino: 42}
+	results := []model.ScanResult{
+		{Path: "/store", Ecosystem: model.EcoNode, Size: 3000, Safety: model.SafetySafe, ProjectRoot: "/store", Links: map[model.InodeKey]int64{shared: 1000}},
+		{Path: "/app/node_modules", Ecosystem: model.EcoNode, Size: 2000, Safety: model.SafetySafe, ProjectRoot: "/app", Links: map[model.InodeKey]int64{shared: 1000}},
+	}
+	next, _ := treeModel{items: BuildTreeItems(results)}.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m := next.(treeModel)
+
+	want := "Selected: 2 items (" + model.HumanSize(4000) + ")"
+	if got := m.renderFooter(); !strings.Contains(got, want) {
+		t.Fatalf("footer = %q, want it to contain %q", got, want)
+	}
+}
+
+// TestArtifactRowShowsRecommendation: the selector is where the user decides
+// what to delete, so a scanner's Recommendation must appear on the artifact
+// row just as it does in the scan table.
+func TestArtifactRowShowsRecommendation(t *testing.T) {
+	results := []model.ScanResult{
+		{Path: "/app/node_modules", Ecosystem: model.EcoNode, Size: 100, Safety: model.SafetySafe, ProjectRoot: "/app", Recommendation: "run pnpm store prune"},
+	}
+	m := treeModel{items: BuildTreeItems(results)}
+	for i, it := range m.items {
+		if it.Type != ItemArtifact {
+			continue
+		}
+		if got := m.renderItem(i, it, false); !strings.Contains(got, "← run pnpm store prune") {
+			t.Fatalf("artifact row = %q, want it to contain the recommendation", got)
+		}
+		return
+	}
+	t.Fatal("no artifact row built")
 }
