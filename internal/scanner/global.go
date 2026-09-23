@@ -252,7 +252,7 @@ var globalVendorCleanups = []globalVendorCleanup{
 }
 
 // VendorCleanups returns prune commands for the package managers installed on
-// this machine. Tools absent from PATH are skipped so the offer only lists what
+// this machine. Tools not installed are skipped so the offer only lists what
 // can actually run. Since every global cache shares the one ecosystem, these run
 // together whenever the global ecosystem is in a --vendor-cleanup scope.
 func (s *GlobalScanner) VendorCleanups() []VendorCleanup {
@@ -270,7 +270,12 @@ func (s *GlobalScanner) VendorCleanups() []VendorCleanup {
 				Kind:    model.DeleteKindCommand,
 				Display: tool + " " + strings.Join(args, " "),
 				Run: func(ctx context.Context) error {
-					return exec.CommandContext(ctx, toolPath, args...).Run()
+					// A tool found outside PATH (e.g. nvm's npm) resolves its
+					// interpreter through PATH via its shebang, so its directory
+					// is prepended.
+					cmd := exec.CommandContext(ctx, toolPath, args...)
+					cmd.Env = append(os.Environ(), "PATH="+filepath.Dir(toolPath)+string(os.PathListSeparator)+os.Getenv("PATH"))
+					return cmd.Run()
 				},
 			},
 		})
