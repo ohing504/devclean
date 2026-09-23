@@ -3,15 +3,21 @@ package scanner
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ohing504/devclean/internal/model"
 )
 
 // nodeWalkEcosystem drives Node.js scanning in the single-pass walk engine.
+//
+// PruneRoot excludes trees whose package.json roots are installed packages,
+// not projects: their dist/ and node_modules are shipped content, so matching
+// them by name would offer package source for deletion (see isNodeVendoredTree).
 var nodeWalkEcosystem = walkEcosystem{
-	Name:    "node",
-	Eco:     model.EcoNode,
-	Markers: []string{"package.json"},
+	Name:      "node",
+	Eco:       model.EcoNode,
+	Markers:   []string{"package.json"},
+	PruneRoot: isNodeVendoredTree,
 	Rules: []artifactRule{
 		{RelPath: "node_modules", Category: model.CatDeps, Safety: model.SafetySafe},   // NPM dependencies
 		{RelPath: ".next", Category: model.CatBuild, Safety: model.SafetySafe},         // Next.js build cache
@@ -70,4 +76,35 @@ func isReactNativeProject(dir string, entryNames map[string]bool) bool {
 func hasFile(dir, name string) bool {
 	_, err := os.Stat(filepath.Join(dir, name))
 	return err == nil
+}
+
+// isNodeVendoredTree reports whether dir is a tree of installed packages that
+// must not be scanned as projects. Both signatures are invariant layouts, never
+// install paths:
+//
+//   - pnpm store version dir (store/v10, store/v11): named v<N> with a files/
+//     blob dir and an index (index/ up to v10, index.db from v11). v11's links/
+//     unpacks packages whose shipped dist/ would match the dist rule; deleting
+//     it corrupts the store every pnpm project hard-links from.
+//   - macOS app bundle (*.app with Contents/): Electron apps such as VS Code
+//     ship node_modules inside the bundle, including update copies staged
+//     under ~/Library/Caches.
+func isNodeVendoredTree(dir string, names map[string]bool) bool {
+	base := filepath.Base(dir)
+	if strings.HasSuffix(base, ".app") && names["Contents"] {
+		return true
+	}
+	return isPnpmStoreVersionDir(base) && names["files"] && (names["index"] || names["index.db"])
+}
+
+func isPnpmStoreVersionDir(base string) bool {
+	if len(base) < 2 || base[0] != 'v' {
+		return false
+	}
+	for _, c := range base[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }

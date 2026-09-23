@@ -2,8 +2,10 @@ package scanner_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -21,6 +23,87 @@ func mustWriteFile(t *testing.T, path string, data []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// artifact is the comparable identity of one walk result. Paths are relative
+// to the scan root; Root is ProjectRoot, empty for ecosystems that don't set it.
+type artifact struct {
+	Path     string
+	Eco      model.Ecosystem
+	Category model.Category
+	Safety   model.SafetyLevel
+	Root     string
+}
+
+func (a artifact) String() string {
+	s := fmt.Sprintf("%s [%s %s %s]", a.Path, a.Eco, a.Category, a.Safety)
+	if a.Root != "" {
+		s += " root=" + a.Root
+	}
+	return s
+}
+
+// walkCase is one WalkScan scenario: build tree under a temp root, scan it
+// with ecos, and expect exactly want — no missing and no extra artifacts.
+type walkCase struct {
+	name string
+	ecos []model.Ecosystem
+	// tree lists paths relative to the root; a trailing "/" makes a directory,
+	// anything else an empty file (parents are created as needed).
+	tree []string
+	want []artifact
+}
+
+func runWalkCases(t *testing.T, cases []walkCase) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			for _, p := range tc.tree {
+				full := filepath.Join(root, filepath.FromSlash(p))
+				if strings.HasSuffix(p, "/") {
+					mustMkdir(t, full)
+					continue
+				}
+				mustMkdir(t, filepath.Dir(full))
+				mustWriteFile(t, full, nil)
+			}
+
+			results, err := scanner.WalkScan(context.Background(), root, tc.ecos...)
+			if err != nil {
+				t.Fatalf("WalkScan: %v", err)
+			}
+			assertArtifacts(t, root, results, tc.want)
+		})
+	}
+}
+
+func assertArtifacts(t *testing.T, root string, results []model.ScanResult, want []artifact) {
+	t.Helper()
+	rel := func(p string) string {
+		if p == "" {
+			return ""
+		}
+		r, err := filepath.Rel(root, p)
+		if err != nil {
+			t.Fatalf("rel %s: %v", p, err)
+		}
+		return filepath.ToSlash(r)
+	}
+
+	got := make(map[artifact]bool, len(results))
+	for _, r := range results {
+		got[artifact{rel(r.Path), r.Ecosystem, r.Category, r.Safety, rel(r.ProjectRoot)}] = true
+	}
+	for _, w := range want {
+		if !got[w] {
+			t.Errorf("missing:    %s", w)
+		}
+		delete(got, w)
+	}
+	for a := range got {
+		t.Errorf("unexpected: %s", a)
 	}
 }
 

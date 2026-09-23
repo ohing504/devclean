@@ -36,6 +36,11 @@
 | `coverage` | build | safe | Test coverage reports |
 | `.svelte-kit` | build | safe | SvelteKit cache |
 
+**Installed-package trees are excluded.** Their `package.json` roots are shipped packages, not projects, so `dist`/`node_modules` inside are package content. Both are detected by invariant layout, never install path, and skipped as a whole subtree:
+
+- pnpm store version dir (`v<N>` with `files/` and `index/` or `index.db`): v11's `links/` unpacks packages whose `dist/` would match; deleting it corrupts the store every project hard-links from. The store itself is reported by the Global Caches scanner.
+- macOS app bundle (`*.app` with `Contents/`): Electron apps (e.g. VS Code update copies under `~/Library/Caches`) ship `node_modules` inside the bundle.
+
 **Monorepo support**: artifacts in sub-packages (apps/, packages/) are grouped under the git root project. Sub-packages are displayed with headers showing their path and total size.
 
 **React Native / Expo**: when a Node project also has `ios/Podfile` or `metro.config.{js,ts,cjs,mjs}`, the scanner additionally collects RN-specific artifacts at multi-segment paths under the project root.
