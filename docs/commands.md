@@ -152,8 +152,6 @@ Commands for tools not installed on the machine are skipped (detected via PATH
 lookup). The `global` ecosystem runs every installed manager's prune together;
 individual tools can't be targeted separately since they share one ecosystem.
 
-Homebrew is not a vendor cleanup. `brew cleanup` is a scan item of its own, sized by brew's dry-run and selected like any other item (see [Global Caches](ecosystems.md#global-caches)).
-
 `--dry-run` prints the commands without executing. `--vendor-cleanup` is
 additive — combine with `--safe`, `--status`, `--yes` as usual.
 

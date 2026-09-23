@@ -21,14 +21,9 @@ import (
 // for caution entries it states what breaks ("re-downloaded on next install"),
 // so a user — or an AI agent reading --json — can decide without external knowledge.
 //
-// tools lists the executables that read and write the cache, in preference
-// order. When one of them is installed (findExecutable) the cache is in use: deleting it only
-// makes the tool download the same content again, so the entry is reported as
-// caution and --yes skips it. When none is installed the entry keeps its declared
-// safety and is reported as a cache no installed tool uses. tools is set only
-// on entries declared safe (a caution entry already needs explicit opt-in) and
-// left empty for caches whose owner has no executable of its own in PATH
-// (libraries such as Puppeteer or Electron, and app caches such as Cursor's).
+// tools lists the executables that use the cache. If one is installed the
+// entry becomes caution: deleting an in-use cache only forces a re-download.
+// Set only on safe entries with an owning executable.
 //
 // Paths owned by a dedicated scanner are intentionally excluded to avoid
 // double-counting: Xcode's DerivedData / DeviceSupport / Archives / CoreSimulator
@@ -144,15 +139,11 @@ type GlobalScanner struct {
 	// is currently running (default: pgrep -x). A field so tests can stub
 	// browser run state.
 	ProcessRunning func(processName string) bool
-	// LookPath resolves an installed executable (default: findExecutable,
-	// which searches PATH and then user-level install directories). It
-	// decides which caches are in use by an installed tool, whether the
-	// Homebrew cleanup item applies, and which VendorCleanups are offered. A
-	// field so tests can stub which tools are installed.
+	// LookPath resolves an installed executable (default: findExecutable).
+	// A field so tests can stub which tools are installed.
 	LookPath func(file string) (string, error)
-	// RunCommand runs an external tool with extra environment variables and
-	// returns its standard output (default: execCommand). A field so tests can
-	// stub tool output and record the commands a delete would run.
+	// RunCommand runs a tool with extra env and returns stdout (default:
+	// execCommand). A field so tests can stub brew.
 	RunCommand func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
 }
 
@@ -165,9 +156,7 @@ func NewGlobalScanner() *GlobalScanner {
 	}
 }
 
-// execCommand runs name with args, adding env to the current environment, and
-// returns standard output. A non-zero exit is returned as an error that
-// includes the command's standard error, so the cause reaches the user.
+// execCommand returns stdout; a failure's error includes stderr.
 func execCommand(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = append(os.Environ(), env...)
@@ -186,11 +175,8 @@ func execCommand(ctx context.Context, env []string, name string, args ...string)
 func (s *GlobalScanner) Name() string               { return "global" }
 func (s *GlobalScanner) Ecosystem() model.Ecosystem { return model.EcoGlobal }
 
-// userToolDirs lists directories that installers put executables in and
-// that a login shell adds to PATH through profile scripts. A scan started
-// without those scripts (launchd, cron, an agent's non-login shell) lacks
-// them in PATH, and a tool missed there would make its in-use cache look
-// unused.
+// userToolDirs lists install directories a non-login shell (launchd, cron,
+// agents) may lack in PATH.
 func userToolDirs(home string) []string {
 	dirs := []string{
 		"/opt/homebrew/bin", // Homebrew on Apple silicon
@@ -209,16 +195,13 @@ func userToolDirs(home string) []string {
 		filepath.Join(home, ".asdf", "shims"),                   // asdf-managed runtimes
 		filepath.Join(home, ".local", "share", "mise", "shims"), // mise-managed runtimes
 	}
-	// nvm keeps one bin directory per installed Node.js version, each with
-	// its own npm (and yarn/pnpm when installed globally).
 	if nvm, err := filepath.Glob(filepath.Join(home, ".nvm", "versions", "node", "*", "bin")); err == nil {
 		dirs = append(dirs, nvm...)
 	}
 	return dirs
 }
 
-// findExecutable resolves file in PATH, then in userToolDirs. It is
-// GlobalScanner.LookPath's default.
+// findExecutable resolves file in PATH, then in userToolDirs.
 func findExecutable(file string) (string, error) {
 	if p, err := exec.LookPath(file); err == nil {
 		return p, nil
@@ -236,8 +219,7 @@ func findExecutable(file string) (string, error) {
 	return "", exec.ErrNotFound
 }
 
-// installedTool returns the first of tools that is installed, as its name
-// and resolved path, or "" and "" when none is.
+// installedTool returns the first installed of tools, or "" when none is.
 func (s *GlobalScanner) installedTool(tools []string) (name, path string) {
 	for _, t := range tools {
 		if p, err := s.lookPath(t); err == nil {
@@ -259,9 +241,8 @@ type globalVendorCleanup struct {
 
 // globalVendorCleanups are vendor-native prune commands for the global caches.
 // All are non-destructive — they only reclaim regenerable download/store caches,
-// so no destructive-action gate is needed here. Homebrew is not listed: its
-// cleanup is a scan item of its own (global_homebrew.go), selected and sized
-// like any other item.
+// so no destructive-action gate is needed here. Homebrew is a scan item
+// instead (global_homebrew.go).
 var globalVendorCleanups = []globalVendorCleanup{
 	{"npm-cache-clean", []string{"npm"}, []string{"cache", "clean", "--force"}, "Clear the npm package cache"},
 	{"yarn-cache-clean", []string{"yarn"}, []string{"cache", "clean"}, "Clear the Yarn cache"},
@@ -308,10 +289,8 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 		absRoot = root
 	}
 
-	// The Homebrew cleanup reaches outside home (old versions under the
-	// Homebrew prefix), so like the code-sign clones it is included only when
-	// the scan root covers home. Its dry-run takes seconds, so it runs
-	// concurrently with the catalog stat and sizing below.
+	// Like code-sign clones, the Homebrew item reaches outside home, so it
+	// needs a scan root covering home.
 	var homebrew <-chan homebrewScan
 	if isUnderRoot(home, absRoot) {
 		if brew, err := s.lookPath("brew"); err == nil {
@@ -373,11 +352,8 @@ func (s *GlobalScanner) runCommand(ctx context.Context, env []string, name strin
 	return s.RunCommand(ctx, env, name, args...)
 }
 
-// catalogResult builds the unsized result for a catalog entry found at full.
-// An installed tool that uses the cache raises the entry to caution; an entry
-// whose tools are all absent keeps its declared safety with a note saying no
-// installed tool uses it. A declared rec always takes precedence over these
-// generated notes.
+// catalogResult builds the unsized result for a catalog entry, applying the
+// installed-tool rule; a declared rec takes precedence over generated notes.
 func (s *GlobalScanner) catalogResult(c globalCache, full string) model.ScanResult {
 	safety, rec := c.safety, c.rec
 	if len(c.tools) > 0 {
