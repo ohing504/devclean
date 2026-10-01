@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -67,36 +66,6 @@ func TestWalkScan_ContextCanceled(t *testing.T) {
 	}
 }
 
-// TestWalkScan_ReadsEachDirOnce converts the single-read property into a
-// deterministic gate: a reintroduced double-read is invisible to output but
-// fails here.
-func TestWalkScan_ReadsEachDirOnce(t *testing.T) {
-	root := t.TempDir()
-	touch(t, filepath.Join(root, "proj", "package.json"))
-	mkdirAll(t, filepath.Join(root, "proj", "src", "deep"))
-	mkdirAll(t, filepath.Join(root, "other"))
-
-	counts := make(map[string]int)
-	orig := walkReadDir
-	walkReadDir = func(dir string) ([]os.DirEntry, error) {
-		counts[dir]++
-		return orig(dir)
-	}
-	defer func() { walkReadDir = orig }()
-
-	if _, err := WalkScan(context.Background(), root, model.EcoNode); err != nil {
-		t.Fatal(err)
-	}
-	for dir, n := range counts {
-		if n != 1 {
-			t.Errorf("dir %s read %d times, want 1", dir, n)
-		}
-	}
-	if counts[root] != 1 {
-		t.Errorf("root read %d times, want exactly 1", counts[root])
-	}
-}
-
 // TestWalkScan_DoesNotFollowSymlinkedArtifact locks the explicit no-follow guard
 // (walk.go skips any entry with os.ModeSymlink): a symlink named like an artifact
 // is not matched, the walk never descends *through* a symlinked directory to
@@ -149,118 +118,26 @@ func paths(rs []model.ScanResult) []string {
 	return out
 }
 
-// TestWalkScan_StaysOnRootFilesystem pins the du -x policy: a directory on a
-// different filesystem than the scan root (a mount such as Xcode CoreDevice's
-// devicefs, a network share or an external volume) is neither read nor
-// reported — even when its name matches an artifact rule.
-func TestWalkScan_StaysOnRootFilesystem(t *testing.T) {
-	root := t.TempDir()
-	proj := filepath.Join(root, "proj")
-	touch(t, filepath.Join(proj, "package.json"))
-	mkdirAll(t, filepath.Join(proj, "node_modules"))
-	mounted := filepath.Join(root, "mnt")
-	touch(t, filepath.Join(mounted, "app", "package.json"))
-	mkdirAll(t, filepath.Join(mounted, "app", "node_modules"))
-	mountedArtifact := filepath.Join(proj, "dist")
-	mkdirAll(t, mountedArtifact)
-
-	origDev := walkDevice
-	walkDevice = func(path string) (uint64, bool) {
-		if path == mounted || path == mountedArtifact {
-			return 2, true
-		}
-		return 1, true
+// TestWalkScan_SymlinkedRoot pins that the engine reads through a scan root
+// given as a symlink (a --path that is a link), reporting artifacts under the
+// link path.
+func TestWalkScan_SymlinkedRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on windows")
 	}
-	defer func() { walkDevice = origDev }()
-
-	var read []string
-	origRead := walkReadDir
-	walkReadDir = func(dir string) ([]os.DirEntry, error) {
-		read = append(read, dir)
-		return origRead(dir)
-	}
-	defer func() { walkReadDir = origRead }()
-
-	results, err := WalkScan(context.Background(), root, model.EcoNode)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := paths(results)
-	want := []string{filepath.Join(proj, "node_modules")}
-	if !slices.Equal(got, want) {
-		t.Errorf("results = %v, want %v", got, want)
-	}
-	for _, dir := range read {
-		if dir == mounted || strings.HasPrefix(dir, mounted+string(filepath.Separator)) {
-			t.Errorf("read %s on another filesystem", dir)
-		}
-	}
-}
-
-// TestWalkScan_SkipsDirWithoutDevice pins that once the root's device is known,
-// a directory whose device cannot be determined (stat fails, as on a hung or
-// disconnected mount) is skipped rather than read.
-func TestWalkScan_SkipsDirWithoutDevice(t *testing.T) {
-	root := t.TempDir()
-	unknown := filepath.Join(root, "unknown")
-	touch(t, filepath.Join(unknown, "package.json"))
-	mkdirAll(t, filepath.Join(unknown, "node_modules"))
-
-	origDev := walkDevice
-	walkDevice = func(path string) (uint64, bool) {
-		if path == unknown {
-			return 0, false
-		}
-		return 1, true
-	}
-	defer func() { walkDevice = origDev }()
-
-	results, err := WalkScan(context.Background(), root, model.EcoNode)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(results) != 0 {
-		t.Errorf("got %v, want no results from a dir without a device ID", paths(results))
-	}
-}
-
-// TestWalkScan_SymlinkedRootOnOtherFilesystem pins that a --path given as a
-// symlink is judged by its target's filesystem: the walk reads through the
-// root link, so comparing against the link's own device would drop every
-// child of a root that links onto another volume.
-func TestWalkScan_SymlinkedRootOnOtherFilesystem(t *testing.T) {
 	target := t.TempDir()
-	targetDev, ok := walkDevice(target)
-	if !ok {
-		t.Skip("platform exposes no device IDs")
-	}
-	var linkDir string
-	for _, dir := range []string{"/dev/shm"} {
-		if dev, ok := walkDevice(dir); ok && dev != targetDev {
-			if d, err := os.MkdirTemp(dir, "devclean-test-"); err == nil {
-				linkDir = d
-				break
-			}
-		}
-	}
-	if linkDir == "" {
-		t.Skip("no writable directory on a filesystem other than the temp dir")
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(linkDir) })
-
 	touch(t, filepath.Join(target, "proj", "package.json"))
 	mkdirAll(t, filepath.Join(target, "proj", "node_modules"))
-	link := filepath.Join(linkDir, "root")
+	link := filepath.Join(t.TempDir(), "link")
 	if err := os.Symlink(target, link); err != nil {
-		t.Skipf("symlink unsupported: %v", err)
+		t.Fatal(err)
 	}
 
 	results, err := WalkScan(context.Background(), link, model.EcoNode)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{filepath.Join(link, "proj", "node_modules")}
-	if got := paths(results); !slices.Equal(got, want) {
+	if got, want := paths(results), []string{filepath.Join(link, "proj", "node_modules")}; !slices.Equal(got, want) {
 		t.Errorf("results = %v, want %v", got, want)
 	}
 }

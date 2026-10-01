@@ -2,15 +2,15 @@ package scanner
 
 import (
 	"context"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 
+	"github.com/ohing504/devclean/internal/fstree"
 	"github.com/ohing504/devclean/internal/model"
 )
 
@@ -113,29 +113,6 @@ func (w *walkScanner) Scan(ctx context.Context, root string) ([]model.ScanResult
 	return runWalk(ctx, root, []walkEcosystem{w.table})
 }
 
-// walkReadDir is os.ReadDir, indirected so a test can assert every directory is
-// read exactly once — the single-read property is the whole point of the
-// engine, and a reintroduced double-read is otherwise invisible to output.
-var walkReadDir = os.ReadDir
-
-// walkDevice returns the device ID of path's filesystem; ok is false when the
-// path cannot be stat'ed or the platform exposes none. It follows symlinks
-// (stat, not lstat) because the walk reads through a symlinked root; every
-// other visited dir is a real directory, so following changes nothing there.
-// Indirected so a test can place a directory on a "different filesystem"
-// without mounting one.
-var walkDevice = func(path string) (uint64, bool) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0, false
-	}
-	sys, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, false
-	}
-	return uint64(sys.Dev), true //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
-}
-
 // projectContext is one entry of the walk's active-project stack: a detected
 // project root plus the artifact rules applying beneath it.
 type projectContext struct {
@@ -171,136 +148,96 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		}
 	}
 
-	// Stay on the root's filesystem, like du -x. A mount under the root — Xcode
-	// CoreDevice's devicefs (paired iPhones' app containers, measured at ~4 s
-	// per directory read), a network share, an external volume — is neither
-	// walked nor reported: its contents are not this machine's reclaimable disk.
-	rootDev, rootDevOK := walkDevice(root)
-
 	var results []model.ScanResult
 	var stack []projectContext
+	var pushedStack []int // per entered dir, how many contexts it pushed
 	numTables := len(tables)
 
-	// visit reads each directory exactly once and reuses its entries for both
-	// marker detection and recursion. The previous filepath.WalkDir version
-	// read every directory twice (WalkDir's own read to recurse, plus a second
-	// os.ReadDir here for markers) — the dominant cost on large trees. name is
-	// dir's base name, checked against the enclosing ecosystem rules; the stack
-	// holds the ancestor project contexts, scoped by the recursion itself.
-	var visit func(dir, name string) error
-	visit = func(dir, name string) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if rootDevOK && dir != root {
-			// A dir that cannot be stat'ed is skipped too: falling through to
-			// ReadDir would hit the slow mount this check exists to avoid.
-			if dev, ok := walkDevice(dir); !ok || dev != rootDev {
-				return nil
-			}
-		}
-
+	// The shared traversal reads each directory exactly once, never follows a
+	// symlink and stays on the root's filesystem; this engine only decides
+	// what a directory is. FollowRoot reads through a symlinked --path.
+	walker := fstree.Walker{
+		FollowRoot: true,
 		// Artifact match first, before the hidden-dir check, against the
 		// ancestor contexts (dir's own context is pushed only if we descend).
 		// Size is filled in afterwards by sizePending.
-		if rule, tableIdx, projRoot, ok := matchArtifact(stack, dir, name, numTables); ok {
-			result := model.ScanResult{
-				Path:      dir,
-				Ecosystem: tables[tableIdx].Eco,
-				Category:  rule.Category,
-				LastMod:   ModTime(dir),
-				Safety:    rule.Safety,
+		Enter: func(dir string, _ fs.FileInfo) bool {
+			name := filepath.Base(dir)
+			if rule, tableIdx, projRoot, ok := matchArtifact(stack, dir, name, numTables); ok {
+				result := model.ScanResult{
+					Path:      dir,
+					Ecosystem: tables[tableIdx].Eco,
+					Category:  rule.Category,
+					LastMod:   ModTime(dir),
+					Safety:    rule.Safety,
+				}
+				if tables[tableIdx].SetProjectRoot {
+					result.ProjectRoot = projRoot
+				}
+				if rule.Recommend != nil {
+					result.Recommendation = rule.Recommend(dir)
+				}
+				results = append(results, result)
+				ReportProgress(ctx, len(results))
+				return false // matched artifact: do not descend
 			}
-			if tables[tableIdx].SetProjectRoot {
-				result.ProjectRoot = projRoot
+			return !strings.HasPrefix(name, ".") || hiddenDescend[name]
+		},
+		Entries: func(dir string, entries []fs.DirEntry) bool {
+			names := make(map[string]bool, len(entries))
+			for _, e := range entries {
+				names[e.Name()] = true
 			}
-			if rule.Recommend != nil {
-				result.Recommendation = rule.Recommend(dir)
+
+			// Prune before establishing any context or descending, so nothing
+			// inside is ever a deletion target.
+			if isInstalledPackageTree(filepath.Base(dir), names) {
+				return false
 			}
-			results = append(results, result)
-			ReportProgress(ctx, len(results))
-			return nil // matched artifact: do not descend
-		}
-
-		if strings.HasPrefix(name, ".") && !hiddenDescend[name] {
-			return nil
-		}
-
-		entries, err := walkReadDir(dir)
-		if err != nil {
-			return nil // unreadable dir is skipped, like the legacy scanners
-		}
-		names := make(map[string]bool, len(entries))
-		for _, e := range entries {
-			names[e.Name()] = true
-		}
-
-		// Prune before establishing any context or descending, so nothing inside
-		// is ever a deletion target.
-		if isInstalledPackageTree(name, names) {
-			return nil
-		}
-		for i := range tables {
-			if p := tables[i].PruneRoot; p != nil && p(dir, names) {
-				return nil
-			}
-		}
-
-		// Marker check: establish the project contexts rooted at this directory.
-		pushed := 0
-		for i := range tables {
-			t := &tables[i]
-			rooted := false
-			for _, m := range t.Markers {
-				if names[m] {
-					rooted = true
-					break
+			for i := range tables {
+				if p := tables[i].PruneRoot; p != nil && p(dir, names) {
+					return false
 				}
 			}
-			if !rooted {
-				continue
-			}
 
-			rules := t.Rules
-			if t.ExtraRules != nil {
-				if extra := t.ExtraRules(dir, names); len(extra) > 0 {
-					combined := make([]artifactRule, 0, len(t.Rules)+len(extra))
-					combined = append(combined, t.Rules...)
-					combined = append(combined, extra...)
-					rules = combined
+			// Marker check: establish the project contexts rooted at this
+			// directory; Leave pops them once its subtree is walked.
+			pushed := 0
+			for i := range tables {
+				t := &tables[i]
+				rooted := false
+				for _, m := range t.Markers {
+					if names[m] {
+						rooted = true
+						break
+					}
 				}
-			}
-			stack = append(stack, projectContext{root: dir, tableIdx: i, rules: rules})
-			pushed++
-		}
+				if !rooted {
+					continue
+				}
 
-		for _, e := range entries {
-			// No-follow policy: never descend into or match a symlink. Following
-			// links would (a) double-count a target that also lives on disk
-			// elsewhere — inflating reported reclaimable space, (b) let a delete
-			// of a symlinked artifact (e.g. a pnpm/monorepo node_modules) reclaim
-			// nothing while risking a shared target, and (c) reopen symlink
-			// cycles. e.IsDir() already excludes symlinks (ReadDir uses lstat
-			// semantics), so this is an explicit assertion of that guarantee, not
-			// a behavior change — it keeps a future refactor from silently
-			// following links. Real reclaimable content behind these links is the
-			// job of the Global Caches scanner (pnpm store) and hardlink dedup.
-			if e.Type()&os.ModeSymlink != 0 {
-				continue
+				rules := t.Rules
+				if t.ExtraRules != nil {
+					if extra := t.ExtraRules(dir, names); len(extra) > 0 {
+						combined := make([]artifactRule, 0, len(t.Rules)+len(extra))
+						combined = append(combined, t.Rules...)
+						combined = append(combined, extra...)
+						rules = combined
+					}
+				}
+				stack = append(stack, projectContext{root: dir, tableIdx: i, rules: rules})
+				pushed++
 			}
-			if !e.IsDir() {
-				continue
-			}
-			if err := visit(filepath.Join(dir, e.Name()), e.Name()); err != nil {
-				stack = stack[:len(stack)-pushed]
-				return err
-			}
-		}
-		stack = stack[:len(stack)-pushed]
-		return nil
+			pushedStack = append(pushedStack, pushed)
+			return true
+		},
+		Leave: func(string) {
+			pushed := pushedStack[len(pushedStack)-1]
+			pushedStack = pushedStack[:len(pushedStack)-1]
+			stack = stack[:len(stack)-pushed]
+		},
 	}
-
-	if err := visit(root, filepath.Base(root)); err != nil {
+	if _, err := walker.Walk(ctx, root); err != nil {
 		return nil, err
 	}
 

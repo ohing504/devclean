@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ohing504/devclean/internal/cleaner"
+	"github.com/ohing504/devclean/internal/fstree"
 	"github.com/ohing504/devclean/internal/model"
 )
 
@@ -334,5 +335,34 @@ func TestCleanAllMixedStrategies(t *testing.T) {
 	}
 	if _, err := os.Stat(methodItem.Path); err != nil {
 		t.Error("method item's path must be untouched")
+	}
+}
+
+// TestRefusesTreeSpanningFilesystems pins that path removal (trash, force and
+// dry-run alike) refuses a tree the shared traversal would not fully enter —
+// a mount inside the item, or a directory whose filesystem cannot be checked
+// — instead of deleting files that were never sized or shown. A real mount
+// needs root, so an unverifiable subdirectory (parent without search
+// permission) stands in for it.
+func TestRefusesTreeSpanningFilesystems(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	for _, opts := range []cleaner.Options{{Force: true}, {DryRun: true}, {TrashDir: t.TempDir()}} {
+		target := filepath.Join(t.TempDir(), "node_modules")
+		mustMkdir(t, filepath.Join(target, "sub"))
+		if err := os.Chmod(target, 0o444); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(target, 0o755) })
+
+		err := cleaner.New(opts).Clean(t.Context(), model.ScanResult{Path: target, Safety: model.SafetySafe})
+
+		if _, ok := errors.AsType[*fstree.SpansFilesystemsError](err); !ok {
+			t.Errorf("%+v: err = %v, want *fstree.SpansFilesystemsError", opts, err)
+		}
+		if _, err := os.Lstat(target); err != nil {
+			t.Errorf("%+v: target gone: %v", opts, err)
+		}
 	}
 }

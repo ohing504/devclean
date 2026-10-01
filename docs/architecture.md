@@ -22,6 +22,7 @@ Scan → Classify → Filter/Sort → Output/Clean
 cmd/devclean/          → entrypoint, wires CLI
 internal/
   model/               → core domain types (Ecosystem, Category, SafetyLevel, ScanResult, ArtifactDef)
+  fstree/              → shared tree traversal policy (no symlink follow, stay on root's filesystem) used by scanner and cleaner
   scanner/             → Scanner interface, Registry, per-ecosystem implementations
   classifier/          → activity status, git info (protection + last commit + gitignore-aware)
   cleaner/             → trash (macOS/Linux) + force delete, dry-run, protection enforcement
@@ -55,9 +56,17 @@ Scanners report progress via context-attached callbacks: the walk batch reports 
 Two invariants keep the figures honest:
 
 - **Hard links** (`Nlink>1`) are counted once per artifact, keyed by `(dev, ino)`, so shared blocks net out across artifacts.
-- **Symlinks** are never followed.
+- **Same traversal as finding and deletion**: sizing walks with `fstree` — symlinks are never followed and directories on another filesystem are not counted.
 
 Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through one shared bounded worker pool (`sizePending`, `min(NumCPU, 8)`) so the tree-walk I/O overlaps.
+
+### Shared traversal (`fstree`)
+
+Finding artifacts, sizing them and checking them before deletion all walk directories through one package, so what is reported, what is counted and what is removed cover the same files. Its policy:
+
+- **Read each directory once** — callers get the entries through hooks (enter before reading, entries after reading, leave after the subtree).
+- **Never follow symlinks** — only the root may be read through, when the caller asks (the walk engine does, for `--path`; sizing and deletion do not, since deleting a symlink removes only the link).
+- **Stay on the root's filesystem** — a directory on another device, or whose device cannot be determined, is not entered and is returned to the caller as skipped.
 
 ### Walk engine
 
@@ -87,7 +96,7 @@ Tables can also:
 
 **Symlink policy — never follow**: the walk skips any entry that is a symlink (explicit `os.ModeSymlink` check), so a symlink is never descended into and never matched as an artifact, even when it is named like one (a symlinked `node_modules`, as pnpm and some monorepos produce). This is deliberate: a symlink's target is real content that lives on disk elsewhere, so following it would double-count that space and inflate the reported reclaimable total, and deleting a symlinked artifact reclaims only the link (bytes) while risking a target shared by other projects. No-follow also means symlink cycles can never be walked, so no separate cycle guard is needed. The reclaimable content behind these links is surfaced instead by the Global Caches scanner (e.g. the pnpm store) and hardlink-aware sizing, not by following per-project links.
 
-**Filesystem boundary — stay on the root's device** (like `du -x`): a directory whose device ID differs from the scan root's is neither read nor matched as an artifact. Mounts under the root — Xcode CoreDevice's `~/Library/Developer/CoreDevice/DeviceFS` (devicefs mounting paired iPhones' app containers; measured at ~4 s per directory read), network shares, external volumes — are not this machine's reclaimable disk. Scan a mount by passing it as `--path`.
+**Filesystem boundary — stay on the root's device** (like `du -x`): a directory whose device ID differs from the scan root's, or whose device cannot be determined, is neither read nor matched as an artifact. A scan root given as a symlink is judged by its target. Mounts under the root — Xcode CoreDevice's `~/Library/Developer/CoreDevice/DeviceFS` (devicefs mounting paired iPhones' app containers; measured at ~4 s per directory read), network shares, external volumes — are not this machine's reclaimable disk. Scan a mount by passing it as `--path`.
 
 Results are sorted by (table order, path) before returning, keeping output order stable.
 
@@ -123,7 +132,7 @@ type DeleteMethod struct {
 Delete *DeleteMethod `json:"delete,omitempty"` // nil = path removal
 ```
 
-The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached, otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal. Example: the global scanner's Homebrew item (`brew cleanup`).
+The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached, otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal. Path removal (trash, permanent, and its dry-run) is refused when the item's tree reaches onto another filesystem or holds a directory whose filesystem cannot be determined: a recursive delete or a cross-device trash copy does not stop at mounts, so it would remove files that were never sized or shown. Example: the global scanner's Homebrew item (`brew cleanup`).
 
 In JSON output, non-path items serialize as `"delete": {"kind": "command", "display": "..."}` (`Run` never serializes), so agents can tell strategies apart; absence of the key means path removal.
 

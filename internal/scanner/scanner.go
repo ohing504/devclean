@@ -3,10 +3,10 @@ package scanner
 import (
 	"context"
 	"io/fs"
-	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/ohing504/devclean/internal/fstree"
 	"github.com/ohing504/devclean/internal/model"
 	"github.com/ohing504/devclean/internal/pathutil"
 )
@@ -165,41 +165,37 @@ type SizeStat struct {
 	Links    map[model.InodeKey]int64 // Nlink>1 inode → disk blocks, keyed by (dev, ino)
 }
 
-// Measure walks path in-process and returns its apparent and disk sizes.
+// Measure walks path in-process and returns its apparent and disk sizes. It
+// uses the same traversal as the walk engine and the cleaner's pre-delete
+// check (fstree): symlinks are not followed — neither the target nor the
+// link's own blocks are counted — and directories on another filesystem are
+// not counted, matching what deletion would remove.
 //
 // Disk uses st_blocks×512 (allocated blocks), so it stays correct for sparse
 // files where the logical size vastly exceeds what is on disk, and matches
 // `du`. Apparent sums logical file sizes. Directories contribute their own
 // blocks to Disk (ext4 dirs use real blocks; APFS reports ~0) but not to
-// Apparent. Symlinks are not followed — neither the target nor the link's own
-// blocks are counted (consistent with the walk engine's no-follow policy).
-// Files hard-linked more than once are counted once within this artifact and
-// recorded in Links so a caller can net out blocks shared across artifacts.
+// Apparent. Files hard-linked more than once are counted once within this
+// artifact and recorded in Links so a caller can net out blocks shared across
+// artifacts.
 func Measure(path string) SizeStat {
 	var st SizeStat
 	seen := make(map[model.InodeKey]struct{})
-	_ = filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // skip unreadable / racing entries, keep summing the rest
-		}
-		info, ierr := d.Info()
-		if ierr != nil {
-			return nil
-		}
+	add := func(info fs.FileInfo) {
 		sys, ok := info.Sys().(*syscall.Stat_t)
 		if !ok {
-			if !d.IsDir() && d.Type()&fs.ModeSymlink == 0 {
+			if !info.IsDir() && info.Mode()&fs.ModeSymlink == 0 {
 				st.Apparent += info.Size() // non-unix fallback: apparent only
 			}
-			return nil
+			return
 		}
 		blocks := int64(sys.Blocks) * 512
-		if d.IsDir() {
+		if info.IsDir() {
 			st.Disk += blocks
-			return nil
+			return
 		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			return nil
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return
 		}
 		if sys.Nlink > 1 {
 			// Count a multiply-linked inode once per artifact for both apparent
@@ -207,7 +203,7 @@ func Measure(path string) SizeStat {
 			// so DedupedTotal can net it out across artifacts.
 			key := model.InodeKey{Dev: uint64(sys.Dev), Ino: uint64(sys.Ino)}
 			if _, dup := seen[key]; dup {
-				return nil
+				return
 			}
 			seen[key] = struct{}{}
 			if st.Links == nil {
@@ -217,8 +213,25 @@ func Measure(path string) SizeStat {
 		}
 		st.Apparent += info.Size()
 		st.Disk += blocks
-		return nil
-	})
+	}
+	w := fstree.Walker{
+		Enter: func(_ string, info fs.FileInfo) bool {
+			add(info)
+			return true
+		},
+		Entries: func(_ string, entries []fs.DirEntry) bool {
+			for _, e := range entries {
+				if e.IsDir() {
+					continue // counted on Enter, if on this filesystem
+				}
+				if info, err := e.Info(); err == nil {
+					add(info)
+				}
+			}
+			return true
+		},
+	}
+	_, _ = w.Walk(context.Background(), path)
 	return st
 }
 

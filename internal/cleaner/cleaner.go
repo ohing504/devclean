@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/ohing504/devclean/internal/fstree"
 	"github.com/ohing504/devclean/internal/model"
 )
 
@@ -36,6 +37,14 @@ func New(opts Options) *Cleaner {
 func (c *Cleaner) Clean(ctx context.Context, r model.ScanResult) error {
 	if r.Protected {
 		return fmt.Errorf("refusing to delete protected item: %s (%s)", r.Path, r.Reason)
+	}
+
+	// Path removal must cover exactly the tree that was sized and shown: a
+	// recursive delete or a cross-device trash copy does not stop at mounts.
+	if r.Delete == nil {
+		if err := fstree.CheckOneFilesystem(ctx, r.Path); err != nil {
+			return err
+		}
 	}
 
 	if c.opts.DryRun {
