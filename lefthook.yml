@@ -5,7 +5,3 @@ pre-commit:
       glob: "*.go"
       run: golangci-lint run --fix
       stage_fixed: true
-    - name: format
-      glob: "*.go"
-      run: gofumpt -w {staged_files}
-      stage_fixed: true

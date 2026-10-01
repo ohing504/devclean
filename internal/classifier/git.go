@@ -81,7 +81,7 @@ func batchCheckIgnored(gitRoot string, paths []string) map[string]bool {
 	cmd.Dir = gitRoot
 	out, _ := cmd.Output()
 	ignored := make(map[string]bool)
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if line != "" {
 			ignored[line] = true
 		}
@@ -123,25 +123,17 @@ func parallelMap[T any](keys []string, fn func(string) T) map[string]T {
 	if len(keys) == 0 {
 		return out
 	}
-	workers := runtime.NumCPU()
-	if workers > gitWorkerCap {
-		workers = gitWorkerCap
-	}
-	if workers > len(keys) {
-		workers = len(keys)
-	}
+	workers := min(runtime.NumCPU(), gitWorkerCap, len(keys))
 
 	vals := make([]T, len(keys))
 	idx := make(chan int)
 	var wg sync.WaitGroup
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range idx {
 				vals[i] = fn(keys[i])
 			}
-		}()
+		})
 	}
 	for i := range keys {
 		idx <- i

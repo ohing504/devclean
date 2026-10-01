@@ -20,11 +20,13 @@ go test ./internal/model/ -run TestHumanSize -v  # single test
 # Lint
 golangci-lint run ./...
 
-# Format
-gofumpt -w .
+# Format (gofumpt + goimports via golangci-lint)
+golangci-lint fmt
 ```
 
 Pre-commit hooks (lefthook) run lint + format automatically on staged `.go` files.
+
+Tool versions (golangci-lint, lefthook) are pinned in `.tool-versions` — `mise install` locally; CI's golangci-lint-action reads the same file. Go itself is pinned by `go.mod`.
 
 ## Architecture
 
@@ -66,7 +68,7 @@ Pipeline: **Scan → Classify → Filter/Sort → Output/Clean**
 
 ## Code Style
 
-- Go formatting via `gofumpt` (stricter than gofmt)
-- Linting via `golangci-lint` v2 with `default: standard` + revive, misspell, gocritic
+- Go formatting via `gofumpt` + `goimports`, run through `golangci-lint fmt` / `run --fix`
+- Linting via `golangci-lint` v2 with `default: standard` + revive, misspell, gocritic, modernize
 - Test files use `_test.go` suffix with `package_test` external test packages
 - Golden file tests for output format stability (`-update` flag to regenerate)

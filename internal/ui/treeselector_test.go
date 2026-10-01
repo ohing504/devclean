@@ -394,7 +394,7 @@ func TestCursorStaysWithinViewport(t *testing.T) {
 	}
 
 	sawScroll := false
-	for i := 0; i < 39; i++ {
+	for range 39 {
 		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 		m = updated.(treeModel)
 		assertCursorVisible(t, m)
@@ -407,7 +407,7 @@ func TestCursorStaysWithinViewport(t *testing.T) {
 	}
 
 	// Scrolling back up must also keep the cursor visible, down to the top.
-	for i := 0; i < 39; i++ {
+	for range 39 {
 		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
 		m = updated.(treeModel)
 		assertCursorVisible(t, m)
