@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/ohing504/devclean/internal/model"
 )
@@ -117,6 +118,21 @@ func (w *walkScanner) Scan(ctx context.Context, root string) ([]model.ScanResult
 // engine, and a reintroduced double-read is otherwise invisible to output.
 var walkReadDir = os.ReadDir
 
+// walkDevice returns the device ID of path's filesystem (lstat, no follow);
+// ok is false when the platform exposes none. Indirected so a test can place a
+// directory on a "different filesystem" without mounting one.
+var walkDevice = func(path string) (uint64, bool) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return 0, false
+	}
+	sys, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, false
+	}
+	return uint64(sys.Dev), true //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
+}
+
 // projectContext is one entry of the walk's active-project stack: a detected
 // project root plus the artifact rules applying beneath it.
 type projectContext struct {
@@ -152,6 +168,12 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		}
 	}
 
+	// Stay on the root's filesystem, like du -x. A mount under the root — Xcode
+	// CoreDevice's devicefs (paired iPhones' app containers, measured at ~4 s
+	// per directory read), a network share, an external volume — is neither
+	// walked nor reported: its contents are not this machine's reclaimable disk.
+	rootDev, rootDevOK := walkDevice(root)
+
 	var results []model.ScanResult
 	var stack []projectContext
 	numTables := len(tables)
@@ -166,6 +188,11 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 	visit = func(dir, name string) error {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if rootDevOK {
+			if dev, ok := walkDevice(dir); ok && dev != rootDev {
+				return nil
+			}
 		}
 
 		// Artifact match first, before the hidden-dir check, against the

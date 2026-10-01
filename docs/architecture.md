@@ -6,7 +6,7 @@ devclean is a monolithic Go CLI binary. All ecosystem scanners are built into a 
 
 ## Pipeline
 
-```
+```text
 Scan → Classify → Filter/Sort → Output/Clean
 ```
 
@@ -18,7 +18,7 @@ Scan → Classify → Filter/Sort → Output/Clean
 
 ## Package Structure
 
-```
+```text
 cmd/devclean/          → entrypoint, wires CLI
 internal/
   model/               → core domain types (Ecosystem, Category, SafetyLevel, ScanResult, ArtifactDef)
@@ -86,6 +86,8 @@ Tables can also:
 **Deduplication**: a directory matching rules of several active ecosystems is reported once, attributed to the first table in order (node → rust → ruby → python → go), and no scanner descends into another's matched artifact (`__pycache__` inside `node_modules` is not reported separately). Attribution can therefore differ between a full scan and an `--eco` subset scan — a shared `coverage/` goes to node in a full scan, to ruby under `--eco ruby`.
 
 **Symlink policy — never follow**: the walk skips any entry that is a symlink (explicit `os.ModeSymlink` check), so a symlink is never descended into and never matched as an artifact, even when it is named like one (a symlinked `node_modules`, as pnpm and some monorepos produce). This is deliberate: a symlink's target is real content that lives on disk elsewhere, so following it would double-count that space and inflate the reported reclaimable total, and deleting a symlinked artifact reclaims only the link (bytes) while risking a target shared by other projects. No-follow also means symlink cycles can never be walked, so no separate cycle guard is needed. The reclaimable content behind these links is surfaced instead by the Global Caches scanner (e.g. the pnpm store) and hardlink-aware sizing, not by following per-project links.
+
+**Filesystem boundary — stay on the root's device** (like `du -x`): a directory whose device ID differs from the scan root's is neither read nor matched as an artifact. Mounts under the root — Xcode CoreDevice's `~/Library/Developer/CoreDevice/DeviceFS` (devicefs mounting paired iPhones' app containers; measured at ~4 s per directory read), network shares, external volumes — are not this machine's reclaimable disk. Scan a mount by passing it as `--path`.
 
 Results are sorted by (table order, path) before returning, keeping output order stable.
 
@@ -164,6 +166,7 @@ Gitignored artifacts (node_modules, .next, etc.) are always deletable even in re
 ## Activity Detection
 
 Uses the most recent of three timestamps:
+
 1. Artifact filesystem mtime
 2. Git last commit time (`git log -1 --format=%ct`)
 3. Project directory mtime

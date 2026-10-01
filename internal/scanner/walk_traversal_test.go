@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -145,4 +147,55 @@ func paths(rs []model.ScanResult) []string {
 		out[i] = r.Path
 	}
 	return out
+}
+
+// TestWalkScan_StaysOnRootFilesystem pins the du -x policy: a directory on a
+// different filesystem than the scan root (a mount such as Xcode CoreDevice's
+// devicefs, a network share or an external volume) is neither read nor
+// reported — even when its name matches an artifact rule.
+func TestWalkScan_StaysOnRootFilesystem(t *testing.T) {
+	root := t.TempDir()
+	proj := filepath.Join(root, "proj")
+	touch(t, filepath.Join(proj, "package.json"))
+	mkdirAll(t, filepath.Join(proj, "node_modules"))
+	mounted := filepath.Join(root, "mnt")
+	touch(t, filepath.Join(mounted, "app", "package.json"))
+	mkdirAll(t, filepath.Join(mounted, "app", "node_modules"))
+	mountedArtifact := filepath.Join(proj, "dist")
+	mkdirAll(t, mountedArtifact)
+
+	origDev := walkDevice
+	walkDevice = func(path string) (uint64, bool) {
+		if path == mounted || path == mountedArtifact {
+			return 2, true
+		}
+		return 1, true
+	}
+	defer func() { walkDevice = origDev }()
+
+	var read []string
+	origRead := walkReadDir
+	walkReadDir = func(dir string) ([]os.DirEntry, error) {
+		read = append(read, dir)
+		return origRead(dir)
+	}
+	defer func() { walkReadDir = origRead }()
+
+	results, err := WalkScan(context.Background(), root, model.EcoNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range results {
+		got = append(got, r.Path)
+	}
+	want := []string{filepath.Join(proj, "node_modules")}
+	if !slices.Equal(got, want) {
+		t.Errorf("results = %v, want %v", got, want)
+	}
+	for _, dir := range read {
+		if dir == mounted || strings.HasPrefix(dir, mounted+string(filepath.Separator)) {
+			t.Errorf("read %s on another filesystem", dir)
+		}
+	}
 }
