@@ -181,6 +181,7 @@
 | `CoreSimulator/Devices` (`xcrun simctl list devices --json`) | `iPhone 17 Pro · iOS 26.3` | `runtime unavailable — safe to remove` when Apple removed the runtime |
 | `iOS DeviceSupport` (peer comparison by `mtime`) | (none) | `superseded by newer build` for older builds when the same `<model> <version>` group has multiple build IDs |
 | `DerivedData` (well-known children) | `ModuleCache.noindex — Swift module cache (shared)` etc. | (none) |
+| `DerivedData` (per-project children, `WorkspacePath` in `info.plist`) | source workspace path, e.g. `~/workspace/app/ios/Runner.xcworkspace` | `source project no longer exists — safe to remove` when that workspace is gone (deleted clone, removed worktree) |
 
 `xcrun simctl` is best-effort — if Xcode CLI tools are not installed, simulator devices fall back to UUID display with no label/recommendation, but the rest of the scan still works.
 
