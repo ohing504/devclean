@@ -41,6 +41,7 @@ Pipeline: **Scan → Classify → Filter/Sort → Output/Clean**
 - `internal/cli/` — cobra commands (scan, clean, list)
 - `internal/ui/` — terminal spinner, interactive tree selector (bubbletea), shared styles
 - `internal/pathutil/` — shared path helpers (`CachedHomeDir`, etc.)
+- `internal/fstree/` — tree traversal shared by scan, sizing and clean (no symlink follow, one filesystem)
 
 ## Key Design Decisions
 

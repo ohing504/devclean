@@ -6,7 +6,7 @@ devclean is a monolithic Go CLI binary. All ecosystem scanners are built into a 
 
 ## Pipeline
 
-```
+```text
 Scan → Classify → Filter/Sort → Output/Clean
 ```
 
@@ -18,10 +18,11 @@ Scan → Classify → Filter/Sort → Output/Clean
 
 ## Package Structure
 
-```
+```text
 cmd/devclean/          → entrypoint, wires CLI
 internal/
   model/               → core domain types (Ecosystem, Category, SafetyLevel, ScanResult, ArtifactDef)
+  fstree/              → tree traversal shared by scanner and cleaner (no symlink follow, one filesystem)
   scanner/             → Scanner interface, Registry, per-ecosystem implementations
   classifier/          → activity status, git info (protection + last commit + gitignore-aware)
   cleaner/             → trash (macOS/Linux) + force delete, dry-run, protection enforcement
@@ -55,9 +56,17 @@ Scanners report progress via context-attached callbacks: the walk batch reports 
 Two invariants keep the figures honest:
 
 - **Hard links** (`Nlink>1`) are counted once per artifact, keyed by `(dev, ino)`, so shared blocks net out across artifacts.
-- **Symlinks** are never followed.
+- **Shared traversal**: sizing walks with `fstree`, so it counts what finding reports and deletion removes.
 
 Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through one shared bounded worker pool (`sizePending`, `min(NumCPU, 8)`) so the tree-walk I/O overlaps.
+
+### Shared traversal (`fstree`)
+
+Finding, sizing and the pre-delete check walk through one package, so they cover the same files:
+
+- **Read each directory once.**
+- **Never follow symlinks.** Only the root is read through, and only for `--path`; deleting a symlink removes only the link.
+- **Stay on the root's filesystem** (like `du -x`). A directory on another device, of unknown device, or unreadable is not entered and is returned as skipped. Mounts under the root — e.g. Xcode CoreDevice's `~/Library/Developer/CoreDevice/DeviceFS`, measured at ~4 s per directory read — are not this machine's reclaimable disk; scan one by passing it as `--path`.
 
 ### Walk engine
 
@@ -85,7 +94,7 @@ Tables can also:
 
 **Deduplication**: a directory matching rules of several active ecosystems is reported once, attributed to the first table in order (node → rust → ruby → python → go), and no scanner descends into another's matched artifact (`__pycache__` inside `node_modules` is not reported separately). Attribution can therefore differ between a full scan and an `--eco` subset scan — a shared `coverage/` goes to node in a full scan, to ruby under `--eco ruby`.
 
-**Symlink policy — never follow**: the walk skips any entry that is a symlink (explicit `os.ModeSymlink` check), so a symlink is never descended into and never matched as an artifact, even when it is named like one (a symlinked `node_modules`, as pnpm and some monorepos produce). This is deliberate: a symlink's target is real content that lives on disk elsewhere, so following it would double-count that space and inflate the reported reclaimable total, and deleting a symlinked artifact reclaims only the link (bytes) while risking a target shared by other projects. No-follow also means symlink cycles can never be walked, so no separate cycle guard is needed. The reclaimable content behind these links is surfaced instead by the Global Caches scanner (e.g. the pnpm store) and hardlink-aware sizing, not by following per-project links.
+**Symlink policy — never follow** (`fstree`): a symlink is never descended into and never matched as an artifact, even when it is named like one (a symlinked `node_modules`, as pnpm and some monorepos produce). This is deliberate: a symlink's target is real content that lives on disk elsewhere, so following it would double-count that space and inflate the reported reclaimable total, and deleting a symlinked artifact reclaims only the link (bytes) while risking a target shared by other projects. No-follow also means symlink cycles can never be walked, so no separate cycle guard is needed. The reclaimable content behind these links is surfaced instead by the Global Caches scanner (e.g. the pnpm store) and hardlink-aware sizing, not by following per-project links.
 
 Results are sorted by (table order, path) before returning, keeping output order stable.
 
@@ -121,7 +130,7 @@ type DeleteMethod struct {
 Delete *DeleteMethod `json:"delete,omitempty"` // nil = path removal
 ```
 
-The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached, otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal. Example: the global scanner's Homebrew item (`brew cleanup`).
+The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached, otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal. Path removal (including dry-run) is refused when `fstree` skips any directory in the item: a recursive delete does not stop at mounts. Example: the global scanner's Homebrew item (`brew cleanup`).
 
 In JSON output, non-path items serialize as `"delete": {"kind": "command", "display": "..."}` (`Run` never serializes), so agents can tell strategies apart; absence of the key means path removal.
 
@@ -164,6 +173,7 @@ Gitignored artifacts (node_modules, .next, etc.) are always deletable even in re
 ## Activity Detection
 
 Uses the most recent of three timestamps:
+
 1. Artifact filesystem mtime
 2. Git last commit time (`git log -1 --format=%ct`)
 3. Project directory mtime

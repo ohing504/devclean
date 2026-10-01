@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -65,38 +66,8 @@ func TestWalkScan_ContextCanceled(t *testing.T) {
 	}
 }
 
-// TestWalkScan_ReadsEachDirOnce converts the single-read property into a
-// deterministic gate: a reintroduced double-read is invisible to output but
-// fails here.
-func TestWalkScan_ReadsEachDirOnce(t *testing.T) {
-	root := t.TempDir()
-	touch(t, filepath.Join(root, "proj", "package.json"))
-	mkdirAll(t, filepath.Join(root, "proj", "src", "deep"))
-	mkdirAll(t, filepath.Join(root, "other"))
-
-	counts := make(map[string]int)
-	orig := walkReadDir
-	walkReadDir = func(dir string) ([]os.DirEntry, error) {
-		counts[dir]++
-		return orig(dir)
-	}
-	defer func() { walkReadDir = orig }()
-
-	if _, err := WalkScan(context.Background(), root, model.EcoNode); err != nil {
-		t.Fatal(err)
-	}
-	for dir, n := range counts {
-		if n != 1 {
-			t.Errorf("dir %s read %d times, want 1", dir, n)
-		}
-	}
-	if counts[root] != 1 {
-		t.Errorf("root read %d times, want exactly 1", counts[root])
-	}
-}
-
-// TestWalkScan_DoesNotFollowSymlinkedArtifact locks the explicit no-follow guard
-// (walk.go skips any entry with os.ModeSymlink): a symlink named like an artifact
+// TestWalkScan_DoesNotFollowSymlinkedArtifact locks the no-follow policy of the
+// shared traversal (fstree): a symlink named like an artifact
 // is not matched, the walk never descends *through* a symlinked directory to
 // match an artifact inside it, and a self-referential symlink does not loop.
 func TestWalkScan_DoesNotFollowSymlinkedArtifact(t *testing.T) {
@@ -145,4 +116,28 @@ func paths(rs []model.ScanResult) []string {
 		out[i] = r.Path
 	}
 	return out
+}
+
+// TestWalkScan_SymlinkedRoot pins that the engine reads through a scan root
+// given as a symlink (a --path that is a link), reporting artifacts under the
+// link path.
+func TestWalkScan_SymlinkedRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on windows")
+	}
+	target := t.TempDir()
+	touch(t, filepath.Join(target, "proj", "package.json"))
+	mkdirAll(t, filepath.Join(target, "proj", "node_modules"))
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := WalkScan(context.Background(), link, model.EcoNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := paths(results), []string{filepath.Join(link, "proj", "node_modules")}; !slices.Equal(got, want) {
+		t.Errorf("results = %v, want %v", got, want)
+	}
 }
