@@ -102,6 +102,8 @@ func newCleanCmd() *cobra.Command {
 					ui.ProjectStyle.Render("Would clean:"),
 					len(toClean), model.HumanSize(totalSize),
 				)
+				// Show the items a real run would refuse.
+				dc := cleaner.New(cleaner.Options{DryRun: true})
 				groups := model.GroupByProject(toClean)
 				for _, p := range groups {
 					fmt.Printf("  %s (%s) %s\n", p.Name, model.HumanSize(p.TotalSize), ui.DimStyle.Render(pathutil.ShortenHome(p.Path)))
@@ -115,6 +117,9 @@ func newCleanCmd() *cobra.Command {
 						fmt.Printf("    %s %s (%s)\n", ui.DimStyle.Render("•"), relPath, ui.DimStyle.Render(model.HumanSize(r.Size)))
 						if r.Delete != nil {
 							fmt.Printf("      %s\n", ui.DimStyle.Render("runs: "+r.Delete.Display))
+						}
+						if err := dc.Clean(cmd.Context(), r); err != nil {
+							fmt.Printf("      %s\n", ui.ErrStyle.Render("would fail: "+err.Error()))
 						}
 					}
 				}

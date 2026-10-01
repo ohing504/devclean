@@ -30,7 +30,7 @@ devclean scan --eco node --json
 
 Colored table grouped by ecosystem → project → sub-package → artifacts:
 
-```
+```text
 ● node 3 projects · 5.2 GB
   my-app Active 2.1 GB · 3 days ago
   ~/workspace/my-app
@@ -91,7 +91,7 @@ devclean clean --eco node --status dormant
 # Non-interactive: clean all safe dormant items
 devclean clean --eco node --status dormant --safe --yes
 
-# Preview without deleting
+# Preview without deleting (items a real run would refuse are marked "would fail")
 devclean clean --eco node --dry-run --yes
 
 # Force permanent delete (skip Trash)
@@ -123,7 +123,7 @@ mis-classification from becoming silent data loss, `--yes` deletes only `safe`
 (auto-regenerated) items by default. `caution` items — shared impact, or state
 that is slow or impossible to regenerate — are skipped and reported:
 
-```
+```text
 Skipped 3 caution item(s) — pass --include-caution to remove them with --yes.
 ```
 
@@ -158,6 +158,7 @@ additive — combine with `--safe`, `--status`, `--yes` as usual.
 ### Interactive Tree Selector
 
 The clean command uses a tree selector matching scan's output style:
+
 - `[↑↓]` move, `[←→]` jump between projects, `[space]` toggle
 - `[a]` select all, `[n]` none, `[s]` safe only, `[d]` dormant only
 - `[enter]` confirm, `[esc]` cancel

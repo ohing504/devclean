@@ -18,8 +18,8 @@ func mkdirAll(t *testing.T, path string) {
 	}
 }
 
-// fakeDevices places the listed directories on device 2 and everything else
-// on device 1; a path mapped to 0 has no determinable device.
+// fakeDevices puts the listed paths on the given device (0 = unknown) and
+// everything else on device 1.
 func fakeDevices(t *testing.T, devs map[string]uint64) {
 	t.Helper()
 	orig := deviceOf
@@ -80,9 +80,6 @@ func TestWalk_DoesNotEnterDirWithoutDevice(t *testing.T) {
 	}
 }
 
-// TestWalk_ReadsEachDirOnce converts the single-read property into a
-// deterministic gate: a reintroduced double-read is invisible to callers but
-// fails here.
 func TestWalk_ReadsEachDirOnce(t *testing.T) {
 	root := t.TempDir()
 	mkdirAll(t, filepath.Join(root, "a", "b"))
@@ -130,9 +127,7 @@ func TestWalk_DoesNotFollowSymlinkedDir(t *testing.T) {
 	}
 }
 
-// TestWalk_SymlinkedRoot pins the root-link switch: a symlinked root is read
-// through only with FollowRoot (a --path given as a link); otherwise it is the
-// link itself, as deleting or sizing that path touches only the link.
+// TestWalk_SymlinkedRoot: a symlinked root is read through only with FollowRoot.
 func TestWalk_SymlinkedRoot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on windows")
@@ -155,10 +150,8 @@ func TestWalk_SymlinkedRoot(t *testing.T) {
 	}
 }
 
-// TestWalk_SymlinkedRootOnOtherFilesystem checks the boundary against a real
-// second filesystem: a root that links onto another volume is judged by its
-// target, so its children are walked. Needs a writable dir on a filesystem
-// other than the temp dir's (/dev/shm on Linux).
+// TestWalk_SymlinkedRootOnOtherFilesystem: a root linking onto another real
+// filesystem (/dev/shm on Linux) is judged by its target.
 func TestWalk_SymlinkedRootOnOtherFilesystem(t *testing.T) {
 	tmpInfo, err := os.Stat(t.TempDir())
 	if err != nil {
@@ -249,18 +242,17 @@ func TestCheckOneFilesystem(t *testing.T) {
 
 	fakeDevices(t, map[string]uint64{mounted: 2})
 	err := CheckOneFilesystem(context.Background(), root)
-	se, ok := errors.AsType[*SpansFilesystemsError](err)
+	se, ok := errors.AsType[*UncheckedError](err)
 	if !ok {
-		t.Fatalf("err = %v, want *SpansFilesystemsError", err)
+		t.Fatalf("err = %v, want *UncheckedError", err)
 	}
 	if want := []string{mounted}; se.Path != root || !slices.Equal(se.Dirs, want) {
 		t.Errorf("err = %+v, want Path %s Dirs %v", se, root, want)
 	}
 }
 
-// TestWalk_ReportsUncheckableDir pins that a subdirectory whose lstat fails
-// (here: its parent lacks search permission) counts as skipped, not as
-// vanished — its filesystem was never checked.
+// TestWalk_ReportsUncheckableDir: a subdirectory whose lstat fails (parent
+// without search permission) counts as skipped.
 func TestWalk_ReportsUncheckableDir(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses directory permissions")
@@ -276,6 +268,27 @@ func TestWalk_ReportsUncheckableDir(t *testing.T) {
 	_, skipped := entered(t, Walker{}, root)
 
 	if want := []string{sub}; !slices.Equal(skipped, want) {
+		t.Errorf("skipped = %v, want %v", skipped, want)
+	}
+}
+
+// TestWalk_ReportsUnreadableDir: a directory that cannot be read counts as
+// skipped.
+func TestWalk_ReportsUnreadableDir(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	root := t.TempDir()
+	locked := filepath.Join(root, "locked")
+	mkdirAll(t, filepath.Join(locked, "inner"))
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	_, skipped := entered(t, Walker{}, root)
+
+	if want := []string{locked}; !slices.Equal(skipped, want) {
 		t.Errorf("skipped = %v, want %v", skipped, want)
 	}
 }

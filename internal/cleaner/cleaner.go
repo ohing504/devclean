@@ -39,8 +39,7 @@ func (c *Cleaner) Clean(ctx context.Context, r model.ScanResult) error {
 		return fmt.Errorf("refusing to delete protected item: %s (%s)", r.Path, r.Reason)
 	}
 
-	// Path removal must cover exactly the tree that was sized and shown: a
-	// recursive delete or a cross-device trash copy does not stop at mounts.
+	// A recursive delete does not stop at mounts; remove only what was sized.
 	if r.Delete == nil {
 		if err := fstree.CheckOneFilesystem(ctx, r.Path); err != nil {
 			return err

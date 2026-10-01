@@ -66,8 +66,8 @@ func TestWalkScan_ContextCanceled(t *testing.T) {
 	}
 }
 
-// TestWalkScan_DoesNotFollowSymlinkedArtifact locks the explicit no-follow guard
-// (walk.go skips any entry with os.ModeSymlink): a symlink named like an artifact
+// TestWalkScan_DoesNotFollowSymlinkedArtifact locks the no-follow policy of the
+// shared traversal (fstree): a symlink named like an artifact
 // is not matched, the walk never descends *through* a symlinked directory to
 // match an artifact inside it, and a self-referential symlink does not loop.
 func TestWalkScan_DoesNotFollowSymlinkedArtifact(t *testing.T) {

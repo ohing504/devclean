@@ -150,25 +150,22 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 
 	var results []model.ScanResult
 	var stack []projectContext
-	var pushedStack []int // per entered dir, how many contexts it pushed
 	numTables := len(tables)
 
-	// The shared traversal reads each directory exactly once, never follows a
-	// symlink and stays on the root's filesystem; this engine only decides
-	// what a directory is. FollowRoot reads through a symlinked --path.
+	// fstree does the traversal; the engine only decides what a directory is.
 	walker := fstree.Walker{
 		FollowRoot: true,
 		// Artifact match first, before the hidden-dir check, against the
 		// ancestor contexts (dir's own context is pushed only if we descend).
 		// Size is filled in afterwards by sizePending.
-		Enter: func(dir string, _ fs.FileInfo) bool {
+		Enter: func(dir string, info fs.FileInfo) bool {
 			name := filepath.Base(dir)
 			if rule, tableIdx, projRoot, ok := matchArtifact(stack, dir, name, numTables); ok {
 				result := model.ScanResult{
 					Path:      dir,
 					Ecosystem: tables[tableIdx].Eco,
 					Category:  rule.Category,
-					LastMod:   ModTime(dir),
+					LastMod:   info.ModTime(),
 					Safety:    rule.Safety,
 				}
 				if tables[tableIdx].SetProjectRoot {
@@ -200,9 +197,7 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 				}
 			}
 
-			// Marker check: establish the project contexts rooted at this
-			// directory; Leave pops them once its subtree is walked.
-			pushed := 0
+			// Marker check: establish the project contexts rooted at this directory.
 			for i := range tables {
 				t := &tables[i]
 				rooted := false
@@ -226,15 +221,14 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 					}
 				}
 				stack = append(stack, projectContext{root: dir, tableIdx: i, rules: rules})
-				pushed++
 			}
-			pushedStack = append(pushedStack, pushed)
 			return true
 		},
-		Leave: func(string) {
-			pushed := pushedStack[len(pushedStack)-1]
-			pushedStack = pushedStack[:len(pushedStack)-1]
-			stack = stack[:len(stack)-pushed]
+		// The contexts dir pushed are the ones on top rooted at dir.
+		Leave: func(dir string) {
+			for len(stack) > 0 && stack[len(stack)-1].root == dir {
+				stack = stack[:len(stack)-1]
+			}
 		},
 	}
 	if _, err := walker.Walk(ctx, root); err != nil {
@@ -319,7 +313,7 @@ func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers
 	for range workers {
 		wg.Go(func() {
 			for i := range idx {
-				st := Measure(results[i].Path)
+				st := measure(ctx, results[i].Path)
 				results[i].Size = st.Disk
 				results[i].ApparentSize = st.Apparent
 				results[i].Links = st.Links

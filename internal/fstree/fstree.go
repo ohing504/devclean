@@ -1,17 +1,7 @@
-// Package fstree walks a directory tree under the one traversal policy that
-// every stage of devclean shares — finding artifacts, sizing them, and
-// checking them before deletion — so what is reported, what is counted and
-// what is removed cover the same files:
-//
-//   - Symlinks are never followed: a symlinked directory is neither descended
-//     into nor reported as a directory. Only the root may be read through, and
-//     only when the caller asks (Walker.FollowRoot).
-//   - The walk stays on the root's filesystem, like du -x. A directory whose
-//     device ID differs from the root's — a mount such as Xcode CoreDevice's
-//     devicefs (paired iPhones' app containers, measured at ~4 s per directory
-//     read), a network share or an external volume — is not entered, nor is
-//     one whose device cannot be determined. Both are returned to the caller
-//     as skipped instead.
+// Package fstree is the one tree traversal shared by finding artifacts,
+// sizing them and checking them before deletion, so all three cover the same
+// files. It never follows symlinks (only the root, when asked) and stays on
+// the root's filesystem, like du -x.
 package fstree
 
 import (
@@ -25,14 +15,11 @@ import (
 	"syscall"
 )
 
-// readDir is os.ReadDir, indirected so a test can assert every directory is
-// read exactly once — the single-read property is what keeps the walk cheap
-// on large trees, and a reintroduced double-read is otherwise invisible.
+// readDir is indirected so a test can assert each directory is read once.
 var readDir = os.ReadDir
 
-// deviceOf returns the device ID of the filesystem info was taken from; ok is
-// false when the platform exposes none. Indirected (with the path) so a test
-// can place a directory on a "different filesystem" without mounting one.
+// deviceOf is indirected so a test can place a directory on another
+// filesystem without mounting one.
 var deviceOf = func(_ string, info fs.FileInfo) (uint64, bool) {
 	sys, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
@@ -44,27 +31,22 @@ var deviceOf = func(_ string, info fs.FileInfo) (uint64, bool) {
 // Walker walks a tree depth-first, reading each directory once. Every hook is
 // optional.
 type Walker struct {
-	// FollowRoot reads through a symlinked root (stat instead of lstat). Set
-	// it when the root is a user-given location such as --path; leave it off
-	// when the root is the item itself, since deleting a symlink removes only
-	// the link.
+	// FollowRoot reads through a symlinked root, for a user-given location
+	// such as --path. Leave it off when the root is the item to delete:
+	// deleting a symlink removes only the link.
 	FollowRoot bool
-	// Enter is called for the root and every directory on the root's
-	// filesystem, before it is read; info is its lstat (stat for a followed
-	// root). The root may also be a file or a symlink — it is passed to Enter
-	// and not read. Returning false skips the directory: it is not read and
-	// Leave is not called for it.
+	// Enter is called before a directory is read (and for a non-directory
+	// root, which is not read). Returning false skips it.
 	Enter func(dir string, info fs.FileInfo) bool
-	// Entries is called with the directory's entries once read. Returning
-	// false skips its subdirectories; Leave is not called. A directory that
-	// cannot be read is skipped without calling Entries.
+	// Entries is called once a directory is read. Returning false skips its
+	// subdirectories and Leave.
 	Entries func(dir string, entries []fs.DirEntry) bool
-	// Leave is called after all subdirectories of a read directory are walked.
+	// Leave is called after a read directory's subtree is walked.
 	Leave func(dir string)
 }
 
-// Walk walks the tree under root and returns the directories it did not enter
-// because they sit on another filesystem or their device is unknown. A root
+// Walk walks the tree under root and returns the directories it could not
+// check: on another filesystem, of unknown filesystem, or unreadable. A root
 // that does not exist is an empty tree. The only error is ctx's.
 func (w Walker) Walk(ctx context.Context, root string) ([]string, error) {
 	statRoot := os.Lstat
@@ -72,8 +54,11 @@ func (w Walker) Walk(ctx context.Context, root string) ([]string, error) {
 		statRoot = os.Stat
 	}
 	info, err := statRoot(root)
-	if err != nil {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
+	}
+	if err != nil {
+		return []string{root}, nil
 	}
 	rootDev, rootDevOK := deviceOf(root, info)
 
@@ -91,24 +76,23 @@ func (w Walker) Walk(ctx context.Context, root string) ([]string, error) {
 		}
 		entries, err := readDir(dir)
 		if err != nil {
+			skipped = append(skipped, dir)
 			return nil
 		}
 		if w.Entries != nil && !w.Entries(dir, entries) {
 			return nil
 		}
 		for _, e := range entries {
-			// e.IsDir() is false for a symlink (ReadDir uses lstat semantics),
-			// which is the no-follow policy.
-			if !e.IsDir() {
+			if !e.IsDir() { // false for symlinks: ReadDir does not follow them
 				continue
 			}
 			child := filepath.Join(dir, e.Name())
 			childInfo, err := e.Info()
 			if errors.Is(err, fs.ErrNotExist) {
-				continue // removed since the read
+				continue
 			}
 			if err != nil {
-				skipped = append(skipped, child) // cannot be checked
+				skipped = append(skipped, child)
 				continue
 			}
 			if rootDevOK {
@@ -126,35 +110,30 @@ func (w Walker) Walk(ctx context.Context, root string) ([]string, error) {
 		}
 		return nil
 	}
-	if err := visit(root, info); err != nil {
-		return skipped, err
-	}
-	return skipped, nil
+	return skipped, visit(root, info)
 }
 
-// SpansFilesystemsError reports a tree that reaches onto another filesystem,
-// or holds directories whose filesystem cannot be determined.
-type SpansFilesystemsError struct {
+// UncheckedError reports a tree with directories Walk could not check.
+type UncheckedError struct {
 	Path string
 	Dirs []string
 }
 
-func (e *SpansFilesystemsError) Error() string {
-	return fmt.Sprintf("refusing to delete %s: it contains directories on another filesystem or of unknown filesystem (%s)",
+func (e *UncheckedError) Error() string {
+	return fmt.Sprintf("refusing to delete %s: contains directories on another filesystem or unreadable (%s)",
 		e.Path, strings.Join(e.Dirs, ", "))
 }
 
-// CheckOneFilesystem returns a *SpansFilesystemsError when the tree at path
-// (not following a symlinked path) has directories it would not enter. A
-// recursive delete does not stop at mounts, so deleting such a tree would
-// remove files on the other filesystem that were never sized or shown.
+// CheckOneFilesystem returns an *UncheckedError when the tree at path has
+// directories Walk could not check. A recursive delete does not stop at
+// mounts, so it would remove files that were never sized or shown.
 func CheckOneFilesystem(ctx context.Context, path string) error {
 	skipped, err := Walker{}.Walk(ctx, path)
 	if err != nil {
 		return err
 	}
 	if len(skipped) > 0 {
-		return &SpansFilesystemsError{Path: path, Dirs: skipped}
+		return &UncheckedError{Path: path, Dirs: skipped}
 	}
 	return nil
 }

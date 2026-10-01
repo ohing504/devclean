@@ -165,11 +165,8 @@ type SizeStat struct {
 	Links    map[model.InodeKey]int64 // Nlink>1 inode → disk blocks, keyed by (dev, ino)
 }
 
-// Measure walks path in-process and returns its apparent and disk sizes. It
-// uses the same traversal as the walk engine and the cleaner's pre-delete
-// check (fstree): symlinks are not followed — neither the target nor the
-// link's own blocks are counted — and directories on another filesystem are
-// not counted, matching what deletion would remove.
+// Measure walks path with fstree, the traversal deletion is checked with, and
+// returns its apparent and disk sizes.
 //
 // Disk uses st_blocks×512 (allocated blocks), so it stays correct for sparse
 // files where the logical size vastly exceeds what is on disk, and matches
@@ -179,6 +176,11 @@ type SizeStat struct {
 // artifact and recorded in Links so a caller can net out blocks shared across
 // artifacts.
 func Measure(path string) SizeStat {
+	return measure(context.Background(), path)
+}
+
+// measure is Measure that stops once ctx is done.
+func measure(ctx context.Context, path string) SizeStat {
 	var st SizeStat
 	seen := make(map[model.InodeKey]struct{})
 	add := func(info fs.FileInfo) {
@@ -231,7 +233,7 @@ func Measure(path string) SizeStat {
 			return true
 		},
 	}
-	_, _ = w.Walk(context.Background(), path)
+	_, _ = w.Walk(ctx, path)
 	return st
 }
 
