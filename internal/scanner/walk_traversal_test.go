@@ -185,10 +185,7 @@ func TestWalkScan_StaysOnRootFilesystem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got []string
-	for _, r := range results {
-		got = append(got, r.Path)
-	}
+	got := paths(results)
 	want := []string{filepath.Join(proj, "node_modules")}
 	if !slices.Equal(got, want) {
 		t.Errorf("results = %v, want %v", got, want)
@@ -197,5 +194,73 @@ func TestWalkScan_StaysOnRootFilesystem(t *testing.T) {
 		if dir == mounted || strings.HasPrefix(dir, mounted+string(filepath.Separator)) {
 			t.Errorf("read %s on another filesystem", dir)
 		}
+	}
+}
+
+// TestWalkScan_SkipsDirWithoutDevice pins that once the root's device is known,
+// a directory whose device cannot be determined (stat fails, as on a hung or
+// disconnected mount) is skipped rather than read.
+func TestWalkScan_SkipsDirWithoutDevice(t *testing.T) {
+	root := t.TempDir()
+	unknown := filepath.Join(root, "unknown")
+	touch(t, filepath.Join(unknown, "package.json"))
+	mkdirAll(t, filepath.Join(unknown, "node_modules"))
+
+	origDev := walkDevice
+	walkDevice = func(path string) (uint64, bool) {
+		if path == unknown {
+			return 0, false
+		}
+		return 1, true
+	}
+	defer func() { walkDevice = origDev }()
+
+	results, err := WalkScan(context.Background(), root, model.EcoNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Errorf("got %v, want no results from a dir without a device ID", paths(results))
+	}
+}
+
+// TestWalkScan_SymlinkedRootOnOtherFilesystem pins that a --path given as a
+// symlink is judged by its target's filesystem: the walk reads through the
+// root link, so comparing against the link's own device would drop every
+// child of a root that links onto another volume.
+func TestWalkScan_SymlinkedRootOnOtherFilesystem(t *testing.T) {
+	target := t.TempDir()
+	targetDev, ok := walkDevice(target)
+	if !ok {
+		t.Skip("platform exposes no device IDs")
+	}
+	var linkDir string
+	for _, dir := range []string{"/dev/shm"} {
+		if dev, ok := walkDevice(dir); ok && dev != targetDev {
+			if d, err := os.MkdirTemp(dir, "devclean-test-"); err == nil {
+				linkDir = d
+				break
+			}
+		}
+	}
+	if linkDir == "" {
+		t.Skip("no writable directory on a filesystem other than the temp dir")
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(linkDir) })
+
+	touch(t, filepath.Join(target, "proj", "package.json"))
+	mkdirAll(t, filepath.Join(target, "proj", "node_modules"))
+	link := filepath.Join(linkDir, "root")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	results, err := WalkScan(context.Background(), link, model.EcoNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(link, "proj", "node_modules")}
+	if got := paths(results); !slices.Equal(got, want) {
+		t.Errorf("results = %v, want %v", got, want)
 	}
 }

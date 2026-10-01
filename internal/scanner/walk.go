@@ -118,11 +118,14 @@ func (w *walkScanner) Scan(ctx context.Context, root string) ([]model.ScanResult
 // engine, and a reintroduced double-read is otherwise invisible to output.
 var walkReadDir = os.ReadDir
 
-// walkDevice returns the device ID of path's filesystem (lstat, no follow);
-// ok is false when the platform exposes none. Indirected so a test can place a
-// directory on a "different filesystem" without mounting one.
+// walkDevice returns the device ID of path's filesystem; ok is false when the
+// path cannot be stat'ed or the platform exposes none. It follows symlinks
+// (stat, not lstat) because the walk reads through a symlinked root; every
+// other visited dir is a real directory, so following changes nothing there.
+// Indirected so a test can place a directory on a "different filesystem"
+// without mounting one.
 var walkDevice = func(path string) (uint64, bool) {
-	info, err := os.Lstat(path)
+	info, err := os.Stat(path)
 	if err != nil {
 		return 0, false
 	}
@@ -189,8 +192,10 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if rootDevOK {
-			if dev, ok := walkDevice(dir); ok && dev != rootDev {
+		if rootDevOK && dir != root {
+			// A dir that cannot be stat'ed is skipped too: falling through to
+			// ReadDir would hit the slow mount this check exists to avoid.
+			if dev, ok := walkDevice(dir); !ok || dev != rootDev {
 				return nil
 			}
 		}
