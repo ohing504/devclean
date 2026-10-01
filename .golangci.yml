@@ -6,6 +6,7 @@ linters:
     - revive
     - misspell
     - gocritic
+    - modernize
 
   exclusions:
     rules:
@@ -32,4 +33,5 @@ formatters:
 
   settings:
     gofumpt:
-      extra-rules: true
+      extra:
+        group-params: true

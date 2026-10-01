@@ -108,7 +108,6 @@ func BuildTreeItems(results []model.ScanResult) []TreeItem {
 			artifactStartIdx := len(items)
 
 			for _, r := range p.Items {
-				r := r
 				relPath := r.Path
 				if p.Path != "" {
 					if rel, err := relPathFromRoot(r.Path, p.Path); err == nil {
@@ -206,10 +205,7 @@ func (m treeModel) Init() tea.Cmd {
 func (m treeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		height := msg.Height - chromeLines
-		if height < 1 {
-			height = 1
-		}
+		height := max(msg.Height-chromeLines, 1)
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, height)
 			m.ready = true

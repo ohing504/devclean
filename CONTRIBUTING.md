@@ -6,9 +6,8 @@ test, and submit a change.
 ## Prerequisites
 
 - **Go 1.26.1+** — pinned in `go.mod`
-- **golangci-lint v2.11.4+** — `brew install golangci-lint` or [official install](https://golangci-lint.run/welcome/install/)
-- **gofumpt** — stricter formatter, used by lefthook (`go install mvdan.cc/gofumpt@latest`)
-- **lefthook** (optional but recommended) — runs lint + format on staged files (`brew install lefthook` then `lefthook install`)
+- **[mise](https://mise.jdx.dev/)** — installs golangci-lint and lefthook at the versions pinned in `.tool-versions` (CI reads the same file). `brew install mise`, activate it in your shell, then `mise install`
+- **lefthook hooks** (optional but recommended) — runs lint + format on staged files (`lefthook install`)
 
 ## Build, Test, Lint
 
@@ -28,8 +27,8 @@ go test ./internal/scanner/ -run TestPythonScanner_FindsPycache -v
 # Lint
 golangci-lint run ./...
 
-# Format
-gofumpt -w .
+# Format (gofumpt + goimports, bundled in golangci-lint)
+golangci-lint fmt
 ```
 
 CI (`.github/workflows/ci.yml`) runs `go build`, `go test -race -count=1`,

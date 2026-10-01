@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -327,10 +328,7 @@ const sizeWorkerCap = 8
 // the traversals and their I/O overlap. Returns ctx.Err() if the scan is
 // cancelled mid-sizing.
 func sizePending(ctx context.Context, results []model.ScanResult) error {
-	workers := runtime.NumCPU()
-	if workers > sizeWorkerCap {
-		workers = sizeWorkerCap
-	}
+	workers := min(runtime.NumCPU(), sizeWorkerCap)
 	return sizePendingWorkers(ctx, results, workers)
 }
 
@@ -350,16 +348,14 @@ func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers
 	idx := make(chan int)
 	var wg sync.WaitGroup
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range idx {
 				st := Measure(results[i].Path)
 				results[i].Size = st.Disk
 				results[i].ApparentSize = st.Apparent
 				results[i].Links = st.Links
 			}
-		}()
+		})
 	}
 
 	var canceled bool
@@ -395,8 +391,7 @@ func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers
 func matchArtifact(stack []projectContext, path, name string, numTables int) (artifactRule, int, string, bool) {
 	for tableIdx := range numTables {
 		// Nearest (deepest) project root of this ecosystem.
-		for i := len(stack) - 1; i >= 0; i-- {
-			pc := stack[i]
+		for _, pc := range slices.Backward(stack) {
 			if pc.tableIdx != tableIdx {
 				continue
 			}
