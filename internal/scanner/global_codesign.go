@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,20 +12,42 @@ import (
 	"github.com/ohing504/devclean/internal/model"
 )
 
-// processRunning reports whether a process named exactly name is running,
-// using pgrep -x. It is GlobalScanner.ProcessRunning's default.
-func processRunning(name string) bool {
-	return exec.Command("pgrep", "-x", name).Run() == nil
+// RunState is the result of checking whether a browser process is running.
+type RunState int
+
+const (
+	RunStateNotRunning RunState = iota
+	RunStateRunning
+	// RunStateUnknown means the check itself failed (pgrep missing or
+	// erroring), so the browser may be running.
+	RunStateUnknown
+)
+
+// processRunState checks for a process named exactly name with pgrep -x. Only
+// pgrep's "no match" exit (1) means not running; any other failure is unknown.
+// It is GlobalScanner.ProcessRunState's default.
+func processRunState(name string) RunState {
+	err := exec.Command("pgrep", "-x", name).Run()
+	if err == nil {
+		return RunStateRunning
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return RunStateNotRunning
+	}
+	return RunStateUnknown
 }
 
 // Recommendation notes for code-sign clones, keyed by browser run state:
 // clones of a browser that is not running are true zombies (safe); while the
-// browser runs, its newest copy may be in use (caution); for bundle IDs we
-// cannot map to a process name the run state is unknowable (caution).
+// browser runs, its newest copy may be in use (caution); when the run-state
+// check fails, or for bundle IDs we cannot map to a process name, the run state
+// is unknowable (caution).
 const (
-	codeSignCloneRec        = "zombie copies from killed browser processes (headless automation like lighthouse/puppeteer); the browser cleans these on next normal exit. Size may overstate if copies are APFS clones."
-	codeSignCloneRunningRec = "browser is currently running — newest copy may be in use; it cleans up leftovers on normal exit"
-	codeSignCloneUnknownRec = "unrecognized browser — cannot check whether it is running (newest copy may be in use); it cleans up leftovers on normal exit"
+	codeSignCloneRec            = "zombie copies from killed browser processes (headless automation like lighthouse/puppeteer); the browser cleans these on next normal exit. Size may overstate if copies are APFS clones."
+	codeSignCloneRunningRec     = "browser is currently running — newest copy may be in use; it cleans up leftovers on normal exit"
+	codeSignCloneUnknownRec     = "unrecognized browser — cannot check whether it is running (newest copy may be in use); it cleans up leftovers on normal exit"
+	codeSignCloneCheckFailedRec = "cannot check whether the browser is running (pgrep failed) — newest copy may be in use; it cleans up leftovers on normal exit"
 )
 
 // codeSignCloneBrowser describes a known Chromium-family browser: the display
@@ -62,7 +85,8 @@ var codeSignCloneBrowsers = map[string]codeSignCloneBrowser{
 //
 // Safety depends on run state: clones of a browser that is not running are
 // safe zombies; while the browser runs (checked once per browser via
-// ProcessRunning) or when the bundle ID is unrecognized, they are caution.
+// ProcessRunState), when that check fails, or when the bundle ID is
+// unrecognized, they are caution.
 //
 // Sizes come from allocated blocks (Measure) and still overstate real disk
 // usage when the copies are APFS clones of the installed app bundle: clones
@@ -76,13 +100,13 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 	}
 
 	// Memoize run-state checks: one pgrep per browser, not per clone dir.
-	running := make(map[string]bool)
-	isRunning := func(processName string) bool {
-		if v, ok := running[processName]; ok {
+	states := make(map[string]RunState)
+	runState := func(processName string) RunState {
+		if v, ok := states[processName]; ok {
 			return v
 		}
-		v := s.ProcessRunning(processName)
-		running[processName] = v
+		v := s.ProcessRunState(processName)
+		states[processName] = v
 		return v
 	}
 
@@ -108,11 +132,14 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 		rec := codeSignCloneUnknownRec
 		if known {
 			name = browser.displayName
-			if isRunning(browser.processName) {
-				rec = codeSignCloneRunningRec
-			} else {
+			switch runState(browser.processName) {
+			case RunStateNotRunning:
 				safety = model.SafetySafe
 				rec = codeSignCloneRec
+			case RunStateRunning:
+				rec = codeSignCloneRunningRec
+			default:
+				rec = codeSignCloneCheckFailedRec
 			}
 		}
 

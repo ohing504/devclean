@@ -185,8 +185,8 @@ func TestIntegration_GlobalScannerPipeline(t *testing.T) {
 	mustWriteFile(t, filepath.Join(npm, "cache.json"), make([]byte, 2048))
 
 	s := &scanner.GlobalScanner{
-		TmpRoot:        t.TempDir(), // isolate from real browser code-sign clones
-		ProcessRunning: func(string) bool { return false },
+		TmpRoot:         t.TempDir(), // isolate from real browser code-sign clones
+		ProcessRunState: func(string) scanner.RunState { return scanner.RunStateNotRunning },
 		// No tool installed: the cache keeps its declared safety and no
 		// external command (brew) runs.
 		LookPath: func(string) (string, error) { return "", exec.ErrNotFound },

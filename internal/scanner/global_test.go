@@ -220,7 +220,7 @@ func TestGlobalScanner_DetectsBrowserCodeSignClones(t *testing.T) {
 	s := newIsolatedGlobalScanner(t)
 	s.TmpRoot = tmpRoot
 	// Browser not running → the clones are safe zombies.
-	s.ProcessRunning = func(string) bool { return false }
+	s.ProcessRunState = func(string) scanner.RunState { return scanner.RunStateNotRunning }
 	results, err := s.Scan(context.Background(), home)
 	if err != nil {
 		t.Fatalf("Scan error: %v", err)
@@ -273,9 +273,12 @@ func TestGlobalScanner_CodeSignClonesCautionWhenBrowserRunning(t *testing.T) {
 	var checked []string
 	s := newIsolatedGlobalScanner(t)
 	s.TmpRoot = tmpRoot
-	s.ProcessRunning = func(name string) bool {
+	s.ProcessRunState = func(name string) scanner.RunState {
 		checked = append(checked, name)
-		return name == "Google Chrome"
+		if name == "Google Chrome" {
+			return scanner.RunStateRunning
+		}
+		return scanner.RunStateNotRunning
 	}
 	results, err := s.Scan(context.Background(), home)
 	if err != nil {
@@ -316,6 +319,64 @@ func TestGlobalScanner_CodeSignClonesCautionWhenBrowserRunning(t *testing.T) {
 
 	if len(checked) != 1 || checked[0] != "Google Chrome" {
 		t.Errorf("expected exactly one memoized check for %q (never for unknown bundles), got %v", "Google Chrome", checked)
+	}
+}
+
+// TestGlobalScanner_CodeSignClonesCautionWhenRunStateUnknown stubs a failed
+// run-state check (pgrep missing or erroring): a known browser's clones must
+// stay caution, never safe, since the browser may be running.
+func TestGlobalScanner_CodeSignClonesCautionWhenRunStateUnknown(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("browser code-sign clones are scanned on darwin only")
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tmpRoot := t.TempDir()
+	chrome := filepath.Join(tmpRoot, "aa", "bbb", "X", "com.google.Chrome.code_sign_clone")
+	mustMkdir(t, filepath.Join(chrome, "copy1"))
+
+	s := newIsolatedGlobalScanner(t)
+	s.TmpRoot = tmpRoot
+	s.ProcessRunState = func(string) scanner.RunState { return scanner.RunStateUnknown }
+	results, err := s.Scan(context.Background(), home)
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+
+	if len(results) != 1 || results[0].Path != chrome {
+		t.Fatalf("expected exactly the Chrome clone, got %+v", results)
+	}
+	r := results[0]
+	if r.Safety != model.SafetyCaution {
+		t.Errorf("expected safety=caution, got %s", r.Safety)
+	}
+	if !strings.Contains(r.Recommendation, "cannot check") {
+		t.Errorf("expected a cannot-check note, got %q", r.Recommendation)
+	}
+}
+
+// TestProcessRunState_PgrepMissingIsUnknown runs the default run-state check
+// with pgrep absent from PATH: the failure must read as unknown, not as
+// "not running".
+func TestProcessRunState_PgrepMissingIsUnknown(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	if got := scanner.NewGlobalScanner().ProcessRunState("Google Chrome"); got != scanner.RunStateUnknown {
+		t.Errorf("expected RunStateUnknown, got %v", got)
+	}
+}
+
+// TestProcessRunState_NoMatchIsNotRunning runs the default run-state check for
+// a process name nothing uses: pgrep's "no match" is the only not-running answer.
+func TestProcessRunState_NoMatchIsNotRunning(t *testing.T) {
+	if _, err := exec.LookPath("pgrep"); err != nil {
+		t.Skip("pgrep not installed")
+	}
+
+	if got := scanner.NewGlobalScanner().ProcessRunState("devclean-no-such-process"); got != scanner.RunStateNotRunning {
+		t.Errorf("expected RunStateNotRunning, got %v", got)
 	}
 }
 
@@ -643,7 +704,7 @@ func newIsolatedGlobalScanner(t *testing.T, installed ...string) *scanner.Global
 	t.Helper()
 	s := scanner.NewGlobalScanner()
 	s.TmpRoot = t.TempDir()
-	s.ProcessRunning = func(string) bool { return false }
+	s.ProcessRunState = func(string) scanner.RunState { return scanner.RunStateNotRunning }
 	s.LookPath = func(file string) (string, error) {
 		if slices.Contains(installed, file) {
 			return "/usr/local/bin/" + file, nil
