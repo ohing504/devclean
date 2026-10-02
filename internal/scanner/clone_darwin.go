@@ -30,7 +30,10 @@ func fileExtents(path string, size int64) (xs []extent, ok bool) {
 		binary.LittleEndian.PutUint32(l[0:], 0)
 		binary.LittleEndian.PutUint64(l[4:], uint64(size-off))
 		binary.LittleEndian.PutUint64(l[12:], uint64(off))
-		if _, err := unix.FcntlInt(uintptr(fd), unix.F_LOG2PHYS_EXT, int(uintptr(unsafe.Pointer(&l)))); err != nil {
+		// Syscall, not FcntlInt: converting &l in the call to an assembly
+		// function keeps l from moving with the stack while the kernel writes it.
+		if _, _, errno := unix.Syscall(unix.SYS_FCNTL, uintptr(fd), unix.F_LOG2PHYS_EXT, //nolint:staticcheck // SA1019: pointer argument must stay pinned
+			uintptr(unsafe.Pointer(&l))); errno != 0 {
 			return nil, false
 		}
 		n := int64(binary.LittleEndian.Uint64(l[4:]))

@@ -197,6 +197,7 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 	var extents []extent
 	var extentBlocks, groupBlocks int64 // st_blocks of files counted by extent or group instead
 	var groups map[uint64]*cloneGroup
+	var rootDev uint64
 	add := func(dir, name string, info fs.FileInfo) {
 		sys, ok := info.Sys().(*syscall.Stat_t)
 		if !ok {
@@ -226,7 +227,7 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 				st.Links = make(map[model.InodeKey]int64)
 			}
 			st.Links[key] = blocks
-		} else if clones != nil {
+		} else if clones != nil && blocks > 0 {
 			full := filepath.Join(dir, name)
 			ci, ok := fileCloneInfo(full)
 			switch {
@@ -253,6 +254,9 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 	}
 	w := fstree.Walker{
 		Enter: func(dir string, info fs.FileInfo) bool {
+			if sys, ok := info.Sys().(*syscall.Stat_t); ok && dir == path {
+				rootDev = uint64(sys.Dev) //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
+			}
 			add(dir, "", info)
 			return true
 		},
@@ -273,7 +277,6 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 	if clones == nil {
 		return st
 	}
-	rootDev, _ := statDev(path)
 	st.Reclaim = st.Disk - groupBlocks - extentBlocks
 	for id, g := range groups {
 		if g.Seen < g.Refcnt {

@@ -201,11 +201,11 @@ func HumanSize(size int64) string {
 }
 
 // DedupedTotal returns the total disk usage across results with blocks shared
-// via hard links or split APFS clone groups counted once. Each result's Size already counts its own
-// hard-linked inodes once (intra-artifact); this nets out inodes that recur
-// across artifacts — e.g. a pnpm store blob also hard-linked into a project's
-// node_modules — so the total reflects the space actually freed by deleting
-// everything shown, not an inflated sum.
+// via hard links or split APFS clone groups counted once. Each result's Size
+// already counts its own hard-linked inodes once (intra-artifact); this nets
+// out inodes that recur across artifacts — e.g. a pnpm store blob also
+// hard-linked into a project's node_modules — so the total reflects the space
+// actually freed by deleting everything shown, not an inflated sum.
 func DedupedTotal(results []ScanResult) int64 {
 	// A lone artifact has nothing to share with; skip building the inode set.
 	// Group headers call this once per sub-package, project and ecosystem.
