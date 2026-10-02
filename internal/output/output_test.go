@@ -490,22 +490,35 @@ func TestWriteTableTieBreaksByName(t *testing.T) {
 	})
 }
 
-// TestWriteTableFollowsSortKey pins that the table orders projects, and picks
-// the -n projects, by the --sort key instead of always by size.
-func TestWriteTableFollowsSortKey(t *testing.T) {
-	results := []model.ScanResult{
+// sortKeyResults has one project per size/time combination so that size order
+// (/big, /mid, /new) and time order (/new, /mid, /big) differ.
+func sortKeyResults() []model.ScanResult {
+	return []model.ScanResult{
 		{Path: "/big/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/big", Size: 3_000_000, LastMod: time.Unix(100, 0), Safety: model.SafetySafe},
 		{Path: "/new/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/new", Size: 1_000_000, LastMod: time.Unix(300, 0), Safety: model.SafetySafe},
 		{Path: "/mid/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/mid", Size: 2_000_000, LastMod: time.Unix(200, 0), Safety: model.SafetySafe},
 	}
+}
+
+// TestWriteTableOrdersProjectsBySortKey pins that the table lists projects in
+// --sort order instead of always by size.
+func TestWriteTableOrdersProjectsBySortKey(t *testing.T) {
 	var buf bytes.Buffer
-	output.WriteTableWithOptions(&buf, results, output.TableOptions{TopN: 2, SortBy: "time"})
+	output.WriteTableWithOptions(&buf, sortKeyResults(), output.TableOptions{SortBy: model.SortByTime})
 	out := buf.String()
-	if strings.Contains(out, "/big\n") {
-		t.Errorf("-n 2 --sort time should drop the oldest project /big; got:\n%s", out)
+	if i, j, k := strings.Index(out, "/new\n"), strings.Index(out, "/mid\n"), strings.Index(out, "/big\n"); i < 0 || j < 0 || k < 0 || i > j || j > k {
+		t.Errorf("--sort time should list /new, /mid, /big; got:\n%s", out)
 	}
-	if i, j := strings.Index(out, "/new\n"), strings.Index(out, "/mid\n"); i < 0 || j < 0 || i > j {
-		t.Errorf("--sort time should list /new before /mid; got:\n%s", out)
+}
+
+// TestWriteTableTopNFollowsSortKey pins that -n picks projects by the --sort
+// key instead of always by size.
+func TestWriteTableTopNFollowsSortKey(t *testing.T) {
+	var buf bytes.Buffer
+	output.WriteTableWithOptions(&buf, sortKeyResults(), output.TableOptions{TopN: 2, SortBy: model.SortByTime})
+	out := buf.String()
+	if strings.Contains(out, "/big\n") || !strings.Contains(out, "/new\n") || !strings.Contains(out, "/mid\n") {
+		t.Errorf("-n 2 --sort time should keep /new and /mid and drop the oldest project /big; got:\n%s", out)
 	}
 }
 

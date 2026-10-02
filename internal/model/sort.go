@@ -3,6 +3,7 @@ package model
 import (
 	"cmp"
 	"strings"
+	"time"
 )
 
 // Sort keys accepted by scan --sort.
@@ -18,15 +19,9 @@ const (
 // An unknown key sorts by size.
 func CompareResults(sortBy string, ascending bool) func(a, b ScanResult) int {
 	return func(a, b ScanResult) int {
-		var c int
-		switch sortBy {
-		case SortByTime:
-			c = a.LastMod.Compare(b.LastMod)
-		case SortByName:
-		default:
-			c = cmp.Compare(a.Size, b.Size)
-		}
-		return cmp.Or(directed(sortBy, ascending, c), strings.Compare(a.Path, b.Path))
+		return compareKeys(sortBy, ascending,
+			sortKeys{a.Size, a.LastMod, a.Path},
+			sortKeys{b.Size, b.LastMod, b.Path})
 	}
 }
 
@@ -34,24 +29,33 @@ func CompareResults(sortBy string, ascending bool) func(a, b ScanResult) int {
 // project's TotalSize, LastMod and Path.
 func CompareProjects(sortBy string, ascending bool) func(a, b ProjectGroup) int {
 	return func(a, b ProjectGroup) int {
-		var c int
-		switch sortBy {
-		case SortByTime:
-			c = a.LastMod.Compare(b.LastMod)
-		case SortByName:
-		default:
-			c = cmp.Compare(a.TotalSize, b.TotalSize)
-		}
-		return cmp.Or(directed(sortBy, ascending, c), strings.Compare(a.Path, b.Path))
+		return compareKeys(sortBy, ascending,
+			sortKeys{a.TotalSize, a.LastMod, a.Path},
+			sortKeys{b.TotalSize, b.LastMod, b.Path})
 	}
 }
 
-// directed turns an ascending comparison c into the default direction for
-// sortBy: descending for size and time. Name has no key besides the path
-// tie-break, which is always A→Z.
-func directed(sortBy string, ascending bool, c int) int {
-	if ascending || sortBy == SortByName {
-		return c
+// sortKeys holds the fields a --sort key can order by.
+type sortKeys struct {
+	size    int64
+	lastMod time.Time
+	path    string
+}
+
+// compareKeys compares a and b by sortBy: descending for size and time unless
+// ascending is set. Name has no key besides the path tie-break, which is
+// always A→Z.
+func compareKeys(sortBy string, ascending bool, a, b sortKeys) int {
+	var c int
+	switch sortBy {
+	case SortByTime:
+		c = a.lastMod.Compare(b.lastMod)
+	case SortByName:
+	default:
+		c = cmp.Compare(a.size, b.size)
 	}
-	return -c
+	if !ascending {
+		c = -c
+	}
+	return cmp.Or(c, strings.Compare(a.path, b.path))
 }

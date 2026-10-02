@@ -17,7 +17,7 @@ func newScanCmd() *cobra.Command {
 		status     string
 		minSizeStr string
 		sortBy     string
-		reverse    bool
+		ascending  bool
 		top        int
 		verbose    bool
 		jsonOutput bool
@@ -47,7 +47,7 @@ func newScanCmd() *cobra.Command {
 				return err
 			}
 
-			sortResults(results, sortBy, reverse)
+			sortResults(results, sortBy, ascending)
 
 			if jsonOutput {
 				return output.WriteJSON(os.Stdout, results)
@@ -57,7 +57,7 @@ func newScanCmd() *cobra.Command {
 				TopN:      top,
 				Verbose:   verbose,
 				SortBy:    sortBy,
-				Ascending: reverse,
+				Ascending: ascending,
 			})
 			return nil
 		},
@@ -68,8 +68,8 @@ func newScanCmd() *cobra.Command {
 	cmd.Flags().StringVar(&category, "category", "", "filter by category: cache, build, runtime, deps")
 	cmd.Flags().StringVar(&status, "status", "", "filter by status: active, recent, stale, dormant")
 	cmd.Flags().StringVar(&minSizeStr, "min-size", "", "skip artifacts smaller than this (e.g. 1MB, 500KB)")
-	cmd.Flags().StringVar(&sortBy, "sort", "size", "sort by: size, time, name")
-	cmd.Flags().BoolVar(&reverse, "asc", false, "sort ascending: smallest or oldest first (name is always A→Z)")
+	cmd.Flags().StringVar(&sortBy, "sort", model.SortBySize, "sort by: size, time, name")
+	cmd.Flags().BoolVar(&ascending, "asc", false, "sort ascending: smallest or oldest first (name is always A→Z)")
 	cmd.Flags().IntVarP(&top, "top", "n", 0, "show only top N projects (0 = all)")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show all artifacts including small ones")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "JSON output for scripting and AI agents")
