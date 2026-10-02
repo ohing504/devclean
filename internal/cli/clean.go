@@ -41,14 +41,15 @@ func newCleanCmd() *cobra.Command {
   devclean clean --eco node --force
   devclean clean --eco xcode --vendor-cleanup --yes  # also runs 'xcrun simctl delete unavailable'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Without a terminal on stdin the selector and confirmation cannot
-			// prompt; fail so a script or agent sees why nothing was cleaned.
-			if !yes && !isatty.IsTerminal(os.Stdin.Fd()) {
-				return errors.New("stdin is not a terminal: pass --yes to clean without prompts (add --dry-run to preview)")
-			}
 			minSize, err := parseMinSize(minSizeStr)
 			if err != nil {
 				return err
+			}
+			// Without a terminal on stdin the selector and confirmation cannot
+			// prompt; fail so a script or agent sees why nothing was cleaned.
+			if !yes && !isatty.IsTerminal(os.Stdin.Fd()) {
+				cmd.SilenceUsage = true
+				return errors.New("stdin is not a terminal: pass --yes to clean without prompts (add --dry-run to preview)")
 			}
 			results, err := runScanPipeline(ScanPipelineOptions{
 				Path:     scanPath,
