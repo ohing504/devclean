@@ -8,6 +8,8 @@ Every command runs to completion via flags alone (`--yes`, `--json`); interactiv
 
 Run `devclean --help` or `devclean <command> --help` for the most up-to-date flag reference.
 
+`--path` (scan and clean) accepts a relative path, resolved against the current directory; output always carries absolute paths. The given directory is scanned even when its name starts with `.`.
+
 ### scan
 
 Scan for reclaimable disk space. See `devclean scan --help` for all flags.

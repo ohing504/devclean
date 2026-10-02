@@ -132,10 +132,10 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		return nil, nil
 	}
 
-	// Hidden directories are only descended into when an active ecosystem
-	// lists the name as a single-segment or any-depth artifact (e.g. ".next",
-	// ".venv"). Artifact matching happens before this check, so compound
-	// rules ending in a hidden segment (android/.gradle) are unaffected.
+	// Hidden directories below the root are only descended into when an
+	// active ecosystem lists the name as a single-segment or any-depth artifact
+	// (e.g. ".next", ".venv"). Artifact matching happens before this check, so
+	// compound rules ending in a hidden segment (android/.gradle) are unaffected.
 	hiddenDescend := make(map[string]bool)
 	for _, t := range tables {
 		for _, r := range t.Rules {
@@ -178,7 +178,8 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 				ReportProgress(ctx, len(results))
 				return false // matched artifact: do not descend
 			}
-			return !strings.HasPrefix(name, ".") || hiddenDescend[name]
+			// The root is always entered: the hidden-dir rule applies below it.
+			return dir == root || !strings.HasPrefix(name, ".") || hiddenDescend[name]
 		},
 		Entries: func(dir string, entries []fs.DirEntry) bool {
 			names := make(map[string]bool, len(entries))

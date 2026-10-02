@@ -55,7 +55,7 @@ A `walkEcosystem` table declares how one ecosystem participates in the shared wa
 | any-depth name | `__pycache__`, `.venv` | matches the directory name anywhere under the nearest project root |
 | any-depth suffix | `*.egg-info` | matches a directory-name suffix anywhere under the nearest project root |
 
-Per directory, the engine matches artifact rules against the **nearest** enclosing project root of each active ecosystem (table order, first match wins), emits the artifact and skips its subtree on a match, and otherwise reads the directory once to detect new project roots (pushed onto a recursion-scoped context stack) before descending into its child directories. Artifact matching runs **before** the hidden-directory check so compound rules ending in a hidden segment (`android/.gradle`) still match; unmatched hidden directories are descended into only when an active ecosystem lists the name as an artifact.
+Per directory, the engine matches artifact rules against the **nearest** enclosing project root of each active ecosystem (table order, first match wins), emits the artifact and skips its subtree on a match, and otherwise reads the directory once to detect new project roots (pushed onto a recursion-scoped context stack) before descending into its child directories. Artifact matching runs **before** the hidden-directory check so compound rules ending in a hidden segment (`android/.gradle`) still match; unmatched hidden directories below the scan root are descended into only when an active ecosystem lists the name as an artifact.
 
 Tables can also:
 
