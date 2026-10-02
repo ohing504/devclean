@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/ohing504/devclean/internal/model"
 )
@@ -41,22 +40,14 @@ var nodeWalkEcosystem = walkEcosystem{
 // pnpm installs pure clones, recognized without reading the store, so no clone
 // source is given.
 func describePnpmInstall(dir string) artifactNote {
-	if pnpmStore(dir) == "" {
+	storeDir := modulesYAMLStoreDir(filepath.Join(dir, ".modules.yaml"))
+	if storeDir == "" || !sameVolume(dir, storeDir) {
 		return artifactNote{}
 	}
 	return artifactNote{
 		Recommendation: "files likely shared with pnpm store — run `pnpm store prune` after deleting to free space",
 		CloneAware:     true,
 	}
-}
-
-// pnpmStore returns the same-volume pnpm store dir installs came from, or "".
-func pnpmStore(dir string) string {
-	storeDir := modulesYAMLStoreDir(filepath.Join(dir, ".modules.yaml"))
-	if storeDir == "" || !sameVolume(dir, storeDir) {
-		return ""
-	}
-	return storeDir
 }
 
 // modulesYAMLStoreDir returns the top-level storeDir value of a pnpm
@@ -85,14 +76,9 @@ func modulesYAMLStoreDir(path string) string {
 
 // sameVolume reports whether both paths exist on the same device.
 func sameVolume(a, b string) bool {
-	ia, errA := os.Stat(a)
-	ib, errB := os.Stat(b)
-	if errA != nil || errB != nil {
-		return false
-	}
-	sa, okA := ia.Sys().(*syscall.Stat_t)
-	sb, okB := ib.Sys().(*syscall.Stat_t)
-	return okA && okB && sa.Dev == sb.Dev
+	da, okA := statDev(a)
+	db, okB := statDev(b)
+	return okA && okB && da == db
 }
 
 // reactNativeRules are added to a Node project context when the project is

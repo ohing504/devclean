@@ -174,12 +174,6 @@ type SizeStat struct {
 	CloneShares map[model.CloneKey]model.CloneShare
 }
 
-// cloneSizing turns on clone-aware sizing; source, if set, is called only once
-// some file's extents were read.
-type cloneSizing struct {
-	source func() (extents []extent, dev uint64, ok bool)
-}
-
 // Measure walks path with fstree, the traversal deletion is checked with, and
 // returns its apparent and disk sizes.
 //
@@ -191,18 +185,18 @@ type cloneSizing struct {
 // artifact and recorded in Links so a caller can net out blocks shared across
 // artifacts.
 func Measure(path string) SizeStat {
-	return measure(context.Background(), path, nil)
+	return measure(context.Background(), path, nil, "")
 }
 
-// measure is Measure that stops once ctx is done; clones makes it clone-aware
-// (see clone.go).
-func measure(ctx context.Context, path string, clones *cloneSizing) SizeStat {
+// measure is Measure that stops once ctx is done. A non-nil clones makes it
+// clone-aware (see clone.go), netting out blocks shared with the files under
+// source, if given.
+func measure(ctx context.Context, path string, clones *cloneSources, source string) SizeStat {
 	var st SizeStat
 	seen := make(map[model.InodeKey]struct{})
 	var extents []extent
 	var extentBlocks, groupBlocks int64 // st_blocks of files counted by extent or group instead
-	groups := make(map[uint64]*cloneGroup)
-	var rootDev uint64
+	var groups map[uint64]*cloneGroup
 	add := func(dir, name string, info fs.FileInfo) {
 		sys, ok := info.Sys().(*syscall.Stat_t)
 		if !ok {
@@ -239,10 +233,13 @@ func measure(ctx context.Context, path string, clones *cloneSizing) SizeStat {
 			case ok && ci.refcnt > 1:
 				g := groups[ci.id]
 				if g == nil {
-					g = &cloneGroup{refcnt: ci.refcnt, blocks: blocks, path: full, size: info.Size()}
+					if groups == nil {
+						groups = make(map[uint64]*cloneGroup)
+					}
+					g = &cloneGroup{CloneShare: model.CloneShare{Refcnt: ci.refcnt, Blocks: blocks}, path: full, size: info.Size()}
 					groups[ci.id] = g
 				}
-				g.seen++
+				g.Seen++
 				groupBlocks += blocks
 			case !ok || ci.mayShare:
 				if xs, ok := fileExtents(full, info.Size()); ok {
@@ -256,11 +253,6 @@ func measure(ctx context.Context, path string, clones *cloneSizing) SizeStat {
 	}
 	w := fstree.Walker{
 		Enter: func(dir string, info fs.FileInfo) bool {
-			if dir == path {
-				if sys, ok := info.Sys().(*syscall.Stat_t); ok {
-					rootDev = uint64(sys.Dev)
-				}
-			}
 			add(dir, "", info)
 			return true
 		},
@@ -278,35 +270,36 @@ func measure(ctx context.Context, path string, clones *cloneSizing) SizeStat {
 	}
 	_, _ = w.Walk(ctx, path)
 	st.Reclaim = st.Disk
-	if clones != nil {
-		st.Reclaim = st.Disk - groupBlocks - extentBlocks
-		for id, g := range groups {
-			switch {
-			case g.seen < g.refcnt:
-				if st.CloneShares == nil {
-					st.CloneShares = make(map[model.CloneKey]model.CloneShare)
-				}
-				st.CloneShares[model.CloneKey{Dev: rootDev, ID: id}] = model.CloneShare{Refcnt: g.refcnt, Seen: g.seen, Blocks: g.blocks}
-			case len(extents) > 0:
-				// A partly rewritten copy may overlap the group: count by extent.
-				if xs, ok := fileExtents(g.path, g.size); ok {
-					extents = append(extents, xs...)
-				} else {
-					st.Reclaim += g.blocks
-				}
-			default:
-				st.Reclaim += g.blocks
+	if clones == nil {
+		return st
+	}
+	rootDev, _ := statDev(path)
+	st.Reclaim = st.Disk - groupBlocks - extentBlocks
+	for id, g := range groups {
+		if g.Seen < g.Refcnt {
+			if st.CloneShares == nil {
+				st.CloneShares = make(map[model.CloneKey]model.CloneShare)
 			}
+			st.CloneShares[model.CloneKey{Dev: rootDev, ID: id}] = g.CloneShare
+			continue
 		}
+		// A partly rewritten copy may overlap the group: count by extent.
 		if len(extents) > 0 {
-			var src []extent
-			if clones.source != nil {
-				if xs, dev, ok := clones.source(); ok && dev == rootDev {
-					src = xs
-				}
+			if xs, ok := fileExtents(g.path, g.size); ok {
+				extents = append(extents, xs...)
+				continue
 			}
-			st.Reclaim += bytesNotIn(mergeExtents(extents), src)
 		}
+		st.Reclaim += g.Blocks
+	}
+	if len(extents) > 0 {
+		var src []extent
+		if source != "" {
+			if xs, dev, ok := clones.get(ctx, source); ok && dev == rootDev {
+				src = xs
+			}
+		}
+		st.Reclaim += bytesNotIn(mergeExtents(extents), src)
 	}
 	return st
 }

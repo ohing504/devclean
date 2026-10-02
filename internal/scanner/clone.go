@@ -4,12 +4,14 @@ import (
 	"cmp"
 	"context"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 	"syscall"
 
 	"github.com/ohing504/devclean/internal/fstree"
+	"github.com/ohing504/devclean/internal/model"
 )
 
 // Clone-aware sizing (CloneAware results). An APFS clone is a separate inode
@@ -28,10 +30,9 @@ type cloneInfo struct {
 }
 
 type cloneGroup struct {
-	refcnt, seen uint32
-	blocks       int64  // st_blocks of one member
-	path         string // one member, for reading its extents
-	size         int64
+	model.CloneShare        // Blocks: st_blocks of one member
+	path             string // one member, for reading its extents
+	size             int64
 }
 
 // extent is a physical byte range [start, end) on a device.
@@ -72,10 +73,28 @@ func bytesNotIn(xs, ref []extent) int64 {
 	return total
 }
 
-// cloneSources loads each clone source's extents once per sizing pass.
+// statDev returns the device of path, following a symlink.
+func statDev(path string) (uint64, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, false
+	}
+	sys, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, false
+	}
+	return uint64(sys.Dev), true //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
+}
+
+// cloneSources loads each clone source's extents once per sizing pass; make
+// it with newCloneSources.
 type cloneSources struct {
 	mu     sync.Mutex
 	byPath map[string]*cloneSource
+}
+
+func newCloneSources() *cloneSources {
+	return &cloneSources{byPath: make(map[string]*cloneSource)}
 }
 
 type cloneSource struct {
@@ -90,9 +109,6 @@ type cloneSource struct {
 // out, so their shared blocks count as freed.
 func (c *cloneSources) get(ctx context.Context, path string) (extents []extent, dev uint64, ok bool) {
 	c.mu.Lock()
-	if c.byPath == nil {
-		c.byPath = make(map[string]*cloneSource)
-	}
 	s := c.byPath[path]
 	if s == nil {
 		s = &cloneSource{}
@@ -101,18 +117,18 @@ func (c *cloneSources) get(ctx context.Context, path string) (extents []extent, 
 	c.mu.Unlock()
 
 	s.once.Do(func() {
+		if s.dev, s.ok = statDev(path); !s.ok {
+			return
+		}
 		var xs []extent
 		w := fstree.Walker{
 			FollowRoot: true,
-			Enter: func(dir string, info fs.FileInfo) bool {
-				if st, ok := info.Sys().(*syscall.Stat_t); ok && dir == path {
-					s.dev, s.ok = uint64(st.Dev), true
-				}
-				return true
-			},
 			Entries: func(dir string, entries []fs.DirEntry) bool {
 				for _, e := range entries {
-					if info, err := e.Info(); err == nil && e.Type().IsRegular() {
+					if !e.Type().IsRegular() {
+						continue
+					}
+					if info, err := e.Info(); err == nil {
 						if fx, ok := fileExtents(filepath.Join(dir, e.Name()), info.Size()); ok {
 							xs = append(xs, fx...)
 						}

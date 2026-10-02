@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"encoding/binary"
-	"os"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -19,11 +18,11 @@ func fileExtents(path string, size int64) (xs []extent, ok bool) {
 	if size == 0 {
 		return nil, true
 	}
-	f, err := os.Open(path)
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, false
 	}
-	defer func() { _ = f.Close() }()
+	defer func() { _ = unix.Close(fd) }()
 
 	// struct log2phys, pack(4): u32 flags, off_t contigbytes, off_t devoffset.
 	var l [20]byte
@@ -31,7 +30,7 @@ func fileExtents(path string, size int64) (xs []extent, ok bool) {
 		binary.LittleEndian.PutUint32(l[0:], 0)
 		binary.LittleEndian.PutUint64(l[4:], uint64(size-off))
 		binary.LittleEndian.PutUint64(l[12:], uint64(off))
-		if _, err := unix.FcntlInt(f.Fd(), unix.F_LOG2PHYS_EXT, int(uintptr(unsafe.Pointer(&l)))); err != nil {
+		if _, err := unix.FcntlInt(uintptr(fd), unix.F_LOG2PHYS_EXT, int(uintptr(unsafe.Pointer(&l)))); err != nil {
 			return nil, false
 		}
 		n := int64(binary.LittleEndian.Uint64(l[4:]))

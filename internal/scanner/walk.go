@@ -317,21 +317,18 @@ func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers
 		workers = 1
 	}
 
-	var sources cloneSources
+	sources := newCloneSources()
 	idx := make(chan int)
 	var wg sync.WaitGroup
 	for range workers {
 		wg.Go(func() {
 			for i := range idx {
 				r := &results[i]
-				var clones *cloneSizing
+				var clones *cloneSources
 				if r.CloneAware && cloneSizingSupported {
-					clones = &cloneSizing{}
-					if src := r.CloneSource; src != "" {
-						clones.source = func() ([]extent, uint64, bool) { return sources.get(ctx, src) }
-					}
+					clones = sources
 				}
-				st := measure(ctx, r.Path, clones)
+				st := measure(ctx, r.Path, clones, r.CloneSource)
 				r.Size = st.Reclaim
 				r.ApparentSize = st.Apparent
 				r.Links = st.Links

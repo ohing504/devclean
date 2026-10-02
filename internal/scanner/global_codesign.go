@@ -145,10 +145,6 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 		if appName == "" && known {
 			appName = browser.processName
 		}
-		source := ""
-		if appName != "" {
-			source = s.installedApp(appName)
-		}
 		out = append(out, model.ScanResult{
 			Path:           m,
 			Ecosystem:      model.EcoGlobal,
@@ -159,7 +155,7 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 			Label:          codeSignCloneLabel(m, name),
 			Recommendation: rec,
 			CloneAware:     true,
-			CloneSource:    source,
+			CloneSource:    s.installedApp(appName),
 		})
 		ReportProgress(ctx, found+len(out))
 	}
@@ -177,9 +173,11 @@ func copiedAppName(cloneDir string) string {
 
 // installedApp returns "<appName>.app" in AppDirs, or "".
 func (s *GlobalScanner) installedApp(appName string) string {
+	if appName == "" {
+		return ""
+	}
 	for _, d := range s.AppDirs {
-		p := filepath.Join(d, appName+".app")
-		if info, err := os.Stat(p); err == nil && info.IsDir() {
+		if p := filepath.Join(d, appName+".app"); isDir(p) {
 			return p
 		}
 	}
