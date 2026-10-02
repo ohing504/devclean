@@ -4,7 +4,7 @@ The behavior the user approved. Code and tests must match this file; a PR that c
 
 ## Commands
 
-Every command runs to completion via flags alone (`--yes`, `--json`); interactive prompts are optional, so scripts and AI agents never need a TTY.
+Every command runs to completion via flags alone (`--yes`, `--json`); interactive prompts are optional, so scripts and AI agents never need a TTY. When stdout is not a terminal, the scan progress spinner is not printed.
 
 Run `devclean --help` or `devclean <command> --help` for the most up-to-date flag reference.
 
@@ -139,6 +139,13 @@ Skipped 3 caution item(s) — pass --include-caution to remove them with --yes.
 Add `--include-caution` to also delete `caution` items non-interactively. `protected`
 items are never deleted either way. The interactive selector (no `--yes`) is
 unaffected — you still see and choose caution items yourself.
+
+Without `--yes`, `clean` needs a terminal on stdin to prompt. When stdin is not a
+terminal it exits with status 1 before scanning:
+
+```text
+Error: stdin is not a terminal: pass --yes to clean without prompts (add --dry-run to preview)
+```
 
 #### Vendor Cleanups
 

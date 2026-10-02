@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/mattn/go-isatty"
 	"github.com/ohing504/devclean/internal/classifier"
 	"github.com/ohing504/devclean/internal/model"
 	"github.com/ohing504/devclean/internal/scanner"
@@ -61,8 +62,10 @@ func runScanPipeline(opts ScanPipelineOptions) ([]model.ScanResult, error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Spinner frames are terminal control codes; keep them out of piped output.
+	showSpinner := !opts.Quiet && isatty.IsTerminal(os.Stdout.Fd())
 	var sp *ui.Spinner
-	if !opts.Quiet {
+	if showSpinner {
 		sp = ui.NewSpinner("Scanning...")
 	}
 
@@ -82,7 +85,7 @@ func runScanPipeline(opts ScanPipelineOptions) ([]model.ScanResult, error) {
 		return nil, err
 	}
 
-	if !opts.Quiet {
+	if showSpinner {
 		sp = ui.NewSpinner("Classifying...")
 	}
 	classifier.ApplyGitInfo(results)
