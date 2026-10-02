@@ -14,7 +14,9 @@ release-please keeps a release PR open on `main`. Merging it bumps the version, 
 goreleaser check
 ```
 
-The first release PR shows the generated version and section; its merge run shows the Release with assets.
+CI runs the same check on every PR. The first release PR shows the generated version and section; its merge run shows the Release with assets.
+
+The repository squash-merges only, with the PR title as the commit title, so the PR title is what release-please reads.
 
 ## Rationale
 
