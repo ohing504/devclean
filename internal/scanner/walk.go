@@ -29,17 +29,15 @@ type artifactRule struct {
 	Suffix   string
 	Category model.Category
 	Safety   model.SafetyLevel
-	// Describe optionally inspects the matched directory once to fill the
-	// result's Recommendation and clone-aware sizing (e.g. how the tool that
-	// populated it affects reclaim).
+	// Describe optionally inspects the matched directory (e.g. which tool
+	// populated it) to fill the result's fields below.
 	Describe func(dir string) artifactNote
 }
 
-// artifactNote is what artifactRule.Describe found about a matched directory.
 type artifactNote struct {
 	Recommendation string
-	CloneAware     bool   // files are likely APFS clones
-	CloneSource    string // directory they were cloned from, "" when unknown
+	CloneAware     bool
+	CloneSource    string
 }
 
 // matches reports whether a directory matches this rule. rel is the
@@ -296,8 +294,7 @@ func isPnpmStoreVersionDir(name string) bool {
 // traverse every artifact tree at once.
 const sizeWorkerCap = 8
 
-// sizePending fills in Size, ApparentSize, AllocatedSize and Links for every
-// result (clone-aware for results marked CloneAware) by running
+// sizePending fills in the size fields of every result by running
 // Measure concurrently across a bounded worker pool. The walk finds artifacts
 // serially but defers their sizing (one in-process tree walk each) to here so
 // the traversals and their I/O overlap. Returns ctx.Err() if the scan is

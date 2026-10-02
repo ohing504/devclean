@@ -135,9 +135,8 @@ type GlobalScanner struct {
 	// code-sign clones (macOS: /private/var/folders). A field so tests can
 	// point it at a fixture directory.
 	TmpRoot string
-	// AppDirs are searched for the installed browser app whose blocks its
-	// code-sign clones share (default: /Applications, ~/Applications). A
-	// field so tests can point it at a fixture directory.
+	// AppDirs are searched for the installed browser app its code-sign clones
+	// share blocks with. A field so tests can point it at a fixture.
 	AppDirs []string
 	// ProcessRunState reports whether a process with exactly the given name
 	// is currently running, or that the check failed (default: pgrep -x). A
@@ -161,7 +160,6 @@ func NewGlobalScanner() *GlobalScanner {
 	}
 }
 
-// defaultAppDirs are where macOS apps are installed: system-wide and per user.
 func defaultAppDirs() []string {
 	dirs := []string{"/Applications"}
 	if home, err := os.UserHomeDir(); err == nil {

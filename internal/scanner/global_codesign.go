@@ -80,7 +80,7 @@ var codeSignCloneBrowsers = map[string]codeSignCloneBrowser{
 // on launch to verify their code signature and remove the copy on normal exit.
 // Force-killed processes — typically headless automation such as lighthouse or
 // puppeteer — leave the copies behind, and they accumulate (observed in the
-// wild: 92 copies summing to 156 GB of allocated blocks, most of it shared).
+// wild: 92 copies / 156 GB of mostly shared blocks).
 //
 // found is the number of results already reported so progress keeps counting up.
 //
@@ -89,9 +89,8 @@ var codeSignCloneBrowsers = map[string]codeSignCloneBrowser{
 // ProcessRunState), when that check fails, or when the bundle ID is
 // unrecognized, they are caution.
 //
-// The copies are APFS clones of each other and of the installed app bundle,
-// so sizing is clone-aware with that bundle as clone source (see clone.go):
-// Size is what deleting the copies frees.
+// The copies are APFS clones of each other and of the installed app, which is
+// the clone source.
 func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []model.ScanResult {
 	matches, err := filepath.Glob(filepath.Join(s.TmpRoot, "*", "*", "X", "*.code_sign_clone"))
 	if err != nil {
@@ -167,8 +166,7 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 	return out
 }
 
-// copiedAppName returns the app name of the bundle the browser copied, from a
-// copy's "<name>.app.bundle" entry, or "" when no copy holds one.
+// copiedAppName returns <name> of a copy's "<name>.app.bundle", or "".
 func copiedAppName(cloneDir string) string {
 	matches, _ := filepath.Glob(filepath.Join(cloneDir, "*", "*.app.bundle"))
 	if len(matches) == 0 {
@@ -177,8 +175,7 @@ func copiedAppName(cloneDir string) string {
 	return strings.TrimSuffix(filepath.Base(matches[0]), ".app.bundle")
 }
 
-// installedApp returns the installed bundle "<appName>.app" from AppDirs, or
-// "" when none is found.
+// installedApp returns "<appName>.app" in AppDirs, or "".
 func (s *GlobalScanner) installedApp(appName string) string {
 	for _, d := range s.AppDirs {
 		p := filepath.Join(d, appName+".app")

@@ -30,13 +30,13 @@ Scanners report progress via context-attached callbacks: the walk batch reports 
 **Sizing** collects these figures per artifact through an in-process walk (`scanner.Measure`):
 
 - **disk** — allocated blocks (`st_blocks×512`), sparse-accurate and matching `du`. Directories contribute their own blocks (real on ext4, ~0 on APFS).
-- **reclaim** — what deleting the artifact frees; becomes `Size`, the primary figure: sorting, `--min-size`, and totals all use it. Equal to disk unless the scanner marks the result `CloneAware` (macOS: browser code-sign copies, pnpm `node_modules`); then APFS clone sharing is netted out and disk is kept as `AllocatedSize` — see [decision](decisions/clone-aware-size.md).
+- **reclaim** — what deleting the artifact frees; `Size`, used by sorting, `--min-size` and totals. Equal to disk unless the result is `CloneAware`, which nets out APFS clone sharing and keeps disk as `AllocatedSize` ([decision](decisions/clone-aware-size.md)).
 - **apparent** — sum of logical file sizes. Surfaces only when a file is materially sparse.
 
 Three invariants keep the figures honest:
 
 - **Hard links** (`Nlink>1`) are counted once per artifact, keyed by `(dev, ino)`, so shared blocks net out across artifacts.
-- **APFS clones** in a `CloneAware` artifact count once, and not at all when a file outside the artifact (its `CloneSource`, or any file for a pure clone) shares them. Pure clone groups split across artifacts are kept in `CloneShares` so `DedupedTotal` counts them once when the results hold all their clones.
+- **APFS clones** in a `CloneAware` artifact count once; clone groups split across artifacts go to `CloneShares` so `DedupedTotal` counts them once.
 - **Shared traversal**: sizing walks with `fstree`, so it counts what finding reports and deletion removes.
 
 Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through one shared bounded worker pool (`sizePending`, `min(NumCPU, 8)`) so the tree-walk I/O overlaps.

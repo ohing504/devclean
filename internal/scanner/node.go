@@ -38,10 +38,8 @@ var nodeWalkEcosystem = walkEcosystem{
 // not prove pnpm populated node_modules). A store on another volume can be
 // neither cloned nor hard-linked, so pnpm copies and no note is given; the
 // packageImportMethod=copy setting is not recorded and cannot be detected.
-//
-// Such a node_modules is sized clone-aware. pnpm's clones are pure clones of
-// store files, which sizing recognizes without reading the store, so no clone
-// source is given: reading every store file's extents costs seconds per scan.
+// pnpm installs pure clones, recognized without reading the store, so no clone
+// source is given.
 func describePnpmInstall(dir string) artifactNote {
 	if pnpmStore(dir) == "" {
 		return artifactNote{}
@@ -52,8 +50,7 @@ func describePnpmInstall(dir string) artifactNote {
 	}
 }
 
-// pnpmStore returns the pnpm store a node_modules was installed from, or ""
-// when pnpm did not populate it or the store is on another volume.
+// pnpmStore returns the same-volume pnpm store dir installs came from, or "".
 func pnpmStore(dir string) string {
 	storeDir := modulesYAMLStoreDir(filepath.Join(dir, ".modules.yaml"))
 	if storeDir == "" || !sameVolume(dir, storeDir) {
@@ -63,8 +60,7 @@ func pnpmStore(dir string) string {
 }
 
 // modulesYAMLStoreDir returns the top-level storeDir value of a pnpm
-// .modules.yaml, or "" when the file or key is missing. pnpm 12 writes the
-// file as JSON (valid YAML); older versions write block-style YAML.
+// .modules.yaml (JSON since pnpm 12), or "" when the file or key is missing.
 func modulesYAMLStoreDir(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {

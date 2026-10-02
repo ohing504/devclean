@@ -55,7 +55,7 @@ Legend: ✔ safe  ⚠ caution  ✖ protected   ● Active  ● Recent  ● Stale
         Run 'devclean list' for details
 ```
 
-A sparse artifact is shown as `8.6 GB (appears as 494.4 GB)` — real disk size, then the size it reports. An artifact made of APFS clones is shown as `760.0 MB (11.3 GB incl. shared blocks)` — what deleting it frees, then its blocks counted per file. When hard-linked blocks are shared across artifacts, the total counts them once and says so. Ecosystem, project and sub-package sizes (also in `clean --dry-run` and the selector) and the collapsed `... and N more` lines count them once within their own artifacts, so a project row shows the same size as the selector footer with only that project selected, and projects sort by that size; blocks shared across projects make the rows add up to more than the total.
+A sparse artifact is shown as `8.6 GB (appears as 494.4 GB)` — real disk size, then the size it reports. An artifact made of APFS clones is shown as `760.0 MB (11.3 GB incl. shared blocks)` — what deleting it frees, then its blocks counted per file (when they differ by over 100 MB). When hard-linked blocks are shared across artifacts, the total counts them once and says so. Ecosystem, project and sub-package sizes (also in `clean --dry-run` and the selector) and the collapsed `... and N more` lines count them once within their own artifacts, so a project row shows the same size as the selector footer with only that project selected, and projects sort by that size; blocks shared across projects make the rows add up to more than the total.
 
 #### JSON (`--json`)
 
@@ -79,10 +79,10 @@ A sparse artifact is shown as `8.6 GB (appears as 494.4 GB)` — real disk size,
 }
 ```
 
-- `size` — what deleting the artifact frees: allocated blocks, sparse-aware, and on macOS clone-aware for browser code-sign copies and pnpm `node_modules` (blocks shared with files outside the artifact are not counted). Used for sorting and `--min-size`.
-- `allocated_size` — allocated blocks counted per file; present only when clone sharing makes `size` smaller.
+- `size` — what deleting the artifact frees (allocated blocks; sparse-aware; APFS-clone-aware for browser code-sign copies and pnpm `node_modules`). Used for sorting and `--min-size`.
+- `allocated_size` — blocks counted per file; present only when it exceeds `size`.
 - `apparent_size` — logical size; omitted when zero. Much larger than `size` for sparse files.
-- `total_size` — sum of `size` with hard-linked blocks counted once, and APFS clones split across the listed artifacts counted once when all their clones are listed.
+- `total_size` — sum of `size`, with blocks shared across artifacts by hard links or APFS clones counted once.
 
 Also present when known: `reason`, `project_root`, `label`, `recommendation`, `last_used_at`.
 
@@ -259,8 +259,6 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 
 **Sparse-aware display**: the table shows an artifact's real on-disk size, annotating it with the larger size the file nominally reports when that apparent size exceeds double the disk figure by more than 1 GiB — e.g. a `Docker.raw` image renders `24.0 GB (appears as 460.0 GB)`, making clear it only uses 24 GB on disk though it presents as 460 GB. The JSON output always carries `apparent_size` (`omitzero`, so dropped when zero) so agents can detect sparse files. Ordinary directories, where block-rounding leaves apparent ≤ disk, are never annotated.
 
-**Clone-aware display**: when a clone-aware `size` is more than 100 MB below `allocated_size`, the table shows `760.0 MB (11.3 GB incl. shared blocks)` instead of the sparse annotation.
-
 ## Ecosystems
 
 ### Supported Ecosystems
@@ -299,7 +297,7 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 | `coverage` | build | safe | Test coverage reports |
 | `.svelte-kit` | build | safe | SvelteKit cache |
 
-**pnpm-installed `node_modules`**: pnpm clones (macOS) or hard-links (Linux) pnpm store files into `node_modules` by default, so deleting it alone frees little; running `pnpm store prune` afterwards removes packages no project references. The result carries this note when `node_modules/.modules.yaml` (written by pnpm on install, as YAML or — pnpm 12 — JSON; `pnpm-lock.yaml` alone does not prove pnpm populated the folder) names a `storeDir` that exists on the same volume. On macOS its `size` then leaves out blocks shared with the store or with other projects' `node_modules`; hard-linked blocks (Linux) are counted once across artifacts as before. A store on another volume forces pnpm to copy, so no note is given. `packageImportMethod: copy` is not recorded in `.modules.yaml`, so such installs still get the note.
+**pnpm-installed `node_modules`**: pnpm clones (macOS) or hard-links (Linux) pnpm store files into `node_modules` by default, so deleting it alone frees little; running `pnpm store prune` afterwards removes packages no project references. The result carries this note when `node_modules/.modules.yaml` (written by pnpm on install, JSON since pnpm 12; `pnpm-lock.yaml` alone does not prove pnpm populated the folder) names a `storeDir` that exists on the same volume. On macOS its `size` leaves out blocks shared with the store or other projects. A store on another volume forces pnpm to copy, so no note is given. `packageImportMethod: copy` is not recorded in `.modules.yaml`, so such installs still get the note.
 
 **Installed-package trees are excluded**: `node_modules`/`dist` inside a pnpm store or a macOS `.app` bundle are package content, not project output — see [decision](decisions/prune-non-project-trees.md).
 
@@ -523,12 +521,12 @@ Only genuine caches under those trees (e.g. `~/.cargo/registry`, `~/Library/Appl
 
 **Homebrew**: with brew installed, reported as one item reclaimed by `HOMEBREW_NO_AUTOREMOVE=1 brew cleanup` (the cleanup brew runs itself after upgrades: old formula versions, stale downloads, logs; casks excluded). Size is brew's dry-run estimate. The item replaces the `~/Library/Caches/Homebrew` entry when `brew --cache` is that path; with nothing to free, only the directory is reported.
 
-**Browser Temp (macOS)**: Chromium-family browsers (Chrome, Brave, Edge, Arc, Vivaldi, …) copy their own bundle to `/private/var/folders/<xx>/<yyy>/X/<bundle-id>.code_sign_clone/` on launch to verify their code signature, removing it on normal exit. Force-killed processes — typically headless automation like lighthouse or puppeteer — leave zombie copies that accumulate (observed: 92 copies summing to 156 GB of blocks counted per file, most of it shared).
+**Browser Temp (macOS)**: Chromium-family browsers (Chrome, Brave, Edge, Arc, Vivaldi, …) copy their own bundle to `/private/var/folders/<xx>/<yyy>/X/<bundle-id>.code_sign_clone/` on launch to verify their code signature, removing it on normal exit. Force-killed processes — typically headless automation like lighthouse or puppeteer — leave zombie copies that accumulate (observed: 92 copies / 156 GB of mostly shared blocks).
 
 - **Matching**: a single `*.code_sign_clone` glob, not a per-browser catalog; the label carries the browser name (from the bundle ID) and the copy count.
 - **Safety follows run state**: `safe` only when `pgrep` reports no matching process (true zombies); `caution` while it runs (checked via `pgrep`, once per browser — the newest copy may be in use), when the `pgrep` check fails (missing or erroring), or when the bundle ID is unrecognized (run state unknowable).
 - **Scope**: the path lies outside home, so it is reported only when the scan root covers the home directory — a `--path` scan of a home subdirectory never surfaces system temp.
-- **Size**: the copies are APFS clones of each other and of the installed app (`/Applications` or `~/Applications`, named after the `<name>.app.bundle` inside the copies), so `size` counts blocks shared between copies once and leaves out blocks the installed app uses. Measured: 12 copies, 11.3 GB counted per file, 0.76 GB freed by deleting them.
+- **Size**: copies share blocks with each other and with the installed app (`<name>.app` in `/Applications` or `~/Applications`, `<name>` from the copies), so `size` counts shared blocks once and leaves out the app's.
 
 ### LLM Model Stores
 

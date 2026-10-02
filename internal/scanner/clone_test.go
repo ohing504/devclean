@@ -17,18 +17,22 @@ import (
 
 const mib = 1 << 20
 
-// writeRandom writes n random bytes, so no two files share content by chance.
-func writeRandom(t *testing.T, path string, n int) {
+func randomBytes(t *testing.T, n int) []byte {
 	t.Helper()
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
 		t.Fatal(err)
 	}
-	mustMkdir(t, filepath.Dir(path))
-	mustWriteFile(t, path, b)
+	return b
 }
 
-// mustClone makes dst an APFS clone of src: a new inode sharing src's blocks.
+func writeRandom(t *testing.T, path string, n int) {
+	t.Helper()
+	mustMkdir(t, filepath.Dir(path))
+	mustWriteFile(t, path, randomBytes(t, n))
+}
+
+// mustClone makes dst an APFS clone of src.
 func mustClone(t *testing.T, src, dst string) {
 	t.Helper()
 	mustMkdir(t, filepath.Dir(dst))
@@ -37,141 +41,23 @@ func mustClone(t *testing.T, src, dst string) {
 	}
 }
 
-// TestPnpmNodeModulesSizeExcludesStoreClones: pnpm on macOS clones store files
-// into node_modules, so deleting node_modules frees only the files that are
-// not clones of the store. Size is that reclaimable amount; AllocatedSize keeps
-// the allocated blocks counted per file.
-func TestPnpmNodeModulesSizeExcludesStoreClones(t *testing.T) {
-	root := t.TempDir()
-	store := filepath.Join(root, "store", "v10")
-	writeRandom(t, filepath.Join(store, "files", "00", "blob"), mib)
-
-	nm := filepath.Join(root, "app", "node_modules")
-	mustMkdir(t, nm)
-	mustWriteFile(t, filepath.Join(root, "app", "package.json"), nil)
-	mustWriteFile(t, filepath.Join(nm, ".modules.yaml"), []byte("storeDir: "+store+"\n"))
-	mustClone(t, filepath.Join(store, "files", "00", "blob"), filepath.Join(nm, "pkg", "index.js"))
-	writeRandom(t, filepath.Join(nm, "pkg", "own.bin"), mib)
-
-	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
-	if err != nil {
-		t.Fatalf("WalkScan: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("want 1 result, got %d: %+v", len(results), results)
-	}
-	r := results[0]
-	if r.Size < mib || r.Size >= mib+mib/2 {
-		t.Errorf("Size = %d, want about 1 MiB (only the file not cloned from the store)", r.Size)
-	}
-	if r.AllocatedSize < 2*mib {
-		t.Errorf("AllocatedSize = %d, want at least 2 MiB (blocks counted per file)", r.AllocatedSize)
-	}
-}
-
-// TestCodeSignClonesSizeCountsSharedBlocksOnce: browser code-sign copies are
-// APFS clones of each other and of the installed app. Deleting them frees only
-// the blocks no file outside them uses, each counted once.
-func TestCodeSignClonesSizeCountsSharedBlocksOnce(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	apps := t.TempDir()
-	installed := filepath.Join(apps, "Google Chrome.app", "Contents", "MacOS", "Google Chrome")
-	writeRandom(t, installed, mib)
-
-	s := newIsolatedGlobalScanner(t)
-	s.AppDirs = []string{apps}
-	clone := filepath.Join(s.TmpRoot, "aa", "bbb", "X", "com.google.Chrome.code_sign_clone")
-	// copy1 holds an older build no longer installed; copy2 clones copy1.
-	writeRandom(t, filepath.Join(clone, "copy1", "bin"), mib)
-	mustClone(t, filepath.Join(clone, "copy1", "bin"), filepath.Join(clone, "copy2", "bin"))
-	// copy3 clones the installed app.
-	mustClone(t, installed, filepath.Join(clone, "copy3", "bin"))
-
-	results, err := s.Scan(context.Background(), home)
-	if err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("want 1 result, got %d: %+v", len(results), results)
-	}
-	r := results[0]
-	if r.Size < mib || r.Size >= mib+mib/2 {
-		t.Errorf("Size = %d, want about 1 MiB (old build counted once, installed app's blocks excluded)", r.Size)
-	}
-	if r.AllocatedSize < 3*mib {
-		t.Errorf("AllocatedSize = %d, want at least 3 MiB (blocks counted per file)", r.AllocatedSize)
-	}
-}
-
-// TestCloneSizeWithoutReferenceCountsSharedBlocksOnce: with the installed app
-// missing, copies that clone each other still count their blocks once.
-func TestCloneSizeWithoutReferenceCountsSharedBlocksOnce(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	s := newIsolatedGlobalScanner(t)
-	s.AppDirs = []string{t.TempDir()} // no Chrome installed
-	clone := filepath.Join(s.TmpRoot, "aa", "bbb", "X", "com.google.Chrome.code_sign_clone")
-	writeRandom(t, filepath.Join(clone, "copy1", "bin"), mib)
-	mustClone(t, filepath.Join(clone, "copy1", "bin"), filepath.Join(clone, "copy2", "bin"))
-
-	results, err := s.Scan(context.Background(), home)
-	if err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("want 1 result, got %d", len(results))
-	}
-	if r := results[0]; r.Size < mib || r.Size >= mib+mib/2 {
-		t.Errorf("Size = %d, want about 1 MiB", r.Size)
-	}
-}
-
-// TestCloneSizeCountsRewrittenPartOfClone: rewriting part of a clone gives it
-// new blocks for that part only; the rest stays shared with the source.
-func TestCloneSizeCountsRewrittenPartOfClone(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	apps := t.TempDir()
-	installed := filepath.Join(apps, "Google Chrome.app", "Contents", "MacOS", "Google Chrome")
-	writeRandom(t, installed, mib)
-
-	s := newIsolatedGlobalScanner(t)
-	s.AppDirs = []string{apps}
-	copied := filepath.Join(s.TmpRoot, "aa", "bbb", "X", "com.google.Chrome.code_sign_clone", "copy1", "bin")
-	mustClone(t, installed, copied)
-	f, err := os.OpenFile(copied, os.O_WRONLY, 0)
+// writeAt overwrites n random bytes of path at off.
+func writeAt(t *testing.T, path string, off int64, n int) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o644)
 	if err != nil {
 		t.Fatal(err)
 	}
-	patch := make([]byte, 64<<10)
-	if _, err := rand.Read(patch); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteAt(patch, 256<<10); err != nil {
+	if _, err := f.WriteAt(randomBytes(t, n), off); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-
-	results, err := s.Scan(context.Background(), home)
-	if err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("want 1 result, got %d", len(results))
-	}
-	if r := results[0]; r.Size < 64<<10 || r.Size > 128<<10 {
-		t.Errorf("Size = %d, want about 64 KiB (only the rewritten range)", r.Size)
-	}
 }
 
-// writePnpmProject makes <root>/<name> a pnpm project whose node_modules names
-// store as its pnpm store, and returns the node_modules path.
+// writePnpmProject makes <root>/<name> a pnpm project installed from store and
+// returns its node_modules.
 func writePnpmProject(t *testing.T, root, name, store string) string {
 	t.Helper()
 	nm := filepath.Join(root, name, "node_modules")
@@ -181,92 +67,58 @@ func writePnpmProject(t *testing.T, root, name, store string) string {
 	return nm
 }
 
-// TestCloneSizeSkipsSparseHoles: a hole in a sparse file has no blocks, so it
-// adds nothing to what deleting the file frees.
-func TestCloneSizeSkipsSparseHoles(t *testing.T) {
-	root := t.TempDir()
-	store := filepath.Join(root, "store")
-	mustMkdir(t, store)
-	nm := writePnpmProject(t, root, "app", store)
-	p := filepath.Join(nm, "pkg", "sparse.bin")
-	mustMkdir(t, filepath.Dir(p))
-	f, err := os.Create(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := make([]byte, 4096)
-	if _, err := rand.Read(data); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteAt(data, 64*mib); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	// Make it a clone candidate: the clone is the file measured, the original
-	// stays in the store.
-	mustClone(t, p, filepath.Join(store, "blob"))
-	if err := os.Remove(filepath.Join(store, "blob")); err != nil {
-		t.Fatal(err)
-	}
-
+func walkNode(t *testing.T, root string, want int) []model.ScanResult {
+	t.Helper()
 	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
 	if err != nil {
 		t.Fatalf("WalkScan: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("want 1 result, got %d", len(results))
+	if len(results) != want {
+		t.Fatalf("want %d results, got %d: %+v", want, len(results), results)
 	}
-	if r := results[0]; r.Size > mib {
-		t.Errorf("Size = %d, want under 1 MiB (the 64 MiB hole holds no blocks)", r.Size)
-	}
+	return results
 }
 
-// TestCloneSizeCountsGroupAndRewrittenCloneOnce: two pure clones of an old
-// build plus a third copy rewritten in part all share most blocks; deleting
-// them frees the shared blocks once plus the rewritten range.
-func TestCloneSizeCountsGroupAndRewrittenCloneOnce(t *testing.T) {
+// codeSignScan returns a scanner whose fake temp root holds a <bundleID>
+// code-sign clone dir, that dir, and the scan's home.
+func codeSignScan(t *testing.T, bundleID string, appDirs ...string) (*scanner.GlobalScanner, string, string) {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-
 	s := newIsolatedGlobalScanner(t)
-	clone := filepath.Join(s.TmpRoot, "aa", "bbb", "X", "com.google.Chrome.code_sign_clone")
-	first := filepath.Join(clone, "copy1", "bin")
-	writeRandom(t, first, mib)
-	mustClone(t, first, filepath.Join(clone, "copy2", "bin"))
-	third := filepath.Join(clone, "copy3", "bin")
-	mustClone(t, first, third)
-	f, err := os.OpenFile(third, os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	patch := make([]byte, 64<<10)
-	if _, err := rand.Read(patch); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteAt(patch, 256<<10); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
+	s.AppDirs = appDirs
+	return s, filepath.Join(s.TmpRoot, "aa", "bbb", "X", bundleID+".code_sign_clone"), home
+}
 
+func scanOne(t *testing.T, s *scanner.GlobalScanner, home string) model.ScanResult {
+	t.Helper()
 	results, err := s.Scan(context.Background(), home)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	if len(results) != 1 {
-		t.Fatalf("want 1 result, got %d", len(results))
+		t.Fatalf("want 1 result, got %d: %+v", len(results), results)
 	}
-	if r := results[0]; r.Size < mib || r.Size > mib+128<<10 {
-		t.Errorf("Size = %d, want about 1 MiB + 64 KiB", r.Size)
+	return results[0]
+}
+
+func TestPnpmNodeModulesSizeExcludesStoreClones(t *testing.T) {
+	root := t.TempDir()
+	store := filepath.Join(root, "store", "v10")
+	writeRandom(t, filepath.Join(store, "blob"), mib)
+	nm := writePnpmProject(t, root, "app", store)
+	mustClone(t, filepath.Join(store, "blob"), filepath.Join(nm, "pkg", "index.js"))
+	writeRandom(t, filepath.Join(nm, "pkg", "own.bin"), mib)
+
+	r := walkNode(t, root, 1)[0]
+	if r.Size < mib || r.Size >= mib+mib/2 {
+		t.Errorf("Size = %d, want about 1 MiB (only the file not cloned from the store)", r.Size)
+	}
+	if r.AllocatedSize < 2*mib {
+		t.Errorf("AllocatedSize = %d, want at least 2 MiB (blocks counted per file)", r.AllocatedSize)
 	}
 }
 
-// TestCloneTotalCountsClonesSplitAcrossArtifacts: two projects whose files are
-// pure clones of each other (the store copy pruned) each free nothing alone,
-// but deleting both frees the blocks once.
 func TestCloneTotalCountsClonesSplitAcrossArtifacts(t *testing.T) {
 	root := t.TempDir()
 	store := filepath.Join(root, "store")
@@ -276,59 +128,81 @@ func TestCloneTotalCountsClonesSplitAcrossArtifacts(t *testing.T) {
 	writeRandom(t, filepath.Join(a, "pkg", "lib.js"), mib)
 	mustClone(t, filepath.Join(a, "pkg", "lib.js"), filepath.Join(b, "pkg", "lib.js"))
 
-	results, err := scanner.WalkScan(context.Background(), root, model.EcoNode)
-	if err != nil {
-		t.Fatalf("WalkScan: %v", err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("want 2 results, got %d", len(results))
-	}
+	results := walkNode(t, root, 2)
 	for _, r := range results {
 		if r.Size >= mib/2 {
-			t.Errorf("%s Size = %d, want near 0 (its blocks are shared with the other project)", r.Path, r.Size)
+			t.Errorf("%s Size = %d, want near 0 (shared with the other project)", r.Path, r.Size)
 		}
 	}
 	if total := model.DedupedTotal(results); total < mib || total >= mib+mib/2 {
-		t.Errorf("DedupedTotal = %d, want about 1 MiB (shared blocks counted once)", total)
+		t.Errorf("DedupedTotal = %d, want about 1 MiB", total)
 	}
 }
 
-// TestCodeSignClonesFindInstalledAppByBundleName: the installed app is found by
-// the bundle name inside the copies, which can differ from the process name.
-func TestCodeSignClonesFindInstalledAppByBundleName(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+func TestCloneSizeSkipsSparseHoles(t *testing.T) {
+	root := t.TempDir()
+	store := filepath.Join(root, "store")
+	mustMkdir(t, store)
+	nm := writePnpmProject(t, root, "app", store)
+	sparse := filepath.Join(nm, "pkg", "sparse.bin")
+	mustMkdir(t, filepath.Dir(sparse))
+	writeAt(t, sparse, 64*mib, 4096)
+	// A clone, since removed, marks the file as possibly sharing blocks.
+	mustClone(t, sparse, filepath.Join(store, "blob"))
+	if err := os.Remove(filepath.Join(store, "blob")); err != nil {
+		t.Fatal(err)
+	}
 
+	if r := walkNode(t, root, 1)[0]; r.Size > mib {
+		t.Errorf("Size = %d, want under 1 MiB (the 64 MiB hole holds no blocks)", r.Size)
+	}
+}
+
+func TestCodeSignClonesSizeCountsSharedBlocksOnce(t *testing.T) {
+	apps := t.TempDir()
+	installed := filepath.Join(apps, "Google Chrome.app", "Contents", "MacOS", "Google Chrome")
+	writeRandom(t, installed, mib)
+	s, clone, home := codeSignScan(t, "com.google.Chrome", apps)
+	// copy1 is an old build, copy2 its clone; copy3 clones the installed app.
+	writeRandom(t, filepath.Join(clone, "copy1", "bin"), mib)
+	mustClone(t, filepath.Join(clone, "copy1", "bin"), filepath.Join(clone, "copy2", "bin"))
+	mustClone(t, installed, filepath.Join(clone, "copy3", "bin"))
+
+	r := scanOne(t, s, home)
+	if r.Size < mib || r.Size >= mib+mib/2 {
+		t.Errorf("Size = %d, want about 1 MiB", r.Size)
+	}
+	if r.AllocatedSize < 3*mib {
+		t.Errorf("AllocatedSize = %d, want at least 3 MiB", r.AllocatedSize)
+	}
+}
+
+func TestCloneSizeCountsGroupAndRewrittenCloneOnce(t *testing.T) {
+	s, clone, home := codeSignScan(t, "com.google.Chrome")
+	first := filepath.Join(clone, "copy1", "bin")
+	writeRandom(t, first, mib)
+	mustClone(t, first, filepath.Join(clone, "copy2", "bin"))
+	third := filepath.Join(clone, "copy3", "bin")
+	mustClone(t, first, third)
+	writeAt(t, third, 256<<10, 64<<10)
+
+	if r := scanOne(t, s, home); r.Size < mib || r.Size > mib+128<<10 {
+		t.Errorf("Size = %d, want about 1 MiB + 64 KiB", r.Size)
+	}
+}
+
+// The installed app is found by the bundle name inside the copies, which can
+// differ from the process name.
+func TestCodeSignClonesFindInstalledAppByBundleName(t *testing.T) {
 	apps := t.TempDir()
 	installed := filepath.Join(apps, "Naver Whale.app", "Contents", "MacOS", "Whale")
 	writeRandom(t, installed, mib)
-
-	s := newIsolatedGlobalScanner(t)
-	s.AppDirs = []string{apps}
-	copied := filepath.Join(s.TmpRoot, "aa", "bbb", "X", "com.naver.Whale.code_sign_clone",
-		"code_sign_clone.abc", "Naver Whale.app.bundle", "Contents", "MacOS", "Whale")
+	s, clone, home := codeSignScan(t, "com.naver.Whale", apps)
+	copied := filepath.Join(clone, "code_sign_clone.abc", "Naver Whale.app.bundle", "Contents", "MacOS", "Whale")
 	mustClone(t, installed, copied)
-	// Rewrite part of the copy so it is not a pure clone and its extents are
-	// compared against the installed app.
-	f, err := os.OpenFile(copied, os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteAt(make([]byte, 64<<10), 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
+	writeAt(t, copied, 0, 64<<10) // no longer a pure clone: compared by extent
 
-	results, err := s.Scan(context.Background(), home)
-	if err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("want 1 result, got %d", len(results))
-	}
-	if r := results[0]; r.Size > 128<<10 {
+	if r := scanOne(t, s, home); r.Size > 128<<10 {
 		t.Errorf("Size = %d, want about 64 KiB (rest shared with the installed app)", r.Size)
 	}
 }

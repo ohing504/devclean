@@ -134,28 +134,23 @@ type ScanResult struct {
 	// pnpm store ↔ node_modules) when computing a grand total. Not serialized.
 	Links map[InodeKey]int64 `json:"-"`
 
-	// CloneAware marks an artifact whose files are likely APFS clones, so
-	// sizing reads physical extents: Size then counts blocks shared between
-	// its files once and leaves out blocks CloneSource (a directory, may be
-	// empty) also uses. Not serialized.
+	// CloneAware turns on APFS-clone-aware sizing; Size then leaves out blocks
+	// shared with CloneSource (a directory, may be empty) or other files.
 	CloneAware  bool   `json:"-"`
 	CloneSource string `json:"-"`
-
-	// CloneShares holds the pure APFS clone groups only partly inside this
-	// artifact, left out of Size, so DedupedTotal can count a group's blocks
-	// once when the results together hold all of its clones. Not serialized.
+	// CloneShares are pure clone groups only partly inside this artifact, left
+	// out of Size; DedupedTotal counts one once the results hold all its clones.
 	CloneShares map[CloneKey]CloneShare `json:"-"`
 }
 
-// CloneKey identifies a group of pure APFS clones: files sharing all blocks
-// report the same clone ID, unique per device.
+// CloneKey identifies a group of pure APFS clones on a device.
 type CloneKey struct {
 	Dev uint64
 	ID  uint64
 }
 
-// CloneShare is one artifact's part of a pure clone group: Refcnt files share
-// the group's Blocks, Seen of them are inside the artifact.
+// CloneShare is one artifact's part of a clone group: Seen of Refcnt clones,
+// each sharing Blocks.
 type CloneShare struct {
 	Refcnt uint32
 	Seen   uint32
@@ -206,8 +201,7 @@ func HumanSize(size int64) string {
 }
 
 // DedupedTotal returns the total disk usage across results with blocks shared
-// via hard links counted once, and with pure APFS clone groups split across
-// results counted once when the results together hold all of a group's clones. Each result's Size already counts its own
+// via hard links or split APFS clone groups counted once. Each result's Size already counts its own
 // hard-linked inodes once (intra-artifact); this nets out inodes that recur
 // across artifacts — e.g. a pnpm store blob also hard-linked into a project's
 // node_modules — so the total reflects the space actually freed by deleting

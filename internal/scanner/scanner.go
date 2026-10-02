@@ -167,20 +167,15 @@ func partitionScanners(scanners []Scanner) ([]walkEcosystem, []Scanner) {
 // blocks) bytes for a path, plus the hard-linked inodes it counted so a caller
 // can dedup blocks shared across artifacts (e.g. pnpm store ↔ node_modules).
 type SizeStat struct {
-	Apparent int64
-	Disk     int64
-	Links    map[model.InodeKey]int64 // Nlink>1 inode → disk blocks, keyed by (dev, ino)
-	// Reclaim is what deleting path frees. It equals Disk unless clone-aware
-	// sizing ran: then blocks shared between the artifact's files count once
-	// and blocks also used by the clone source are left out.
-	Reclaim int64
-	// CloneShares are the pure clone groups only partly inside path.
+	Apparent    int64
+	Disk        int64
+	Links       map[model.InodeKey]int64 // Nlink>1 inode → disk blocks, keyed by (dev, ino)
+	Reclaim     int64                    // what deleting path frees; Disk unless clone-aware
 	CloneShares map[model.CloneKey]model.CloneShare
 }
 
-// cloneSizing turns on clone-aware sizing for one measure call. source, when
-// set, returns the clone source's merged extents and their device; it is only
-// called when some file is not a pure clone and its extents had to be read.
+// cloneSizing turns on clone-aware sizing; source, if set, is called only once
+// some file's extents were read.
 type cloneSizing struct {
 	source func() (extents []extent, dev uint64, ok bool)
 }
@@ -199,19 +194,15 @@ func Measure(path string) SizeStat {
 	return measure(context.Background(), path, nil)
 }
 
-// measure is Measure that stops once ctx is done. A non-nil clones also reads
-// each singly-linked file's APFS clone attributes, and physical extents where
-// those do not settle it, to fill Reclaim (see clone.go).
+// measure is Measure that stops once ctx is done; clones makes it clone-aware
+// (see clone.go).
 func measure(ctx context.Context, path string, clones *cloneSizing) SizeStat {
 	var st SizeStat
 	seen := make(map[model.InodeKey]struct{})
 	var extents []extent
-	var extentBlocks int64 // st_blocks of the files whose extents were read
+	var extentBlocks, groupBlocks int64 // st_blocks of files counted by extent or group instead
 	groups := make(map[uint64]*cloneGroup)
-	var groupBlocks int64 // st_blocks of the pure clones grouped by clone ID
 	var rootDev uint64
-	// The file is filepath.Join(dir, name); it is only built when its extents
-	// are read, so plain sizing allocates no paths.
 	add := func(dir, name string, info fs.FileInfo) {
 		sys, ok := info.Sys().(*syscall.Stat_t)
 		if !ok {
@@ -246,7 +237,6 @@ func measure(ctx context.Context, path string, clones *cloneSizing) SizeStat {
 			ci, ok := fileCloneInfo(full)
 			switch {
 			case ok && ci.refcnt > 1:
-				// A pure clone: refcnt files share all of these blocks.
 				g := groups[ci.id]
 				if g == nil {
 					g = &cloneGroup{refcnt: ci.refcnt, blocks: blocks, path: full, size: info.Size()}
@@ -293,15 +283,12 @@ func measure(ctx context.Context, path string, clones *cloneSizing) SizeStat {
 		for id, g := range groups {
 			switch {
 			case g.seen < g.refcnt:
-				// Clones outside path keep the blocks; a total over several
-				// artifacts may still hold them all.
 				if st.CloneShares == nil {
 					st.CloneShares = make(map[model.CloneKey]model.CloneShare)
 				}
 				st.CloneShares[model.CloneKey{Dev: rootDev, ID: id}] = model.CloneShare{Refcnt: g.refcnt, Seen: g.seen, Blocks: g.blocks}
 			case len(extents) > 0:
-				// A partly rewritten clone in path may share these blocks:
-				// count them through the extent union.
+				// A partly rewritten copy may overlap the group: count by extent.
 				if xs, ok := fileExtents(g.path, g.size); ok {
 					extents = append(extents, xs...)
 				} else {
