@@ -55,7 +55,7 @@ Legend: ✔ safe  ⚠ caution  ✖ protected   ● Active  ● Recent  ● Stale
         Run 'devclean list' for details
 ```
 
-A sparse artifact is shown as `8.6 GB (appears as 494.4 GB)` — real disk size, then the size it reports. An artifact made of APFS clones is shown as `760.0 MB (11.3 GB incl. shared blocks)` — what deleting it frees, then its blocks counted per file (when they differ by over 100 MB). When hard-linked blocks are shared across artifacts, the total counts them once and says so. Ecosystem, project and sub-package sizes (also in `clean --dry-run` and the selector) and the collapsed `... and N more` lines count them once within their own artifacts, so a project row shows the same size as the selector footer with only that project selected, and projects sort by that size; blocks shared across projects make the rows add up to more than the total.
+A sparse artifact is shown as `8.6 GB (appears as 494.4 GB)` — real disk size, then the size it reports. An artifact made of APFS clones is shown as `760.0 MB (11.3 GB incl. shared blocks)` — what deleting it frees, then its blocks counted per file (when they differ by over 100 MB). When blocks are shared across artifacts through hard links or APFS clones, the total counts them once and says so. Ecosystem, project and sub-package sizes (also in `clean --dry-run` and the selector) and the collapsed `... and N more` lines count them once within their own artifacts, so a project row shows the same size as the selector footer with only that project selected, and projects sort by that size; hard-linked blocks shared across projects make the rows add up to more than the total, and APFS clones split across artifacts, left out of every row, make them add up to less.
 
 #### JSON (`--json`)
 
@@ -526,7 +526,7 @@ Only genuine caches under those trees (e.g. `~/.cargo/registry`, `~/Library/Appl
 - **Matching**: a single `*.code_sign_clone` glob, not a per-browser catalog; the label carries the browser name (from the bundle ID) and the copy count.
 - **Safety follows run state**: `safe` only when `pgrep` reports no matching process (true zombies); `caution` while it runs (checked via `pgrep`, once per browser — the newest copy may be in use), when the `pgrep` check fails (missing or erroring), or when the bundle ID is unrecognized (run state unknowable).
 - **Scope**: the path lies outside home, so it is reported only when the scan root covers the home directory — a `--path` scan of a home subdirectory never surfaces system temp.
-- **Size**: copies share blocks with each other and with the installed app (`<name>.app` in `/Applications` or `~/Applications`, `<name>` from the copies), so `size` counts shared blocks once and leaves out the app's.
+- **Size**: copies share blocks with each other and with the installed app (`<name>.app` in `/Applications` or `~/Applications`, `<name>` from the copies), so `size` counts shared blocks once and leaves out the app's. When the app is not found, `recommendation` says the size may overstate.
 
 ### LLM Model Stores
 

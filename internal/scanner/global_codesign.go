@@ -48,6 +48,7 @@ const (
 	codeSignCloneRec             = "zombie copies from killed browser processes (headless automation like lighthouse/puppeteer); the browser cleans these on next normal exit"
 	codeSignCloneRunningRec      = "browser is currently running — newest copy may be in use; it cleans up leftovers on normal exit"
 	codeSignCloneUnrecognizedRec = "unrecognized browser — cannot check whether it is running (newest copy may be in use); it cleans up leftovers on normal exit"
+	codeSignCloneNoAppNote       = "; size may overstate: the installed browser app was not found, so blocks shared with it count as freed"
 	codeSignCloneCheckFailedRec  = "cannot check whether the browser is running (pgrep failed) — newest copy may be in use; it cleans up leftovers on normal exit"
 )
 
@@ -145,6 +146,10 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 		if appName == "" && known {
 			appName = browser.processName
 		}
+		source := s.installedApp(appName)
+		if source == "" {
+			rec += codeSignCloneNoAppNote
+		}
 		out = append(out, model.ScanResult{
 			Path:           m,
 			Ecosystem:      model.EcoGlobal,
@@ -155,7 +160,7 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 			Label:          codeSignCloneLabel(m, name),
 			Recommendation: rec,
 			CloneAware:     true,
-			CloneSource:    s.installedApp(appName),
+			CloneSource:    source,
 		})
 		ReportProgress(ctx, found+len(out))
 	}

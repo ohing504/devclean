@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -204,5 +205,22 @@ func TestCodeSignClonesFindInstalledAppByBundleName(t *testing.T) {
 
 	if r := scanOne(t, s, home); r.Size > 128<<10 {
 		t.Errorf("Size = %d, want about 64 KiB (rest shared with the installed app)", r.Size)
+	}
+}
+
+// Without the installed app, blocks shared with it count as freed, so the
+// result says its size may overstate.
+func TestCodeSignClonesNoteOverstatedSizeWithoutInstalledApp(t *testing.T) {
+	apps := t.TempDir()
+	writeRandom(t, filepath.Join(apps, "Google Chrome.app", "Contents", "MacOS", "Google Chrome"), mib)
+	for name, appDirs := range map[string][]string{"found": {apps}, "missing": nil} {
+		t.Run(name, func(t *testing.T) {
+			s, clone, home := codeSignScan(t, "com.google.Chrome", appDirs...)
+			writeRandom(t, filepath.Join(clone, "copy1", "bin"), mib)
+			got := strings.Contains(scanOne(t, s, home).Recommendation, "may overstate")
+			if want := name == "missing"; got != want {
+				t.Errorf("overstate note = %v, want %v", got, want)
+			}
+		})
 	}
 }

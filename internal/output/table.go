@@ -83,9 +83,8 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 		}
 	}
 
-	// Totals dedup blocks shared across artifacts via hard links (e.g. a pnpm
-	// store blob also linked into node_modules), so the figures reflect space
-	// actually freed rather than an inflated sum of overlapping artifacts.
+	// Totals count blocks shared across artifacts once (see DedupedTotal), so
+	// the total can differ from the row sum either way.
 	grandTotal := model.DedupedTotal(allItems)
 	var naiveTotal int64
 	for _, r := range allItems {
@@ -97,8 +96,8 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 	safeTotal := model.DedupedTotal(safeItems)
 
 	fmt.Fprintf(w, "\n%s", ui.TotalStyle.Render(fmt.Sprintf("Total: %s (%d items)", model.HumanSize(grandTotal), grandCount)))
-	if grandTotal < naiveTotal {
-		fmt.Fprintf(w, " %s", ui.DimStyle.Render("(excludes hard-linked blocks shared across items)"))
+	if grandTotal != naiveTotal {
+		fmt.Fprintf(w, " %s", ui.DimStyle.Render("(blocks shared across items counted once)"))
 	}
 	fmt.Fprintln(w)
 	if safeTotal > 0 {
