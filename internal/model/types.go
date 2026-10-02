@@ -184,6 +184,11 @@ func HumanSize(size int64) string {
 // node_modules — so the total reflects the space actually freed by deleting
 // everything shown, not an inflated sum.
 func DedupedTotal(results []ScanResult) int64 {
+	// A lone artifact has nothing to share with; skip building the inode set.
+	// Group headers call this once per sub-package, project and ecosystem.
+	if len(results) == 1 {
+		return results[0].Size
+	}
 	var total int64
 	seen := make(map[InodeKey]struct{})
 	for _, r := range results {
@@ -238,6 +243,10 @@ type ProjectGroup struct {
 }
 
 // GroupByProject groups scan results by their project root, sorted by total size descending.
+// TotalSize counts blocks hard-linked between the project's own artifacts once
+// (DedupedTotal), matching the selector footer when only that project is
+// selected. Blocks also linked from outside the project stay on disk after
+// cleaning it, so it can exceed the space that cleaning it alone frees.
 func GroupByProject(results []ScanResult) []ProjectGroup {
 	m := make(map[string]*ProjectGroup)
 	for _, r := range results {
@@ -250,7 +259,6 @@ func GroupByProject(results []ScanResult) []ProjectGroup {
 			}
 			m[key] = p
 		}
-		p.TotalSize += r.Size
 		p.Items = append(p.Items, r)
 		if r.LastMod.After(p.LastMod) {
 			p.LastMod = r.LastMod
@@ -262,6 +270,7 @@ func GroupByProject(results []ScanResult) []ProjectGroup {
 	}
 	var groups []ProjectGroup
 	for _, g := range m {
+		g.TotalSize = DedupedTotal(g.Items)
 		sort.Slice(g.Items, func(i, j int) bool {
 			return g.Items[i].Size > g.Items[j].Size
 		})

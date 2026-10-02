@@ -257,3 +257,41 @@ func TestScanResultJSON_DeleteMethod(t *testing.T) {
 		t.Errorf("nil Delete must be omitted from JSON: %s", without)
 	}
 }
+
+// TestGroupByProject_DedupsHardLinksWithinProject pins that a project total
+// counts blocks hard-linked between its own artifacts once, matching
+// DedupedTotal over the same items.
+func TestGroupByProject_DedupsHardLinksWithinProject(t *testing.T) {
+	shared := map[model.InodeKey]int64{{Dev: 1, Ino: 7}: 400}
+	results := []model.ScanResult{
+		{Path: "/proj/node_modules", ProjectRoot: "/proj", Size: 500, Links: shared},
+		{Path: "/proj/pkg/node_modules", ProjectRoot: "/proj", Size: 500, Links: shared},
+	}
+
+	groups := model.GroupByProject(results)
+
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(groups))
+	}
+	if got, want := groups[0].TotalSize, model.DedupedTotal(results); got != want || got != 600 {
+		t.Errorf("TotalSize = %d, want %d (deduped)", got, want)
+	}
+}
+
+// TestGroupByProject_SortsByDedupedTotal pins that projects are ordered by the
+// deduped total they display, not by the naive sum of artifact sizes.
+func TestGroupByProject_SortsByDedupedTotal(t *testing.T) {
+	shared := map[model.InodeKey]int64{{Dev: 1, Ino: 7}: 400}
+	results := []model.ScanResult{
+		// naive 1000, deduped 600
+		{Path: "/linked/a/node_modules", ProjectRoot: "/linked", Size: 500, Links: shared},
+		{Path: "/linked/b/node_modules", ProjectRoot: "/linked", Size: 500, Links: shared},
+		{Path: "/plain/node_modules", ProjectRoot: "/plain", Size: 800},
+	}
+
+	groups := model.GroupByProject(results)
+
+	if len(groups) != 2 || groups[0].Path != "/plain" {
+		t.Errorf("expected /plain (800) before /linked (600); got %+v", groups)
+	}
+}
