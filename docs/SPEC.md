@@ -518,7 +518,7 @@ Only genuine caches under those trees (e.g. `~/.cargo/registry`, `~/Library/Appl
 **Browser Temp (macOS)**: Chromium-family browsers (Chrome, Brave, Edge, Arc, Vivaldi, …) copy their own bundle to `/private/var/folders/<xx>/<yyy>/X/<bundle-id>.code_sign_clone/` on launch to verify their code signature, removing it on normal exit. Force-killed processes — typically headless automation like lighthouse or puppeteer — leave zombie copies that accumulate (observed: 92 copies / 156 GB).
 
 - **Matching**: a single `*.code_sign_clone` glob, not a per-browser catalog; the label carries the browser name (from the bundle ID) and the copy count.
-- **Safety follows run state**: `safe` when the browser is not running (true zombies); `caution` while it runs (checked via `pgrep`, once per browser — the newest copy may be in use) or when the bundle ID is unrecognized (run state unknowable).
+- **Safety follows run state**: `safe` only when `pgrep` reports no matching process (true zombies); `caution` while it runs (checked via `pgrep`, once per browser — the newest copy may be in use), when the `pgrep` check fails (missing or erroring), or when the bundle ID is unrecognized (run state unknowable).
 - **Scope**: the path lies outside home, so it is reported only when the scan root covers the home directory — a `--path` scan of a home subdirectory never surfaces system temp.
 - **Size caveat**: reported size may overstate real usage when the copies are APFS clones of the installed app.
 
