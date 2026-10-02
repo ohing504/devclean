@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -73,4 +75,56 @@ func RelativeTime(t time.Time) string {
 		}
 		return fmt.Sprintf("%d years ago", years)
 	}
+}
+
+// Artifact cells shared by every view that lists artifacts (scan table, clean
+// selector), so the same artifact reads the same everywhere.
+
+// ArtifactName returns the scanner-provided Label when set, else the artifact
+// path relative to root, else its basename (root empty or not an ancestor).
+func ArtifactName(r model.ScanResult, root string) string {
+	if r.Label != "" {
+		return r.Label
+	}
+	if root != "" {
+		rel, err := filepath.Rel(root, r.Path)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return rel
+		}
+	}
+	return filepath.Base(r.Path)
+}
+
+// sparseMinDiff is the apparent−disk gap above which a size is worth annotating
+// as sparse. Below it, ordinary block-rounding slack (apparent can even fall
+// under disk) would produce noise.
+const sparseMinDiff = 1 << 30 // 1 GiB
+
+// ArtifactSize renders an artifact's real on-disk size, annotating it with the
+// larger size the file nominally reports when it is materially sparse —
+// nominal more than double disk and over sparseMinDiff larger. Example: a
+// Docker.raw image shows "24.0 GB (appears as 460.0 GB)", making clear it only
+// uses 24 GB on disk though it presents itself as 460 GB.
+func ArtifactSize(r model.ScanResult) string {
+	if r.ApparentSize > r.Size*2 && r.ApparentSize-r.Size > sparseMinDiff {
+		return fmt.Sprintf("%s (appears as %s)", model.HumanSize(r.Size), model.HumanSize(r.ApparentSize))
+	}
+	return model.HumanSize(r.Size)
+}
+
+// LastUsedTag formats r.LastUsedAt as a dim trailing tag, or "" when the
+// scanner did not populate it.
+func LastUsedTag(r model.ScanResult) string {
+	if r.LastUsedAt.IsZero() {
+		return ""
+	}
+	return " " + DimStyle.Render("· last used "+RelativeTime(r.LastUsedAt))
+}
+
+// RecommendationTag formats r.Recommendation as a styled trailing tag, or "" if empty.
+func RecommendationTag(r model.ScanResult) string {
+	if r.Recommendation == "" {
+		return ""
+	}
+	return "  " + RecommendStyle.Render("← "+r.Recommendation)
 }

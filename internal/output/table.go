@@ -256,15 +256,17 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 		// Artifacts in this sub-package
 		for _, r := range sp.items {
 			icon := ui.SafetyIcon(r.Safety)
-			name := artifactDisplayName(r)
+			// The sub-package header already shows the directory, so the
+			// artifact is named relative to it.
+			name := ui.ArtifactName(r, filepath.Dir(r.Path))
 			cat := ui.DimStyle.Render("(" + string(r.Category) + ")")
-			rec := recommendationTag(r)
+			rec := ui.RecommendationTag(r)
 			fmt.Fprintf(
 				w, "      %s %-24s %10s%s%s\n",
 				icon,
 				name+" "+cat,
-				ui.InfoStyle.Render(sizeCell(r)),
-				lastUsedTag(r),
+				ui.InfoStyle.Render(ui.ArtifactSize(r)),
+				ui.LastUsedTag(r),
 				rec,
 			)
 		}
@@ -276,23 +278,6 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more packages (%s)", collapsedPkgs, model.HumanSize(collapsedPkgSize))),
 		)
 	}
-}
-
-// sparseMinDiff is the apparent−disk gap above which a size is worth annotating
-// as sparse. Below it, ordinary block-rounding slack (apparent can even fall
-// under disk) would produce noise.
-const sparseMinDiff = 1 << 30 // 1 GiB
-
-// sizeCell renders an artifact's real on-disk size, annotating it with the
-// larger size the file nominally reports when it is materially sparse —
-// nominal more than double disk and over sparseMinDiff larger. Example: a
-// Docker.raw image shows "24.0 GB (appears as 460.0 GB)", making clear it only
-// uses 24 GB on disk though it presents itself as 460 GB.
-func sizeCell(r model.ScanResult) string {
-	if r.ApparentSize > r.Size*2 && r.ApparentSize-r.Size > sparseMinDiff {
-		return fmt.Sprintf("%s (appears as %s)", model.HumanSize(r.Size), model.HumanSize(r.ApparentSize))
-	}
-	return model.HumanSize(r.Size)
 }
 
 func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot string, opts TableOptions) {
@@ -307,15 +292,15 @@ func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot stri
 		}
 
 		icon := ui.SafetyIcon(r.Safety)
-		name := artifactDisplayNameOr(r, artifactRelPath(r.Path, projectRoot))
+		name := ui.ArtifactName(r, projectRoot)
 		cat := ui.DimStyle.Render("(" + string(r.Category) + ")")
-		rec := recommendationTag(r)
+		rec := ui.RecommendationTag(r)
 		fmt.Fprintf(
 			w, "    %s %-30s %10s%s%s\n",
 			icon,
 			name+" "+cat,
-			ui.InfoStyle.Render(sizeCell(r)),
-			lastUsedTag(r),
+			ui.InfoStyle.Render(ui.ArtifactSize(r)),
+			ui.LastUsedTag(r),
 			rec,
 		)
 	}
@@ -326,41 +311,6 @@ func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot stri
 			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more (%s)", collapsed, model.HumanSize(collapsedSize))),
 		)
 	}
-}
-
-// artifactDisplayName picks the best human-readable name for an artifact:
-// Label if set, else basename.
-func artifactDisplayName(r model.ScanResult) string {
-	if r.Label != "" {
-		return r.Label
-	}
-	return filepath.Base(r.Path)
-}
-
-// artifactDisplayNameOr uses Label if set, else the supplied fallback (typically a relative path).
-func artifactDisplayNameOr(r model.ScanResult, fallback string) string {
-	if r.Label != "" {
-		return r.Label
-	}
-	return fallback
-}
-
-// recommendationTag formats r.Recommendation as a styled trailing tag, or "" if empty.
-func recommendationTag(r model.ScanResult) string {
-	if r.Recommendation == "" {
-		return ""
-	}
-	return "  " + ui.RecommendStyle.Render("← "+r.Recommendation)
-}
-
-// lastUsedTag formats r.LastUsedAt as a dim trailing tag, or "" when the
-// scanner did not populate it (zero time renders nothing so existing output
-// stays byte-identical).
-func lastUsedTag(r model.ScanResult) string {
-	if r.LastUsedAt.IsZero() {
-		return ""
-	}
-	return " " + ui.DimStyle.Render("· last used "+ui.RelativeTime(r.LastUsedAt))
 }
 
 // artifactRelPath returns the path of an artifact relative to its project root.

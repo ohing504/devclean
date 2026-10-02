@@ -76,3 +76,24 @@ func TestSafetyIcon(t *testing.T) {
 		}
 	}
 }
+
+func TestArtifactName(t *testing.T) {
+	tests := []struct {
+		name string
+		r    model.ScanResult
+		root string
+		want string
+	}{
+		{"label wins", model.ScanResult{Path: "/w/app/node_modules", Label: "Runner · iOS"}, "/w/app", "Runner · iOS"},
+		{"relative to root", model.ScanResult{Path: "/w/mono/apps/web/.next"}, "/w/mono", "apps/web/.next"},
+		{"sibling with shared prefix", model.ScanResult{Path: "/w/app2/node_modules"}, "/w/app", "node_modules"},
+		{"no root", model.ScanResult{Path: "/w/app/node_modules"}, "", "node_modules"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ui.ArtifactName(tt.r, tt.root); got != tt.want {
+				t.Errorf("ArtifactName = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

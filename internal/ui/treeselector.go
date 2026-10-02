@@ -108,15 +108,9 @@ func BuildTreeItems(results []model.ScanResult) []TreeItem {
 			artifactStartIdx := len(items)
 
 			for _, r := range p.Items {
-				relPath := r.Path
-				if p.Path != "" {
-					if rel, err := relPathFromRoot(r.Path, p.Path); err == nil {
-						relPath = rel
-					}
-				}
 				items = append(items, TreeItem{
 					Type:     ItemArtifact,
-					Label:    relPath,
+					Label:    ArtifactName(r, p.Path),
 					Size:     r.Size,
 					Selected: false,
 					Result:   &r,
@@ -134,14 +128,6 @@ func BuildTreeItems(results []model.ScanResult) []TreeItem {
 	}
 
 	return items
-}
-
-func relPathFromRoot(path, root string) (string, error) {
-	if !strings.HasPrefix(path, root) {
-		return path, fmt.Errorf("not a subpath")
-	}
-	rel := path[len(root):]
-	return strings.TrimPrefix(rel, "/"), nil
 }
 
 // RunTreeSelector runs the interactive tree selector and returns selected items.
@@ -502,12 +488,9 @@ func (m treeModel) renderItem(idx int, item TreeItem, isCursor bool) string {
 		}
 		safetyIcon := SafetyIcon(item.Result.Safety)
 		cat := DimStyle.Render("(" + string(item.Result.Category) + ")")
-		size := DimStyle.Render(model.HumanSize(item.Size))
-		rec := ""
-		if item.Result.Recommendation != "" {
-			rec = "  " + RecommendStyle.Render("← "+item.Result.Recommendation)
-		}
-		return fmt.Sprintf("%s    %s %s %s %s  %s%s", cursor, checkbox, safetyIcon, item.Label, cat, size, rec)
+		size := DimStyle.Render(ArtifactSize(*item.Result))
+		return fmt.Sprintf("%s    %s %s %s %s  %s%s%s", cursor, checkbox, safetyIcon, item.Label, cat, size,
+			LastUsedTag(*item.Result), RecommendationTag(*item.Result))
 	}
 
 	return ""
