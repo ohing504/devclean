@@ -35,7 +35,7 @@ func newPythonProject(t *testing.T) string {
 
 var (
 	ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
-	spinnerRow = regexp.MustCompile(`(?m)^.*Scanning.*$\n?`)
+	spinnerRow = regexp.MustCompile(`(?m)^.*(Scanning|Classifying).*$\n?`)
 )
 
 // runCLI executes devclean with args and returns its stdout with ANSI escapes
@@ -46,20 +46,25 @@ func runCLI(t *testing.T, args ...string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orig := os.Stdout
-	os.Stdout = w
 	done := make(chan []byte)
 	go func() {
 		b, _ := io.ReadAll(r)
 		done <- b
 	}()
 
-	cmd := NewRootCmd(BuildInfo{})
-	cmd.SetArgs(args)
-	runErr := cmd.Execute()
-
-	os.Stdout = orig
-	_ = w.Close()
+	// Restore stdout and close the pipe even if Execute panics, so later
+	// tests keep their output and the reader goroutine exits.
+	runErr := func() error {
+		orig := os.Stdout
+		os.Stdout = w
+		defer func() {
+			os.Stdout = orig
+			_ = w.Close()
+		}()
+		cmd := NewRootCmd(BuildInfo{})
+		cmd.SetArgs(args)
+		return cmd.Execute()
+	}()
 	out := <-done
 	if runErr != nil {
 		t.Fatalf("devclean %s: %v", strings.Join(args, " "), runErr)
@@ -84,11 +89,13 @@ func TestRelativePathMatchesAbsolute(t *testing.T) {
 			if !strings.Contains(want, proj) || !strings.Contains(want, ".mypy_cache") {
 				t.Fatalf("absolute --path output lacks %s/.mypy_cache:\n%s", proj, want)
 			}
-			t.Chdir(proj)
 			for _, rel := range []string{".", "../proj"} {
-				if got := runCLI(t, append(base, "--path", rel)...); got != want {
-					t.Errorf("--path %s output differs from absolute path\n got: %s\nwant: %s", rel, got, want)
-				}
+				t.Run(rel, func(t *testing.T) {
+					t.Chdir(proj)
+					if got := runCLI(t, append(base, "--path", rel)...); got != want {
+						t.Errorf("output differs from absolute path\n got: %s\nwant: %s", got, want)
+					}
+				})
 			}
 		})
 	}
