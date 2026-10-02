@@ -79,11 +79,8 @@ func BuildTreeItems(results []model.ScanResult) []TreeItem {
 		ecoResults := ecoMap[eco]
 		projects := model.GroupByProject(ecoResults)
 
-		// Eco header
-		var ecoSize int64
-		for _, p := range projects {
-			ecoSize += p.TotalSize
-		}
+		// Eco header: hard-linked blocks shared across its projects counted once
+		ecoSize := model.DedupedTotal(ecoResults)
 		items = append(items, TreeItem{
 			Type:  ItemEcoHeader,
 			Label: fmt.Sprintf("● %s %d projects · %s", eco, len(projects), model.HumanSize(ecoSize)),
