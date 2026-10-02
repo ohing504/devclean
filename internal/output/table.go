@@ -37,7 +37,7 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 
 	projectOrder := model.CompareProjects(opts.SortBy, opts.Ascending)
 	if opts.TopN > 0 {
-		results = topProjects(results, opts.TopN, projectOrder)
+		results = model.TopProjects(results, opts.TopN, projectOrder)
 	}
 	ecoGroups := groupByEcosystem(results)
 	sortGroupsBySize(ecoGroups)
@@ -143,24 +143,6 @@ func groupByEcosystem(results []model.ScanResult) []ecoGroup {
 		groups = append(groups, *g)
 	}
 	return groups
-}
-
-// topProjects keeps the artifacts of the first topN projects in order. A
-// project is one project root even when its artifacts span several
-// ecosystems; it is ranked by all of them together.
-func topProjects(results []model.ScanResult, topN int, order func(a, b model.ProjectGroup) int) []model.ScanResult {
-	projects := model.GroupByProject(results)
-	if topN >= len(projects) {
-		return results
-	}
-	slices.SortFunc(projects, order)
-	kept := make(map[string]bool, topN)
-	for _, p := range projects[:topN] {
-		kept[p.Path] = true
-	}
-	return model.FilterResults(results, func(r model.ScanResult) bool {
-		return kept[r.ProjectKey()]
-	})
 }
 
 func sortGroupsBySize(groups []ecoGroup) {

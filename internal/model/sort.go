@@ -2,6 +2,7 @@ package model
 
 import (
 	"cmp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -12,6 +13,29 @@ const (
 	SortByTime = "time"
 	SortByName = "name"
 )
+
+// IsSortKey reports whether s is a key scan --sort accepts.
+func IsSortKey(s string) bool {
+	return s == SortBySize || s == SortByTime || s == SortByName
+}
+
+// TopProjects keeps the artifacts of the first topN projects in order, keeping
+// their order in results. A project is one project root even when its
+// artifacts span several ecosystems; it is ranked by all of them together.
+func TopProjects(results []ScanResult, topN int, order func(a, b ProjectGroup) int) []ScanResult {
+	projects := GroupByProject(results)
+	if topN >= len(projects) {
+		return results
+	}
+	slices.SortFunc(projects, order)
+	kept := make(map[string]bool, topN)
+	for _, p := range projects[:topN] {
+		kept[p.Path] = true
+	}
+	return FilterResults(results, func(r ScanResult) bool {
+		return kept[r.ProjectKey()]
+	})
+}
 
 // CompareResults orders scan results by a --sort key: largest or newest first,
 // or path A→Z for name; ascending puts the smallest or oldest first instead.

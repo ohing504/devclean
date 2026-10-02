@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"os"
+	"fmt"
 	"slices"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -31,6 +31,9 @@ func newScanCmd() *cobra.Command {
   devclean scan --sort time --asc
   devclean scan --eco node --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !model.IsSortKey(sortBy) {
+				return fmt.Errorf("invalid --sort %q: use size, time or name", sortBy)
+			}
 			minSize, err := parseMinSize(minSizeStr)
 			if err != nil {
 				return err
@@ -50,10 +53,13 @@ func newScanCmd() *cobra.Command {
 			sortResults(results, sortBy, ascending)
 
 			if jsonOutput {
-				return output.WriteJSON(os.Stdout, results)
+				if top > 0 {
+					results = model.TopProjects(results, top, model.CompareProjects(sortBy, ascending))
+				}
+				return output.WriteJSON(cmd.OutOrStdout(), results)
 			}
 
-			output.WriteTableWithOptions(os.Stdout, results, output.TableOptions{
+			output.WriteTableWithOptions(cmd.OutOrStdout(), results, output.TableOptions{
 				TopN:      top,
 				Verbose:   verbose,
 				SortBy:    sortBy,
