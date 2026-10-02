@@ -96,6 +96,10 @@ func WalkScan(ctx context.Context, root string, ecos ...model.Ecosystem) ([]mode
 			tables = append(tables, t)
 		}
 	}
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
 	return runWalk(ctx, root, tables)
 }
 

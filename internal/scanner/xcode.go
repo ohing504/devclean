@@ -95,11 +95,6 @@ func (s *XcodeScanner) Scan(ctx context.Context, root string) ([]model.ScanResul
 		return nil, nil
 	}
 
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		absRoot = root
-	}
-
 	// Resolve simulator UDID → metadata once (best-effort; nil on failure).
 	simInfo := listSimDevices()
 
@@ -112,7 +107,7 @@ func (s *XcodeScanner) Scan(ctx context.Context, root string) ([]model.ScanResul
 		}
 
 		full := filepath.Join(home, a.relPath)
-		if !isUnderRoot(full, absRoot) {
+		if !isUnderRoot(full, root) {
 			continue
 		}
 		info, err := os.Stat(full)

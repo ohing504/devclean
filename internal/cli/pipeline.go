@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/ohing504/devclean/internal/classifier"
@@ -52,12 +51,6 @@ func runScanPipeline(opts ScanPipelineOptions) ([]model.ScanResult, error) {
 			return nil, err
 		}
 		scanPath = home
-	}
-	// Resolve a relative --path once, so every stage (scope checks, git,
-	// output, deletion) sees the same absolute paths.
-	scanPath, err := filepath.Abs(scanPath)
-	if err != nil {
-		return nil, err
 	}
 
 	reg := scanner.DefaultRegistry()

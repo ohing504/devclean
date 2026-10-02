@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"io/fs"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -11,7 +12,9 @@ import (
 	"github.com/ohing504/devclean/internal/pathutil"
 )
 
-// Scanner is the interface every ecosystem scanner implements.
+// Scanner is the interface every ecosystem scanner implements. Scan receives
+// an absolute root: Registry.ScanWithProgress and WalkScan resolve a relative
+// one before any scanner runs.
 type Scanner interface {
 	Name() string
 	Ecosystem() model.Ecosystem
@@ -104,6 +107,10 @@ func (r *Registry) ScanWith(ctx context.Context, root string, scanners []Scanner
 // Walk-based scanners are partitioned out and executed first as a single
 // batched filesystem pass; the remaining scanners run sequentially.
 func (r *Registry) ScanWithProgress(ctx context.Context, root string, scanners []Scanner, onProgress ProgressFunc) ([]model.ScanResult, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
 	var all []model.ScanResult
 
 	// Attach a real-time progress reporter via context

@@ -60,11 +60,6 @@ func (s *DockerScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 		return nil, nil
 	}
 
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		absRoot = root
-	}
-
 	var results []model.ScanResult
 	for _, a := range dockerArtifacts {
 		select {
@@ -74,7 +69,7 @@ func (s *DockerScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 		}
 
 		full := filepath.Join(home, a.relPath)
-		if !isUnderRoot(full, absRoot) {
+		if !isUnderRoot(full, root) {
 			continue
 		}
 		if _, err := os.Stat(full); err != nil {

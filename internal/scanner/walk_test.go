@@ -174,6 +174,31 @@ func TestWalkScan_HiddenNamedRootIsScanned(t *testing.T) {
 	}
 }
 
+// TestWalkScan_RelativeRootYieldsAbsolutePaths pins that WalkScan resolves a
+// relative root, so results carry absolute paths whatever the caller passed.
+func TestWalkScan_RelativeRootYieldsAbsolutePaths(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(root, "proj", ".mypy_cache")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "proj", "pyproject.toml"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	t.Chdir(root)
+
+	results, err := WalkScan(context.Background(), "proj", model.EcoPython)
+	if err != nil {
+		t.Fatalf("WalkScan error: %v", err)
+	}
+	if len(results) != 1 || results[0].Path != cache {
+		t.Errorf("expected only %s, got %+v", cache, results)
+	}
+}
+
 // TestScanWithProgress_MixedPartition pins the partition behavior: walk
 // adapters are batched into a single walk that runs first (reported under the
 // "projects" label), remaining scanners run sequentially after it, and batch

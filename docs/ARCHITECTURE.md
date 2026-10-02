@@ -23,6 +23,8 @@ Two scanner families share the `Scanner` interface:
 - **Walk ecosystems** (Node, Rust, Ruby, Python, Go, Flutter, Android): declarative rule tables (`walkEcosystem` in `internal/scanner/walk.go`) executed by a single-pass walk engine. The registry partitions walk-based scanners out of every scan and batches them into **one** recursive filesystem traversal, dispatching each directory against all active tables — one pass regardless of how many project ecosystems are active. The engine reads each directory **once** (`os.ReadDir`) and reuses those entries for both marker detection and recursion.
 - **Stat scanners** (Xcode, Docker, Global Caches, LLM Model Stores): implement `Scanner` directly and check fixed, known paths instead of walking a tree.
 
+**Scan root**: the registry (and `WalkScan`) resolves the root to an absolute path once, before any scanner runs; every scanner receives that absolute root and needs no resolution of its own.
+
 Scanners report progress via context-attached callbacks: the walk batch reports under a single "projects" label, stat scanners under their own names.
 
 **Sizing** collects two figures per artifact through an in-process walk (`scanner.Measure`):

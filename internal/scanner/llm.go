@@ -41,11 +41,6 @@ func (s *LLMScanner) Scan(ctx context.Context, root string) ([]model.ScanResult,
 		return nil, nil
 	}
 
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		absRoot = root
-	}
-
 	var results []model.ScanResult
 	add := func(path, label, rec string) bool {
 		select {
@@ -70,7 +65,7 @@ func (s *LLMScanner) Scan(ctx context.Context, root string) ([]model.ScanResult,
 
 	// LM Studio: one result per model directory (~/.lmstudio/models/<org>/<model>).
 	lmRoot := filepath.Join(home, ".lmstudio", "models")
-	if isUnderRoot(lmRoot, absRoot) {
+	if isUnderRoot(lmRoot, root) {
 		for _, dir := range subdirs(lmRoot) {
 			for _, modelDir := range subdirs(dir) {
 				label := filepath.Base(dir) + "/" + filepath.Base(modelDir)
@@ -84,7 +79,7 @@ func (s *LLMScanner) Scan(ctx context.Context, root string) ([]model.ScanResult,
 	// Hugging Face hub: one result per model directory
 	// (~/.cache/huggingface/hub/models--<org>--<name>).
 	hfRoot := filepath.Join(home, ".cache", "huggingface", "hub")
-	if isUnderRoot(hfRoot, absRoot) {
+	if isUnderRoot(hfRoot, root) {
 		for _, dir := range subdirs(hfRoot) {
 			base := filepath.Base(dir)
 			if !strings.HasPrefix(base, "models--") {
@@ -108,7 +103,7 @@ func (s *LLMScanner) Scan(ctx context.Context, root string) ([]model.ScanResult,
 	}
 	for _, store := range wholeStores {
 		full := filepath.Join(home, store.relPath)
-		if !isUnderRoot(full, absRoot) {
+		if !isUnderRoot(full, root) {
 			continue
 		}
 		info, err := os.Stat(full)
