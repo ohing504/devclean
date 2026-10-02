@@ -24,7 +24,7 @@ go test ./internal/ -run TestGolden -update      # regenerate golden files after
 | `docs/SPEC.md` | behavior the user approved: commands, flags, JSON, safety levels, ecosystem catalog, config | behavior changes |
 | `docs/ARCHITECTURE.md` | module boundaries, cross-module contracts, adding an ecosystem | a boundary or contract changes |
 | `docs/decisions/` | one costly-to-reverse choice per file: decision, verification, rationale, rejected alternatives | such a choice is made or reversed |
-| `CHANGELOG.md` | `[Unreleased]` entry per user-visible change | user-visible change |
+| `CHANGELOG.md` | release sections written by release-please from PR titles | never by hand (`docs/decisions/release-please.md`) |
 
 - Update docs in the same commit as the code.
 - `docs/plans/` holds temporary design/implementation documents; it is excluded locally via `.git/info/exclude` and never committed.
@@ -32,4 +32,6 @@ go test ./internal/ -run TestGolden -update      # regenerate golden files after
 ## Commits and PRs
 
 - Conventional Commits, lowercase prefix (`feat:`, `fix:`, `docs:`, …); one change per PR, squash-merged.
+- PR titles are in English and state the user-visible change: release-please copies `feat`, `fix`, `perf` and `revert` titles into `CHANGELOG.md` verbatim.
+- Releasing is merging the open release-please PR; do not push tags.
 - The user reviews through the PR: its body states what changed and why, and which SPEC lines and decision files changed.

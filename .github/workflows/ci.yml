@@ -56,3 +56,17 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version-file: .tool-versions
+
+  # The release job runs GoReleaser only after the tag exists, so a config error must surface here.
+  goreleaser-check:
+    name: GoReleaser config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: goreleaser check
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
