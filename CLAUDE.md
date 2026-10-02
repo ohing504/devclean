@@ -39,7 +39,7 @@ Pipeline: **Scan → Classify → Filter/Sort → Output/Clean**
 - `internal/cleaner/` — trash (macOS/Linux) + force delete, dry-run, protection enforcement
 - `internal/output/` — JSON formatter + lipgloss colored table (ecosystem → project → sub-package)
 - `internal/cli/` — cobra commands (scan, clean, list)
-- `internal/ui/` — terminal spinner, interactive tree selector (bubbletea), shared styles
+- `internal/ui/` — terminal spinner, interactive tree selector (bubbletea), shared styles and artifact row cells used by both scan table and clean selector
 - `internal/pathutil/` — shared path helpers (`CachedHomeDir`, etc.)
 - `internal/fstree/` — tree traversal shared by scan, sizing and clean (no symlink follow, one filesystem)
 

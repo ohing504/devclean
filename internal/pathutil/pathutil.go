@@ -21,8 +21,14 @@ func CachedHomeDir() string {
 // ShortenHome replaces the home directory prefix with "~".
 func ShortenHome(path string) string {
 	home := CachedHomeDir()
-	if home != "" && strings.HasPrefix(path, home) {
-		return "~" + path[len(home):]
+	if home == "" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if rest, ok := strings.CutPrefix(path, home+string(os.PathSeparator)); ok {
+		return "~" + string(os.PathSeparator) + rest
 	}
 	return path
 }

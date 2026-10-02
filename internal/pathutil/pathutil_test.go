@@ -31,6 +31,7 @@ func TestShortenHome(t *testing.T) {
 	}{
 		{home + "/workspace/project", "~/workspace/project"},
 		{home, "~"},
+		{home + "-backup/project", home + "-backup/project"},
 		{"/tmp/other", "/tmp/other"},
 		{"relative/path", "relative/path"},
 		{"", ""},

@@ -454,3 +454,41 @@ func TestArtifactRowShowsRecommendation(t *testing.T) {
 	}
 	t.Fatal("no artifact row built")
 }
+
+// TestArtifactRowShowsScanTableCells verifies the clean selector row carries the
+// same artifact cells as the scan table: display label, sparse size note,
+// last-used tag, and recommendation.
+func TestArtifactRowShowsScanTableCells(t *testing.T) {
+	results := []model.ScanResult{{
+		Path:           "/home/Library/Developer/Xcode/DerivedData/Runner-abc",
+		Ecosystem:      model.EcoXcode,
+		Category:       model.CatBuild,
+		Safety:         model.SafetySafe,
+		ProjectRoot:    "/home/Library/Developer/Xcode/DerivedData",
+		Label:          "~/workspace/app/ios/Runner.xcworkspace",
+		Recommendation: "source project no longer exists — safe to remove",
+		Size:           4096,
+		ApparentSize:   2147483649,
+		LastUsedAt:     time.Now().Add(-48 * time.Hour),
+	}}
+	m := treeModel{items: BuildTreeItems(results)}
+	var row string
+	for i, it := range m.items {
+		if it.Type == ItemArtifact {
+			row = m.renderItem(i, it, false)
+		}
+	}
+	for _, want := range []string{
+		"~/workspace/app/ios/Runner.xcworkspace",
+		"appears as",
+		"last used",
+		"source project no longer exists",
+	} {
+		if !strings.Contains(row, want) {
+			t.Errorf("artifact row missing %q; got:\n%s", want, row)
+		}
+	}
+	if strings.Contains(row, "Runner-abc") {
+		t.Errorf("artifact row should show the label, not the folder name; got:\n%s", row)
+	}
+}

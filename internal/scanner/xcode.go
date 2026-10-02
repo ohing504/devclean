@@ -3,6 +3,9 @@ package scanner
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/ohing504/devclean/internal/model"
+	"github.com/ohing504/devclean/internal/pathutil"
 )
 
 // xcodeArtifact describes a fixed home-relative path scanned for the Xcode ecosystem.
@@ -256,7 +260,10 @@ func enrichSimDevices(results []model.ScanResult, simInfo map[string]simDeviceIn
 }
 
 // enrichDerivedData labels well-known shared subdirectories so they are not
-// confused with per-project build folders.
+// confused with per-project build folders, and labels per-project folders with
+// the workspace they were built from (read from the folder's info.plist). When
+// that workspace no longer exists (deleted clone, removed git worktree), the
+// folder can never be reused and is flagged for removal.
 func enrichDerivedData(results []model.ScanResult) {
 	known := map[string]string{
 		"ModuleCache.noindex":      "Swift module cache (shared)",
@@ -268,8 +275,64 @@ func enrichDerivedData(results []model.ScanResult) {
 		name := filepath.Base(r.Path)
 		if label, ok := known[name]; ok {
 			results[i].Label = name + " — " + label
+			continue
+		}
+		ws := derivedDataWorkspace(r.Path)
+		if ws == "" {
+			continue
+		}
+		results[i].Label = pathutil.ShortenHome(ws)
+		if workspaceGone(ws) {
+			results[i].Recommendation = "source project no longer exists — safe to remove"
 		}
 	}
+}
+
+// workspaceGone reports whether ws is known not to exist. A workspace on an
+// external volume that is not mounted right now is not known to be gone.
+func workspaceGone(ws string) bool {
+	if _, err := os.Stat(ws); !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	if rest, ok := strings.CutPrefix(ws, "/Volumes/"); ok {
+		volume, _, _ := strings.Cut(rest, "/")
+		if _, err := os.Stat(filepath.Join("/Volumes", volume)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// derivedDataWorkspace returns the WorkspacePath recorded in a DerivedData
+// folder's info.plist, or "" when the file is missing, not an XML plist, or the
+// recorded path is not absolute.
+func derivedDataWorkspace(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "info.plist"))
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		Dict struct {
+			Entries []struct {
+				XMLName xml.Name
+				Value   string `xml:",chardata"`
+			} `xml:",any"`
+		} `xml:"dict"`
+	}
+	if err := xml.Unmarshal(data, &doc); err != nil {
+		return ""
+	}
+	entries := doc.Dict.Entries
+	for i := 0; i+1 < len(entries); i++ {
+		if entries[i].XMLName.Local == "key" && entries[i].Value == "WorkspacePath" &&
+			entries[i+1].XMLName.Local == "string" {
+			if ws := strings.TrimSpace(entries[i+1].Value); filepath.IsAbs(ws) {
+				return ws
+			}
+			return ""
+		}
+	}
+	return ""
 }
 
 // simDeviceInfo holds the bits of `xcrun simctl list devices` we care about.
