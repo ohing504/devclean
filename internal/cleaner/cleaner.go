@@ -1,3 +1,6 @@
+// Package cleaner deletes scan results: it refuses protected items, honors
+// dry-run, then runs an item's DeleteMethod or removes its path by moving it to
+// the Trash (macOS/Linux) or deleting it permanently.
 package cleaner
 
 import (

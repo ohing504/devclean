@@ -50,5 +50,5 @@ Out of scope:
 - Issues that require an attacker who already has write access to the user's
   filesystem
 - Reports of `caution` items being deletable (this is the documented behavior
-  — see `docs/ecosystems.md`)
+  — see `docs/SPEC.md`)
 - Theoretical race conditions without a reproducible exploit path
