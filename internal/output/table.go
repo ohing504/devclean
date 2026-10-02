@@ -1,10 +1,12 @@
 package output
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"path/filepath"
-	"sort"
+	"slices"
+	"strings"
 
 	"github.com/ohing504/devclean/internal/model"
 	"github.com/ohing504/devclean/internal/pathutil"
@@ -32,12 +34,12 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 	}
 
 	ecoGroups := groupByEcosystem(results)
-	sortGroupsBySize(ecoGroups)
 
 	// Apply top N at project level across all ecosystems
 	if opts.TopN > 0 {
 		ecoGroups = applyTopN(ecoGroups, opts.TopN)
 	}
+	sortGroupsBySize(ecoGroups)
 
 	var grandCount int
 	var allItems []model.ScanResult
@@ -152,8 +154,8 @@ func applyTopN(ecoGroups []ecoGroup, topN int) []ecoGroup {
 	}
 
 	// Already sorted by GroupByProject, but re-sort across ecosystems
-	sort.Slice(allProjects, func(i, j int) bool {
-		return allProjects[i].TotalSize > allProjects[j].TotalSize
+	slices.SortFunc(allProjects, func(a, b model.ProjectGroup) int {
+		return cmp.Or(cmp.Compare(b.TotalSize, a.TotalSize), strings.Compare(a.Path, b.Path))
 	})
 
 	if topN < len(allProjects) {
@@ -181,8 +183,8 @@ func applyTopN(ecoGroups []ecoGroup, topN int) []ecoGroup {
 }
 
 func sortGroupsBySize(groups []ecoGroup) {
-	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].totalSize > groups[j].totalSize
+	slices.SortFunc(groups, func(a, b ecoGroup) int {
+		return cmp.Or(cmp.Compare(b.totalSize, a.totalSize), strings.Compare(a.ecosystem, b.ecosystem))
 	})
 }
 
@@ -212,15 +214,13 @@ func groupBySubPackage(items []model.ScanResult, projectRoot string) []subPackag
 	var result []subPackage
 	for _, sp := range m {
 		sp.totalSize = model.DedupedTotal(sp.items)
-		sort.Slice(sp.items, func(i, j int) bool {
-			return sp.items[i].Size > sp.items[j].Size
-		})
+		slices.SortFunc(sp.items, model.CompareSizeDescPath)
 		result = append(result, *sp)
 	}
 
 	// Sort sub-packages by size desc
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].totalSize > result[j].totalSize
+	slices.SortFunc(result, func(a, b subPackage) int {
+		return cmp.Or(cmp.Compare(b.totalSize, a.totalSize), strings.Compare(a.name, b.name))
 	})
 
 	return result

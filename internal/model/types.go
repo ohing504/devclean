@@ -4,10 +4,12 @@
 package model
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -243,6 +245,7 @@ type ProjectGroup struct {
 }
 
 // GroupByProject groups scan results by their project root, sorted by total size descending.
+// Equal sizes are ordered by path so the order is the same on every run.
 // TotalSize counts blocks hard-linked between the project's own artifacts once
 // (DedupedTotal), matching the selector footer when only that project is
 // selected. Blocks also linked from outside the project stay on disk after
@@ -271,13 +274,17 @@ func GroupByProject(results []ScanResult) []ProjectGroup {
 	var groups []ProjectGroup
 	for _, g := range m {
 		g.TotalSize = DedupedTotal(g.Items)
-		sort.Slice(g.Items, func(i, j int) bool {
-			return g.Items[i].Size > g.Items[j].Size
-		})
+		slices.SortFunc(g.Items, CompareSizeDescPath)
 		groups = append(groups, *g)
 	}
-	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].TotalSize > groups[j].TotalSize
+	slices.SortFunc(groups, func(a, b ProjectGroup) int {
+		return cmp.Or(cmp.Compare(b.TotalSize, a.TotalSize), strings.Compare(a.Path, b.Path))
 	})
 	return groups
+}
+
+// CompareSizeDescPath orders scan results by size descending, then by path
+// ascending, for use with slices.SortFunc.
+func CompareSizeDescPath(a, b ScanResult) int {
+	return cmp.Or(cmp.Compare(b.Size, a.Size), strings.Compare(a.Path, b.Path))
 }

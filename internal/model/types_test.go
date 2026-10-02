@@ -295,3 +295,35 @@ func TestGroupByProject_SortsByDedupedTotal(t *testing.T) {
 		t.Errorf("expected /plain (800) before /linked (600); got %+v", groups)
 	}
 }
+
+// TestGroupByProject_TieBreaksByPath pins that projects and their artifacts
+// with equal sizes are ordered by path, so output is the same on every run.
+func TestGroupByProject_TieBreaksByPath(t *testing.T) {
+	var results []model.ScanResult
+	for _, name := range []string{"e", "c", "a", "d", "b"} {
+		root := "/p/" + name
+		results = append(results,
+			model.ScanResult{Path: root + "/z/node_modules", ProjectRoot: root, Size: 100},
+			model.ScanResult{Path: root + "/y/node_modules", ProjectRoot: root, Size: 100},
+		)
+	}
+
+	groups := model.GroupByProject(results)
+
+	t.Run("projects", func(t *testing.T) {
+		var got []string
+		for _, g := range groups {
+			got = append(got, g.Path)
+		}
+		if want := "/p/a /p/b /p/c /p/d /p/e"; strings.Join(got, " ") != want {
+			t.Errorf("project order = %v, want %s", got, want)
+		}
+	})
+	t.Run("artifacts", func(t *testing.T) {
+		for _, g := range groups {
+			if g.Items[0].Path > g.Items[1].Path {
+				t.Errorf("items of %s not ordered by path: %s, %s", g.Path, g.Items[0].Path, g.Items[1].Path)
+			}
+		}
+	})
+}

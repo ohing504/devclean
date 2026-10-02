@@ -1,0 +1,29 @@
+package cli
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/ohing504/devclean/internal/model"
+)
+
+// TestSortResultsTieBreaksByPath pins that results with equal sort keys are
+// ordered by path in both directions, so scan output is the same on every run.
+func TestSortResultsTieBreaksByPath(t *testing.T) {
+	for _, asc := range []bool{false, true} {
+		var results []model.ScanResult
+		for _, p := range []string{"/e", "/c", "/a", "/d", "/b"} {
+			results = append(results, model.ScanResult{Path: p, Size: 100})
+		}
+
+		sortResults(results, "size", asc)
+
+		var got []string
+		for _, r := range results {
+			got = append(got, r.Path)
+		}
+		if want := "/a /b /c /d /e"; strings.Join(got, " ") != want {
+			t.Errorf("ascending=%v: order = %v, want %s", asc, got, want)
+		}
+	}
+}
