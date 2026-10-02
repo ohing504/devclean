@@ -13,8 +13,8 @@ import (
 )
 
 // Scanner is the interface every ecosystem scanner implements. Scan receives
-// an absolute root: Registry.ScanWithProgress and WalkScan resolve a relative
-// one before any scanner runs.
+// an absolute root: Registry.ScanWithProgress resolves a relative one before
+// any scanner runs.
 type Scanner interface {
 	Name() string
 	Ecosystem() model.Ecosystem
