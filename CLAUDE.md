@@ -1,75 +1,34 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Project
-
-devclean is a Go CLI tool that scans developer environments for reclaimable disk space (build artifacts, caches, dependencies, runtimes) and provides safe cleanup. Currently supports Node.js (with React Native / Expo extension), Rust, Ruby, Python, Go (per-project only), and Xcode (macOS) with more ecosystems planned (Android, Flutter, Docker, Global caches).
+devclean is a Go CLI tool that scans developer environments for reclaimable disk space and provides safe cleanup.
 
 ## Commands
 
 ```bash
-# Build
 go build -o devclean ./cmd/devclean
-
-# Test
-go test ./...                          # all tests
-go test ./internal/model/ -v           # single package
+go test -race -count=1 ./...                     # all tests (same as CI)
 go test ./internal/model/ -run TestHumanSize -v  # single test
-
-# Lint
-golangci-lint run ./...
-
-# Format (gofumpt + goimports via golangci-lint)
-golangci-lint fmt
+golangci-lint run ./...                          # lint
+golangci-lint fmt                                # format (gofumpt + goimports)
 ```
 
-Pre-commit hooks (lefthook) run lint + format automatically on staged `.go` files.
+- lefthook pre-commit runs lint + format on staged `.go` files.
+- CI (`.github/workflows/ci.yml`) runs build, `go test -race -count=1` and lint on Ubuntu and macOS.
+- Tool versions: `.tool-versions` (`mise install`; CI reads the same file). Go: `go.mod`.
 
-Tool versions (golangci-lint, lefthook) are pinned in `.tool-versions` — `mise install` locally; CI's golangci-lint-action reads the same file. Go itself is pinned by `go.mod`.
+## Docs
 
-## Architecture
+| File | Holds | Update when |
+|---|---|---|
+| `docs/SPEC.md` | behavior the user approved: commands, flags, JSON, safety levels, ecosystem catalog, config | behavior changes |
+| `docs/ARCHITECTURE.md` | module boundaries, cross-module contracts, adding an ecosystem | a boundary or contract changes |
+| `docs/decisions/` | one costly-to-reverse choice per file: decision, verification, rationale, rejected alternatives | such a choice is made or reversed |
+| `CHANGELOG.md` | `[Unreleased]` entry per user-visible change | user-visible change |
 
-Pipeline: **Scan → Classify → Filter/Sort → Output/Clean**
+- Update docs in the same commit as the code.
+- `docs/plans/` holds temporary design/implementation documents; it is excluded locally via `.git/info/exclude` and never committed.
 
-- `cmd/devclean/` — entrypoint, wires CLI
-- `internal/model/` — core domain types (`Ecosystem`, `Category`, `SafetyLevel`, `ScanResult`, `ArtifactDef`)
-- `internal/scanner/` — `Scanner` interface + per-ecosystem implementations with progress callbacks
-- `internal/classifier/` — activity status (3-timestamp), gitignore-aware protection
-- `internal/cleaner/` — trash (macOS/Linux) + force delete, dry-run, protection enforcement
-- `internal/output/` — JSON formatter + lipgloss colored table (ecosystem → project → sub-package)
-- `internal/cli/` — cobra commands (scan, clean, list)
-- `internal/ui/` — terminal spinner, interactive tree selector (bubbletea), shared styles and artifact row cells used by both scan table and clean selector
-- `internal/pathutil/` — shared path helpers (`CachedHomeDir`, etc.)
-- `internal/fstree/` — tree traversal shared by scan, sizing and clean (no symlink follow, one filesystem)
+## Commits and PRs
 
-## Key Design Decisions
-
-- **Safety levels**: `safe` (auto-regenerated), `caution` (shared impact), `protected` (git-tracked with uncommitted changes)
-- **Gitignore-aware protection**: gitignored artifacts (node_modules, .next) deletable even in dirty repos; only tracked artifacts are protected
-- **Activity detection**: uses most recent of artifact mtime, git commit time, project dir mtime
-- **Monorepo support**: artifacts grouped by git root; sub-packages shown with headers
-- **Output sorting**: ecosystems grouped by total size desc, projects by size desc, sub-packages by size desc
-- **Clean flow**: scan → interactive multiselect (protected hidden) → trash/force choice → per-artifact results
-- **AI agent friendly**: all interactions via CLI flags (`--yes`, `--json`), no interactive prompts required
-- **Metadata enrichment**: scanners populate `ScanResult.Label` / `Recommendation` so users can decide without decoding paths (UUID → "iPhone 17 Pro · iOS 26.3", "superseded by newer build", "runtime unavailable"). First applied in xcode; reusable for any ecosystem with opaque identifiers
-- **Vendor cleanup**: scanners may implement the optional `VendorCleaner` interface to register ecosystem-native cleanup commands. `devclean clean --vendor-cleanup` runs them alongside path-based deletion so vendor internal state stays consistent. Implemented: `xcode` (`simctl delete unavailable`) and `global` (npm/yarn/pnpm/pip/uv cache prunes, skipping tools absent from PATH). Destructive commands (Docker `system prune`) are deferred to a future `--include-destructive` gate.
-- **Deletion strategy**: `ScanResult.Delete` (`model.DeleteMethod`: kind path/command/api + display + Run closure) expresses non-path reclaims per item; nil = path removal. Cleaner applies protected/dry-run gates uniformly, then delegates to the method or falls back to trash/force. `VendorCleanup` embeds the same `DeleteMethod` — bulk (ecosystem-level) vs per-item are two uses of one execution contract
-- **Name-based match false positives (SDK/toolchain source)**: a directory name like `build`/`dist` is not always regenerable output — inside a tool's own SDK or toolchain checkout it can be committed *source* (Flutter SDK's `engine/src/build` holds GN build-system source, tracked in git). gitignore-aware protection does NOT catch this: committed-clean files are not `protected`, so they classify as `safe` and become deletion targets. When adding any ecosystem/rule, scan that tool's real SDK checkout and verify what gets flagged; exclude the SDK subtree via the walk engine's `PruneRoot` hook, detecting the SDK root by its invariant bootstrap layout (never a hardcoded install path). A scanner's own false positive is a safety requirement of that scanner's PR — never deferred as a separate concern.
-
-## Documentation Rules
-
-- docs under `docs/` are the SSOT (single source of truth) for the project
-- `docs/plans/` is gitignored — temporary design/implementation documents only
-- when implementing a feature, update the relevant doc file in the same commit:
-  - new ecosystem → update `docs/ecosystems.md`
-  - new/changed command or flag → update `docs/commands.md`
-  - architecture change → update `docs/architecture.md`
-  - config change → update `docs/configuration.md`
-
-## Code Style
-
-- Go formatting via `gofumpt` + `goimports`, run through `golangci-lint fmt` / `run --fix`
-- Linting via `golangci-lint` v2 with `default: standard` + revive, misspell, gocritic, modernize
-- Test files use `_test.go` suffix with `package_test` external test packages
-- Golden file tests for output format stability (`-update` flag to regenerate)
+- Conventional Commits, lowercase prefix (`feat:`, `fix:`, `docs:`, …); one change per PR, squash-merged.
+- The user reviews through the PR: its body states what changed and why, and which SPEC lines and decision files changed.
