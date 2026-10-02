@@ -32,6 +32,10 @@ type artifactRule struct {
 	// Recommend optionally derives ScanResult.Recommendation from the matched
 	// directory (e.g. how the tool that populated it affects reclaim).
 	Recommend func(dir string) string
+	// CloneSource optionally reports that the matched directory's files are
+	// APFS clones of source (a directory, "" when unknown), turning on
+	// clone-aware sizing for the result.
+	CloneSource func(dir string) (source string, ok bool)
 }
 
 // matches reports whether a directory matches this rule. rel is the
@@ -174,6 +178,9 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 				if rule.Recommend != nil {
 					result.Recommendation = rule.Recommend(dir)
 				}
+				if rule.CloneSource != nil {
+					result.CloneSource, result.CloneAware = rule.CloneSource(dir)
+				}
 				results = append(results, result)
 				ReportProgress(ctx, len(results))
 				return false // matched artifact: do not descend
@@ -286,7 +293,8 @@ func isPnpmStoreVersionDir(name string) bool {
 // traverse every artifact tree at once.
 const sizeWorkerCap = 8
 
-// sizePending fills in Size, ApparentSize and Links for every result by running
+// sizePending fills in Size, ApparentSize, AllocatedSize and Links for every
+// result (clone-aware for results marked CloneAware) by running
 // Measure concurrently across a bounded worker pool. The walk finds artifacts
 // serially but defers their sizing (one in-process tree walk each) to here so
 // the traversals and their I/O overlap. Returns ctx.Err() if the scan is
@@ -309,15 +317,27 @@ func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers
 		workers = 1
 	}
 
+	var sources cloneSources
 	idx := make(chan int)
 	var wg sync.WaitGroup
 	for range workers {
 		wg.Go(func() {
 			for i := range idx {
-				st := measure(ctx, results[i].Path)
-				results[i].Size = st.Disk
-				results[i].ApparentSize = st.Apparent
-				results[i].Links = st.Links
+				r := &results[i]
+				var clones *cloneSizing
+				if r.CloneAware && cloneSizingSupported {
+					clones = &cloneSizing{}
+					if src := r.CloneSource; src != "" {
+						clones.source = func() ([]extent, uint64, bool) { return sources.get(ctx, src) }
+					}
+				}
+				st := measure(ctx, r.Path, clones)
+				r.Size = st.Reclaim
+				r.ApparentSize = st.Apparent
+				r.Links = st.Links
+				if st.Reclaim < st.Disk {
+					r.AllocatedSize = st.Disk
+				}
 			}
 		})
 	}

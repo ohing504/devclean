@@ -27,14 +27,16 @@ Two scanner families share the `Scanner` interface:
 
 Scanners report progress via context-attached callbacks: the walk batch reports under a single "projects" label, stat scanners under their own names.
 
-**Sizing** collects two figures per artifact through an in-process walk (`scanner.Measure`):
+**Sizing** collects these figures per artifact through an in-process walk (`scanner.Measure`):
 
-- **disk** — allocated blocks (`st_blocks×512`), sparse-accurate and matching `du`. The primary figure: sorting, `--min-size`, and totals all use it. Directories contribute their own blocks (real on ext4, ~0 on APFS).
+- **disk** — allocated blocks (`st_blocks×512`), sparse-accurate and matching `du`. Directories contribute their own blocks (real on ext4, ~0 on APFS).
+- **reclaim** — what deleting the artifact frees; becomes `Size`, the primary figure: sorting, `--min-size`, and totals all use it. Equal to disk unless the scanner marks the result `CloneAware` (macOS: browser code-sign copies, pnpm `node_modules`); then APFS clone sharing is netted out and disk is kept as `AllocatedSize` — see [decision](decisions/clone-aware-size.md).
 - **apparent** — sum of logical file sizes. Surfaces only when a file is materially sparse.
 
-Two invariants keep the figures honest:
+Three invariants keep the figures honest:
 
 - **Hard links** (`Nlink>1`) are counted once per artifact, keyed by `(dev, ino)`, so shared blocks net out across artifacts.
+- **APFS clones** in a `CloneAware` artifact count once, and not at all when a file outside the artifact (its `CloneSource`, or any file for a pure clone) shares them.
 - **Shared traversal**: sizing walks with `fstree`, so it counts what finding reports and deletion removes.
 
 Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through one shared bounded worker pool (`sizePending`, `min(NumCPU, 8)`) so the tree-walk I/O overlaps.

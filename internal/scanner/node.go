@@ -1,7 +1,8 @@
 package scanner
 
 import (
-	"bufio"
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,15 +17,15 @@ var nodeWalkEcosystem = walkEcosystem{
 	Eco:     model.EcoNode,
 	Markers: []string{"package.json"},
 	Rules: []artifactRule{
-		{RelPath: "node_modules", Category: model.CatDeps, Safety: model.SafetySafe, Recommend: pnpmStoreNote}, // NPM dependencies
-		{RelPath: ".next", Category: model.CatBuild, Safety: model.SafetySafe},                                 // Next.js build cache
-		{RelPath: ".nuxt", Category: model.CatBuild, Safety: model.SafetySafe},                                 // Nuxt.js build cache
-		{RelPath: ".output", Category: model.CatBuild, Safety: model.SafetySafe},                               // Nuxt 3 output
-		{RelPath: "dist", Category: model.CatBuild, Safety: model.SafetySafe},                                  // Build output
-		{RelPath: ".turbo", Category: model.CatCache, Safety: model.SafetySafe},                                // Turborepo cache
-		{RelPath: ".parcel-cache", Category: model.CatCache, Safety: model.SafetySafe},                         // Parcel cache
-		{RelPath: "coverage", Category: model.CatBuild, Safety: model.SafetySafe},                              // Test coverage reports
-		{RelPath: ".svelte-kit", Category: model.CatBuild, Safety: model.SafetySafe},                           // SvelteKit cache
+		{RelPath: "node_modules", Category: model.CatDeps, Safety: model.SafetySafe, Recommend: pnpmStoreNote, CloneSource: pnpmStoreClones}, // NPM dependencies
+		{RelPath: ".next", Category: model.CatBuild, Safety: model.SafetySafe},                                                               // Next.js build cache
+		{RelPath: ".nuxt", Category: model.CatBuild, Safety: model.SafetySafe},                                                               // Nuxt.js build cache
+		{RelPath: ".output", Category: model.CatBuild, Safety: model.SafetySafe},                                                             // Nuxt 3 output
+		{RelPath: "dist", Category: model.CatBuild, Safety: model.SafetySafe},                                                                // Build output
+		{RelPath: ".turbo", Category: model.CatCache, Safety: model.SafetySafe},                                                              // Turborepo cache
+		{RelPath: ".parcel-cache", Category: model.CatCache, Safety: model.SafetySafe},                                                       // Parcel cache
+		{RelPath: "coverage", Category: model.CatBuild, Safety: model.SafetySafe},                                                            // Test coverage reports
+		{RelPath: ".svelte-kit", Category: model.CatBuild, Safety: model.SafetySafe},                                                         // SvelteKit cache
 	},
 	ExtraRules: nodeExtraRules,
 }
@@ -38,26 +39,49 @@ var nodeWalkEcosystem = walkEcosystem{
 // neither cloned nor hard-linked, so pnpm copies and no note is given; the
 // packageImportMethod=copy setting is not recorded and cannot be detected.
 func pnpmStoreNote(dir string) string {
-	storeDir := modulesYAMLStoreDir(filepath.Join(dir, ".modules.yaml"))
-	if storeDir == "" || !sameVolume(dir, storeDir) {
+	if pnpmStore(dir) == "" {
 		return ""
 	}
 	return "files likely shared with pnpm store — run `pnpm store prune` after deleting to free space"
 }
 
+// pnpmStoreClones marks a pnpm-installed node_modules for clone-aware sizing
+// with the store as clone source: on macOS pnpm clones store files by default,
+// so deleting node_modules frees only what is not shared with the store.
+func pnpmStoreClones(dir string) (string, bool) {
+	store := pnpmStore(dir)
+	return store, store != ""
+}
+
+// pnpmStore returns the pnpm store a node_modules was installed from, or ""
+// when pnpm did not populate it or the store is on another volume.
+func pnpmStore(dir string) string {
+	storeDir := modulesYAMLStoreDir(filepath.Join(dir, ".modules.yaml"))
+	if storeDir == "" || !sameVolume(dir, storeDir) {
+		return ""
+	}
+	return storeDir
+}
+
 // modulesYAMLStoreDir returns the top-level storeDir value of a pnpm
-// .modules.yaml, or "" when the file or key is missing.
+// .modules.yaml, or "" when the file or key is missing. pnpm 12 writes the
+// file as JSON (valid YAML); older versions write block-style YAML.
 func modulesYAMLStoreDir(path string) string {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
-	defer func() { _ = f.Close() }()
-
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
-		if v, ok := strings.CutPrefix(sc.Text(), "storeDir:"); ok {
+	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
+		var m struct {
+			StoreDir string `json:"storeDir"`
+		}
+		if json.Unmarshal(data, &m) != nil {
+			return ""
+		}
+		return m.StoreDir
+	}
+	for line := range strings.Lines(string(data)) {
+		if v, ok := strings.CutPrefix(line, "storeDir:"); ok {
 			return strings.Trim(strings.TrimSpace(v), `'"`)
 		}
 	}

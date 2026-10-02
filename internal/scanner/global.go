@@ -135,6 +135,10 @@ type GlobalScanner struct {
 	// code-sign clones (macOS: /private/var/folders). A field so tests can
 	// point it at a fixture directory.
 	TmpRoot string
+	// AppDirs are searched for the installed browser app whose blocks its
+	// code-sign clones share (default: /Applications, ~/Applications). A
+	// field so tests can point it at a fixture directory.
+	AppDirs []string
 	// ProcessRunState reports whether a process with exactly the given name
 	// is currently running, or that the check failed (default: pgrep -x). A
 	// field so tests can stub browser run state.
@@ -150,10 +154,20 @@ type GlobalScanner struct {
 func NewGlobalScanner() *GlobalScanner {
 	return &GlobalScanner{
 		TmpRoot:         "/private/var/folders",
+		AppDirs:         defaultAppDirs(),
 		ProcessRunState: processRunState,
 		LookPath:        findExecutable,
 		RunCommand:      execCommand,
 	}
+}
+
+// defaultAppDirs are where macOS apps are installed: system-wide and per user.
+func defaultAppDirs() []string {
+	dirs := []string{"/Applications"}
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, "Applications"))
+	}
+	return dirs
 }
 
 // execCommand returns stdout; a failure's error includes stderr.

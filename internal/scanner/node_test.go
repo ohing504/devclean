@@ -89,6 +89,9 @@ func TestNodeModulesPnpmNote(t *testing.T) {
 	files := map[string]string{
 		"same-volume/package.json":               "",
 		"same-volume/node_modules/.modules.yaml": "layoutVersion: 5\nstoreDir: " + store + "\n",
+		// pnpm 12 writes .modules.yaml as JSON (a YAML subset).
+		"json-format/package.json":               "",
+		"json-format/node_modules/.modules.yaml": "{\n  \"layoutVersion\": 5,\n  \"storeDir\": \"" + store + "\"\n}\n",
 		"other-volume/package.json":              "",
 		// /dev is devfs (macOS) or devtmpfs (Linux): never the temp dir's volume.
 		"other-volume/node_modules/.modules.yaml": "storeDir: /dev\n",
@@ -112,8 +115,10 @@ func TestNodeModulesPnpmNote(t *testing.T) {
 		rel, _ := filepath.Rel(root, r.Path)
 		got[filepath.ToSlash(rel)] = r.Recommendation
 	}
-	if !strings.Contains(got["same-volume/node_modules"], "pnpm store prune") {
-		t.Errorf("same-volume recommendation = %q, want a pnpm store prune note", got["same-volume/node_modules"])
+	for _, p := range []string{"same-volume/node_modules", "json-format/node_modules"} {
+		if !strings.Contains(got[p], "pnpm store prune") {
+			t.Errorf("%s recommendation = %q, want a pnpm store prune note", p, got[p])
+		}
 	}
 	for _, p := range []string{"other-volume/node_modules", "store-gone/node_modules", "npm-app/node_modules"} {
 		if rec, ok := got[p]; !ok || rec != "" {

@@ -170,6 +170,17 @@ type SizeStat struct {
 	Apparent int64
 	Disk     int64
 	Links    map[model.InodeKey]int64 // Nlink>1 inode → disk blocks, keyed by (dev, ino)
+	// Reclaim is what deleting path frees. It equals Disk unless clone-aware
+	// sizing ran: then blocks shared between the artifact's files count once
+	// and blocks also used by the clone source are left out.
+	Reclaim int64
+}
+
+// cloneSizing turns on clone-aware sizing for one measure call. source, when
+// set, returns the clone source's merged extents and their device; it is only
+// called when some file is not a pure clone and its extents had to be read.
+type cloneSizing struct {
+	source func() (extents []extent, dev uint64, ok bool)
 }
 
 // Measure walks path with fstree, the traversal deletion is checked with, and
@@ -183,14 +194,23 @@ type SizeStat struct {
 // artifact and recorded in Links so a caller can net out blocks shared across
 // artifacts.
 func Measure(path string) SizeStat {
-	return measure(context.Background(), path)
+	return measure(context.Background(), path, nil)
 }
 
-// measure is Measure that stops once ctx is done.
-func measure(ctx context.Context, path string) SizeStat {
+// measure is Measure that stops once ctx is done. A non-nil clones also reads
+// each singly-linked file's APFS clone attributes, and physical extents where
+// those do not settle it, to fill Reclaim (see clone.go).
+func measure(ctx context.Context, path string, clones *cloneSizing) SizeStat {
 	var st SizeStat
 	seen := make(map[model.InodeKey]struct{})
-	add := func(info fs.FileInfo) {
+	var extents []extent
+	var extentBlocks int64 // st_blocks of the files whose extents were read
+	groups := make(map[uint64]*cloneGroup)
+	var groupBlocks int64 // st_blocks of the pure clones grouped by clone ID
+	var rootDev uint64
+	// The file is filepath.Join(dir, name); it is only built when its extents
+	// are read, so plain sizing allocates no paths.
+	add := func(dir, name string, info fs.FileInfo) {
 		sys, ok := info.Sys().(*syscall.Stat_t)
 		if !ok {
 			if !info.IsDir() && info.Mode()&fs.ModeSymlink == 0 {
@@ -219,28 +239,71 @@ func measure(ctx context.Context, path string) SizeStat {
 				st.Links = make(map[model.InodeKey]int64)
 			}
 			st.Links[key] = blocks
+		} else if clones != nil {
+			full := filepath.Join(dir, name)
+			ci, ok := fileCloneInfo(full)
+			switch {
+			case ok && ci.refcnt > 1:
+				// A pure clone: refcnt files share all of these blocks.
+				g := groups[ci.id]
+				if g == nil {
+					g = &cloneGroup{refcnt: ci.refcnt, blocks: blocks}
+					groups[ci.id] = g
+				}
+				g.seen++
+				groupBlocks += blocks
+			case !ok || ci.mayShare:
+				if xs, ok := fileExtents(full, info.Size()); ok {
+					extents = append(extents, xs...)
+					extentBlocks += blocks
+				}
+			}
 		}
 		st.Apparent += info.Size()
 		st.Disk += blocks
 	}
 	w := fstree.Walker{
-		Enter: func(_ string, info fs.FileInfo) bool {
-			add(info)
+		Enter: func(dir string, info fs.FileInfo) bool {
+			if dir == path {
+				if sys, ok := info.Sys().(*syscall.Stat_t); ok {
+					rootDev = uint64(sys.Dev)
+				}
+			}
+			add(dir, "", info)
 			return true
 		},
-		Entries: func(_ string, entries []fs.DirEntry) bool {
+		Entries: func(dir string, entries []fs.DirEntry) bool {
 			for _, e := range entries {
 				if e.IsDir() {
 					continue // counted on Enter, if on this filesystem
 				}
 				if info, err := e.Info(); err == nil {
-					add(info)
+					add(dir, e.Name(), info)
 				}
 			}
 			return true
 		},
 	}
 	_, _ = w.Walk(ctx, path)
+	st.Reclaim = st.Disk
+	if clones != nil {
+		st.Reclaim = st.Disk - groupBlocks - extentBlocks
+		for _, g := range groups {
+			// Freed only when every clone of the group is inside path.
+			if g.seen >= g.refcnt {
+				st.Reclaim += g.blocks
+			}
+		}
+		if len(extents) > 0 {
+			var src []extent
+			if clones.source != nil {
+				if xs, dev, ok := clones.source(); ok && dev == rootDev {
+					src = xs
+				}
+			}
+			st.Reclaim += bytesNotIn(mergeExtents(extents), src)
+		}
+	}
 	return st
 }
 

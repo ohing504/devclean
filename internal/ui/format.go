@@ -100,12 +100,25 @@ func ArtifactName(r model.ScanResult, root string) string {
 // under disk) would produce noise.
 const sparseMinDiff = 1 << 30 // 1 GiB
 
+// sharedMinDiff is the allocated−size gap above which a clone-aware size is
+// annotated with its allocated blocks; smaller gaps are not worth the noise.
+const sharedMinDiff = 100 * 1000 * 1000 // 100 MB
+
 // ArtifactSize renders an artifact's real on-disk size, annotating it with the
 // larger size the file nominally reports when it is materially sparse —
 // nominal more than double disk and over sparseMinDiff larger. Example: a
 // Docker.raw image shows "24.0 GB (appears as 460.0 GB)", making clear it only
 // uses 24 GB on disk though it presents itself as 460 GB.
+//
+// A clone-aware size well below the artifact's allocated blocks is annotated
+// with those blocks instead — e.g. browser code-sign copies show
+// "760.0 MB (11.3 GB incl. shared blocks)": deleting them frees 760 MB, the
+// rest is shared with the installed app. This takes precedence over the sparse
+// annotation, whose apparent size would be just as large.
 func ArtifactSize(r model.ScanResult) string {
+	if r.AllocatedSize-r.Size > sharedMinDiff {
+		return fmt.Sprintf("%s (%s incl. shared blocks)", model.HumanSize(r.Size), model.HumanSize(r.AllocatedSize))
+	}
 	if r.ApparentSize > r.Size*2 && r.ApparentSize-r.Size > sparseMinDiff {
 		return fmt.Sprintf("%s (appears as %s)", model.HumanSize(r.Size), model.HumanSize(r.ApparentSize))
 	}

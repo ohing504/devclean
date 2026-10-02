@@ -112,8 +112,9 @@ type ScanResult struct {
 	Path           string         `json:"path"`
 	Ecosystem      Ecosystem      `json:"ecosystem"`
 	Category       Category       `json:"category"`
-	Size           int64          `json:"size"`                   // disk usage: allocated blocks (st_blocks×512), sparse-aware
-	ApparentSize   int64          `json:"apparent_size,omitzero"` // sum of logical file sizes; exceeds Size for sparse files
+	Size           int64          `json:"size"`                    // bytes deleting it frees: allocated blocks (st_blocks×512), sparse-aware, APFS-clone-aware when CloneAware
+	ApparentSize   int64          `json:"apparent_size,omitzero"`  // sum of logical file sizes; exceeds Size for sparse files
+	AllocatedSize  int64          `json:"allocated_size,omitzero"` // allocated blocks counted per file; set only when APFS clone sharing makes Size smaller
 	LastMod        time.Time      `json:"last_modified"`
 	Activity       ActivityStatus `json:"activity"`
 	Safety         SafetyLevel    `json:"safety"`
@@ -132,6 +133,13 @@ type ScanResult struct {
 	// disk blocks, so a caller can dedup blocks shared across artifacts (e.g.
 	// pnpm store ↔ node_modules) when computing a grand total. Not serialized.
 	Links map[InodeKey]int64 `json:"-"`
+
+	// CloneAware marks an artifact whose files are likely APFS clones, so
+	// sizing reads physical extents: Size then counts blocks shared between
+	// its files once and leaves out blocks CloneSource (a directory, may be
+	// empty) also uses. Not serialized.
+	CloneAware  bool   `json:"-"`
+	CloneSource string `json:"-"`
 }
 
 // DeleteStrategy returns the effective delete strategy for this result:

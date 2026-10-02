@@ -45,7 +45,7 @@ func processRunState(name string) RunState {
 // check fails, or for bundle IDs we cannot map to a process name, the run state
 // is unknowable (caution).
 const (
-	codeSignCloneRec             = "zombie copies from killed browser processes (headless automation like lighthouse/puppeteer); the browser cleans these on next normal exit. Size may overstate if copies are APFS clones."
+	codeSignCloneRec             = "zombie copies from killed browser processes (headless automation like lighthouse/puppeteer); the browser cleans these on next normal exit"
 	codeSignCloneRunningRec      = "browser is currently running — newest copy may be in use; it cleans up leftovers on normal exit"
 	codeSignCloneUnrecognizedRec = "unrecognized browser — cannot check whether it is running (newest copy may be in use); it cleans up leftovers on normal exit"
 	codeSignCloneCheckFailedRec  = "cannot check whether the browser is running (pgrep failed) — newest copy may be in use; it cleans up leftovers on normal exit"
@@ -80,7 +80,7 @@ var codeSignCloneBrowsers = map[string]codeSignCloneBrowser{
 // on launch to verify their code signature and remove the copy on normal exit.
 // Force-killed processes — typically headless automation such as lighthouse or
 // puppeteer — leave the copies behind, and they accumulate (observed in the
-// wild: 92 copies / 156 GB).
+// wild: 92 copies summing to 156 GB of allocated blocks, most of it shared).
 //
 // found is the number of results already reported so progress keeps counting up.
 //
@@ -89,11 +89,9 @@ var codeSignCloneBrowsers = map[string]codeSignCloneBrowser{
 // ProcessRunState), when that check fails, or when the bundle ID is
 // unrecognized, they are caution.
 //
-// Sizes come from allocated blocks (Measure) and still overstate real disk
-// usage when the copies are APFS clones of the installed app bundle: clones
-// have distinct inodes and each reports full blocks, so neither block counting
-// nor inode dedup catches the sharing. Clone-aware measurement is a planned
-// follow-up (needs APFS extent-level accounting).
+// The copies are APFS clones of each other and of the installed app bundle,
+// so sizing is clone-aware with that bundle as clone source (see clone.go):
+// Size is what deleting the copies frees.
 func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []model.ScanResult {
 	matches, err := filepath.Glob(filepath.Join(s.TmpRoot, "*", "*", "X", "*.code_sign_clone"))
 	if err != nil {
@@ -144,6 +142,10 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 			}
 		}
 
+		source := ""
+		if known {
+			source = s.installedApp(browser.processName)
+		}
 		out = append(out, model.ScanResult{
 			Path:           m,
 			Ecosystem:      model.EcoGlobal,
@@ -153,10 +155,24 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 			ProjectRoot:    filepath.Dir(m),
 			Label:          codeSignCloneLabel(m, name),
 			Recommendation: rec,
+			CloneAware:     true,
+			CloneSource:    source,
 		})
 		ReportProgress(ctx, found+len(out))
 	}
 	return out
+}
+
+// installedApp returns the installed bundle "<appName>.app" from AppDirs, or
+// "" when none is found. Each browser's app bundle is named after its process.
+func (s *GlobalScanner) installedApp(appName string) string {
+	for _, d := range s.AppDirs {
+		p := filepath.Join(d, appName+".app")
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 // codeSignCloneLabel derives e.g. "Chrome code-sign clones (92 copies)" from
