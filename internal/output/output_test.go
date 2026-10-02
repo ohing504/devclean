@@ -489,3 +489,40 @@ func TestWriteTableTieBreaksByName(t *testing.T) {
 		}
 	})
 }
+
+// TestWriteTableFollowsSortKey pins that the table orders projects, and picks
+// the -n projects, by the --sort key instead of always by size.
+func TestWriteTableFollowsSortKey(t *testing.T) {
+	results := []model.ScanResult{
+		{Path: "/big/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/big", Size: 3_000_000, LastMod: time.Unix(100, 0), Safety: model.SafetySafe},
+		{Path: "/new/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/new", Size: 1_000_000, LastMod: time.Unix(300, 0), Safety: model.SafetySafe},
+		{Path: "/mid/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/mid", Size: 2_000_000, LastMod: time.Unix(200, 0), Safety: model.SafetySafe},
+	}
+	var buf bytes.Buffer
+	output.WriteTableWithOptions(&buf, results, output.TableOptions{TopN: 2, SortBy: "time"})
+	out := buf.String()
+	if strings.Contains(out, "/big\n") {
+		t.Errorf("-n 2 --sort time should drop the oldest project /big; got:\n%s", out)
+	}
+	if i, j := strings.Index(out, "/new\n"), strings.Index(out, "/mid\n"); i < 0 || j < 0 || i > j {
+		t.Errorf("--sort time should list /new before /mid; got:\n%s", out)
+	}
+}
+
+// TestWriteTableTopNCountsProjectPaths pins that -n counts a project once even
+// when its artifacts span several ecosystems, ranking it by their combined size.
+func TestWriteTableTopNCountsProjectPaths(t *testing.T) {
+	results := []model.ScanResult{
+		{Path: "/a/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/a", Size: 3_000_000, Safety: model.SafetySafe},
+		{Path: "/a/.venv", Ecosystem: model.EcoPython, Category: model.CatDeps, ProjectRoot: "/a", Size: 3_000_000, Safety: model.SafetySafe},
+		{Path: "/b/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/b", Size: 5_000_000, Safety: model.SafetySafe},
+		{Path: "/c/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/c", Size: 4_000_000, Safety: model.SafetySafe},
+	}
+	var buf bytes.Buffer
+	output.WriteTableWithOptions(&buf, results, output.TableOptions{TopN: 2})
+	out := buf.String()
+	// /a totals 6 MB across node and python, so -n 2 keeps /a and /b, not /c.
+	if !strings.Contains(out, "/a\n") || !strings.Contains(out, "/b\n") || strings.Contains(out, "/c\n") {
+		t.Errorf("-n 2 should keep projects /a (6 MB) and /b; got:\n%s", out)
+	}
+}

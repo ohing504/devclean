@@ -15,8 +15,10 @@ import (
 
 // TableOptions controls table output behavior.
 type TableOptions struct {
-	TopN    int  // limit output to top N projects (0 = all)
-	Verbose bool // show all artifacts including small ones
+	TopN      int    // limit output to top N projects (0 = all)
+	Verbose   bool   // show all artifacts including small ones
+	SortBy    string // project order and top-N key: size (default), time, name
+	Ascending bool   // smallest, oldest or A→Z project first
 }
 
 const collapseThreshold = 1024 * 1024 // 1 MB — hide artifacts below this in default mode
@@ -33,12 +35,11 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 		return
 	}
 
-	ecoGroups := groupByEcosystem(results)
-
-	// Apply top N at project level across all ecosystems
+	projectOrder := model.CompareProjects(opts.SortBy, opts.Ascending)
 	if opts.TopN > 0 {
-		ecoGroups = applyTopN(ecoGroups, opts.TopN)
+		results = topProjects(results, opts.TopN, projectOrder)
 	}
+	ecoGroups := groupByEcosystem(results)
 	sortGroupsBySize(ecoGroups)
 
 	var grandCount int
@@ -49,6 +50,7 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 		allItems = append(allItems, eg.items...)
 
 		projects := model.GroupByProject(eg.items)
+		slices.SortFunc(projects, projectOrder)
 
 		fmt.Fprintf(
 			w, "\n%s %s\n",
@@ -143,43 +145,22 @@ func groupByEcosystem(results []model.ScanResult) []ecoGroup {
 	return groups
 }
 
-// applyTopN collects all projects across ecosystems, sorts by size,
-// keeps only top N, then rebuilds ecosystem groups with the remaining items.
-func applyTopN(ecoGroups []ecoGroup, topN int) []ecoGroup {
-	// Collect all projects across ecosystems
-	var allProjects []model.ProjectGroup
-	for _, eg := range ecoGroups {
-		projects := model.GroupByProject(eg.items)
-		allProjects = append(allProjects, projects...)
+// topProjects keeps the artifacts of the first topN projects in order. A
+// project is one project root even when its artifacts span several
+// ecosystems; it is ranked by all of them together.
+func topProjects(results []model.ScanResult, topN int, order func(a, b model.ProjectGroup) int) []model.ScanResult {
+	projects := model.GroupByProject(results)
+	if topN >= len(projects) {
+		return results
 	}
-
-	// Already sorted by GroupByProject, but re-sort across ecosystems
-	slices.SortFunc(allProjects, func(a, b model.ProjectGroup) int {
-		return cmp.Or(cmp.Compare(b.TotalSize, a.TotalSize), strings.Compare(a.Path, b.Path))
-	})
-
-	if topN < len(allProjects) {
-		allProjects = allProjects[:topN]
-	}
-
-	// Rebuild: collect kept project paths
-	kept := make(map[string]bool)
-	for _, p := range allProjects {
+	slices.SortFunc(projects, order)
+	kept := make(map[string]bool, topN)
+	for _, p := range projects[:topN] {
 		kept[p.Path] = true
 	}
-
-	// Filter original results to only include items from kept projects
-	var filtered []model.ScanResult
-	for _, eg := range ecoGroups {
-		for _, r := range eg.items {
-			key := r.ProjectKey()
-			if kept[key] {
-				filtered = append(filtered, r)
-			}
-		}
-	}
-
-	return groupByEcosystem(filtered)
+	return model.FilterResults(results, func(r model.ScanResult) bool {
+		return kept[r.ProjectKey()]
+	})
 }
 
 func sortGroupsBySize(groups []ecoGroup) {
@@ -214,7 +195,7 @@ func groupBySubPackage(items []model.ScanResult, projectRoot string) []subPackag
 	var result []subPackage
 	for _, sp := range m {
 		sp.totalSize = model.DedupedTotal(sp.items)
-		slices.SortFunc(sp.items, model.CompareSizeDescPath)
+		slices.SortFunc(sp.items, model.CompareResults(model.SortBySize, false))
 		result = append(result, *sp)
 	}
 

@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"cmp"
 	"os"
 	"slices"
-	"strings"
 
 	"github.com/ohing504/devclean/internal/model"
 	"github.com/ohing504/devclean/internal/output"
@@ -56,8 +54,10 @@ func newScanCmd() *cobra.Command {
 			}
 
 			output.WriteTableWithOptions(os.Stdout, results, output.TableOptions{
-				TopN:    top,
-				Verbose: verbose,
+				TopN:      top,
+				Verbose:   verbose,
+				SortBy:    sortBy,
+				Ascending: reverse,
 			})
 			return nil
 		},
@@ -69,7 +69,7 @@ func newScanCmd() *cobra.Command {
 	cmd.Flags().StringVar(&status, "status", "", "filter by status: active, recent, stale, dormant")
 	cmd.Flags().StringVar(&minSizeStr, "min-size", "", "skip artifacts smaller than this (e.g. 1MB, 500KB)")
 	cmd.Flags().StringVar(&sortBy, "sort", "size", "sort by: size, time, name")
-	cmd.Flags().BoolVar(&reverse, "asc", false, "sort ascending instead of descending")
+	cmd.Flags().BoolVar(&reverse, "asc", false, "sort ascending: smallest or oldest first (name is always A→Z)")
 	cmd.Flags().IntVarP(&top, "top", "n", 0, "show only top N projects (0 = all)")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show all artifacts including small ones")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "JSON output for scripting and AI agents")
@@ -78,22 +78,5 @@ func newScanCmd() *cobra.Command {
 }
 
 func sortResults(results []model.ScanResult, sortBy string, ascending bool) {
-	// c orders newest/largest first, or path A→Z for "name"; --asc negates it.
-	// Equal keys fall back to path ascending in both directions so the order
-	// is the same on every run.
-	slices.SortFunc(results, func(a, b model.ScanResult) int {
-		var c int
-		switch sortBy {
-		case "time":
-			c = b.LastMod.Compare(a.LastMod)
-		case "name":
-			c = strings.Compare(a.Path, b.Path)
-		default: // "size"
-			c = cmp.Compare(b.Size, a.Size)
-		}
-		if ascending {
-			c = -c
-		}
-		return cmp.Or(c, strings.Compare(a.Path, b.Path))
-	})
+	slices.SortFunc(results, model.CompareResults(sortBy, ascending))
 }
