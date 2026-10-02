@@ -704,6 +704,7 @@ func newIsolatedGlobalScanner(t *testing.T, installed ...string) *scanner.Global
 	t.Helper()
 	s := scanner.NewGlobalScanner()
 	s.TmpRoot = t.TempDir()
+	s.AppDirs = nil
 	s.ProcessRunState = func(string) scanner.RunState { return scanner.RunStateNotRunning }
 	s.LookPath = func(file string) (string, error) {
 		if slices.Contains(installed, file) {

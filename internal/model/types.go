@@ -112,8 +112,9 @@ type ScanResult struct {
 	Path           string         `json:"path"`
 	Ecosystem      Ecosystem      `json:"ecosystem"`
 	Category       Category       `json:"category"`
-	Size           int64          `json:"size"`                   // disk usage: allocated blocks (st_blocks×512), sparse-aware
-	ApparentSize   int64          `json:"apparent_size,omitzero"` // sum of logical file sizes; exceeds Size for sparse files
+	Size           int64          `json:"size"`                    // bytes deleting it frees: allocated blocks (st_blocks×512), sparse-aware, APFS-clone-aware when CloneAware
+	ApparentSize   int64          `json:"apparent_size,omitzero"`  // sum of logical file sizes; exceeds Size for sparse files
+	AllocatedSize  int64          `json:"allocated_size,omitzero"` // allocated blocks counted per file; set only when APFS clone sharing makes Size smaller
 	LastMod        time.Time      `json:"last_modified"`
 	Activity       ActivityStatus `json:"activity"`
 	Safety         SafetyLevel    `json:"safety"`
@@ -132,6 +133,28 @@ type ScanResult struct {
 	// disk blocks, so a caller can dedup blocks shared across artifacts (e.g.
 	// pnpm store ↔ node_modules) when computing a grand total. Not serialized.
 	Links map[InodeKey]int64 `json:"-"`
+
+	// CloneAware turns on APFS-clone-aware sizing; Size then leaves out blocks
+	// shared with CloneSource (a directory, may be empty) or other files.
+	CloneAware  bool   `json:"-"`
+	CloneSource string `json:"-"`
+	// CloneShares are pure clone groups only partly inside this artifact, left
+	// out of Size; DedupedTotal counts one once the results hold all its clones.
+	CloneShares map[CloneKey]CloneShare `json:"-"`
+}
+
+// CloneKey identifies a group of pure APFS clones on a device.
+type CloneKey struct {
+	Dev uint64
+	ID  uint64
+}
+
+// CloneShare is one artifact's part of a clone group: Seen of Refcnt clones,
+// each sharing Blocks.
+type CloneShare struct {
+	Refcnt uint32
+	Seen   uint32
+	Blocks int64
 }
 
 // DeleteStrategy returns the effective delete strategy for this result:
@@ -178,11 +201,11 @@ func HumanSize(size int64) string {
 }
 
 // DedupedTotal returns the total disk usage across results with blocks shared
-// via hard links counted once. Each result's Size already counts its own
-// hard-linked inodes once (intra-artifact); this nets out inodes that recur
-// across artifacts — e.g. a pnpm store blob also hard-linked into a project's
-// node_modules — so the total reflects the space actually freed by deleting
-// everything shown, not an inflated sum.
+// via hard links or split APFS clone groups counted once. Each result's Size
+// already counts its own hard-linked inodes once (intra-artifact); this nets
+// out inodes that recur across artifacts — e.g. a pnpm store blob also
+// hard-linked into a project's node_modules — so the total reflects the space
+// actually freed by deleting everything shown, not an inflated sum.
 func DedupedTotal(results []ScanResult) int64 {
 	// A lone artifact has nothing to share with; skip building the inode set.
 	// Group headers call this once per sub-package, project and ecosystem.
@@ -191,7 +214,14 @@ func DedupedTotal(results []ScanResult) int64 {
 	}
 	var total int64
 	seen := make(map[InodeKey]struct{})
+	groups := make(map[CloneKey]CloneShare)
 	for _, r := range results {
+		for key, s := range r.CloneShares {
+			g := groups[key]
+			g.Refcnt, g.Blocks = s.Refcnt, s.Blocks
+			g.Seen += s.Seen
+			groups[key] = g
+		}
 		total += r.Size
 		for key, blocks := range r.Links {
 			// First artifact to hold this inode keeps it (already in r.Size);
@@ -201,6 +231,11 @@ func DedupedTotal(results []ScanResult) int64 {
 				continue
 			}
 			seen[key] = struct{}{}
+		}
+	}
+	for _, g := range groups {
+		if g.Seen >= g.Refcnt {
+			total += g.Blocks
 		}
 	}
 	return total

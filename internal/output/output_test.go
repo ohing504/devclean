@@ -77,6 +77,31 @@ func TestWriteTableNoSparseAnnotationForDense(t *testing.T) {
 	}
 }
 
+// TestWriteTableSharedBlocksAnnotation verifies an artifact whose clone-aware
+// size is far below its allocated blocks shows the allocated figure as shared,
+// not as a sparse "appears as" size, even though its apparent size is large.
+func TestWriteTableSharedBlocksAnnotation(t *testing.T) {
+	clones := model.ScanResult{
+		Path:          "/private/var/folders/aa/bbb/X/com.google.Chrome.code_sign_clone",
+		Ecosystem:     model.EcoGlobal,
+		Category:      model.CatCache,
+		Size:          760 * 1000 * 1000,
+		AllocatedSize: 11300 * 1000 * 1000,
+		ApparentSize:  10500 * 1000 * 1000,
+		Activity:      model.StatusActive,
+		Safety:        model.SafetyCaution,
+	}
+	var buf bytes.Buffer
+	output.WriteTableWithOptions(&buf, []model.ScanResult{clones}, output.TableOptions{Verbose: true})
+	out := buf.String()
+	if !strings.Contains(out, "760.0 MB (11.3 GB incl. shared blocks)") {
+		t.Errorf("clone artifact must show its allocated size as shared; got:\n%s", out)
+	}
+	if strings.Contains(out, "appears as") {
+		t.Errorf("clone artifact must not be annotated as sparse; got:\n%s", out)
+	}
+}
+
 // TestWriteJSONDedupsHardlinkedTotal pins that the JSON total_size nets out
 // blocks shared across artifacts via hard links (the pnpm case), rather than
 // summing the overlapping per-artifact sizes.
@@ -101,7 +126,7 @@ func TestWriteJSONDedupsHardlinkedTotal(t *testing.T) {
 }
 
 // TestWriteTableDedupNote verifies the table annotates its grand total when
-// hard-link dedup made it smaller than the naive sum.
+// hard-link dedup made it smaller than the row sum.
 func TestWriteTableDedupNote(t *testing.T) {
 	shared := map[model.InodeKey]int64{{Dev: 1, Ino: 7}: 400}
 	results := []model.ScanResult{
@@ -110,8 +135,25 @@ func TestWriteTableDedupNote(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	output.WriteTableWithOptions(&buf, results, output.TableOptions{Verbose: true})
-	if out := buf.String(); !strings.Contains(out, "excludes hard-linked") {
+	if out := buf.String(); !strings.Contains(out, sharedBlocksNote) {
 		t.Errorf("expected hard-link dedup note in total; got:\n%s", out)
+	}
+}
+
+const sharedBlocksNote = "blocks shared across items counted once"
+
+// A clone group split across items is left out of each row and counted in the
+// total, so the total exceeds the row sum and needs the same note.
+func TestWriteTableSplitCloneNote(t *testing.T) {
+	shared := map[model.CloneKey]model.CloneShare{{Dev: 1, ID: 7}: {Refcnt: 2, Seen: 1, Blocks: 400}}
+	results := []model.ScanResult{
+		{Path: "/a/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/a", CloneShares: shared, Safety: model.SafetySafe, Activity: model.StatusDormant},
+		{Path: "/b/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/b", CloneShares: shared, Safety: model.SafetySafe, Activity: model.StatusDormant},
+	}
+	var buf bytes.Buffer
+	output.WriteTableWithOptions(&buf, results, output.TableOptions{Verbose: true})
+	if out := buf.String(); !strings.Contains(out, sharedBlocksNote) {
+		t.Errorf("expected shared-blocks note in total; got:\n%s", out)
 	}
 }
 

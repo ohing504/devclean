@@ -29,9 +29,15 @@ type artifactRule struct {
 	Suffix   string
 	Category model.Category
 	Safety   model.SafetyLevel
-	// Recommend optionally derives ScanResult.Recommendation from the matched
-	// directory (e.g. how the tool that populated it affects reclaim).
-	Recommend func(dir string) string
+	// Describe optionally inspects the matched directory (e.g. which tool
+	// populated it) to fill the result's fields below.
+	Describe func(dir string) artifactNote
+}
+
+type artifactNote struct {
+	Recommendation string
+	CloneAware     bool
+	CloneSource    string
 }
 
 // matches reports whether a directory matches this rule. rel is the
@@ -171,8 +177,10 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 				if tables[tableIdx].SetProjectRoot {
 					result.ProjectRoot = projRoot
 				}
-				if rule.Recommend != nil {
-					result.Recommendation = rule.Recommend(dir)
+				if rule.Describe != nil {
+					n := rule.Describe(dir)
+					result.Recommendation = n.Recommendation
+					result.CloneAware, result.CloneSource = n.CloneAware, n.CloneSource
 				}
 				results = append(results, result)
 				ReportProgress(ctx, len(results))
@@ -286,7 +294,7 @@ func isPnpmStoreVersionDir(name string) bool {
 // traverse every artifact tree at once.
 const sizeWorkerCap = 8
 
-// sizePending fills in Size, ApparentSize and Links for every result by running
+// sizePending fills in the size fields of every result by running
 // Measure concurrently across a bounded worker pool. The walk finds artifacts
 // serially but defers their sizing (one in-process tree walk each) to here so
 // the traversals and their I/O overlap. Returns ctx.Err() if the scan is
@@ -309,15 +317,25 @@ func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers
 		workers = 1
 	}
 
+	sources := newCloneSources()
 	idx := make(chan int)
 	var wg sync.WaitGroup
 	for range workers {
 		wg.Go(func() {
 			for i := range idx {
-				st := measure(ctx, results[i].Path)
-				results[i].Size = st.Disk
-				results[i].ApparentSize = st.Apparent
-				results[i].Links = st.Links
+				r := &results[i]
+				var clones *cloneSources
+				if r.CloneAware && cloneSizingSupported {
+					clones = sources
+				}
+				st := measure(ctx, r.Path, clones, r.CloneSource)
+				r.Size = st.Reclaim
+				r.ApparentSize = st.Apparent
+				r.Links = st.Links
+				r.CloneShares = st.CloneShares
+				if st.Reclaim < st.Disk {
+					r.AllocatedSize = st.Disk
+				}
 			}
 		})
 	}

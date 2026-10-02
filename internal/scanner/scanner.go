@@ -167,9 +167,11 @@ func partitionScanners(scanners []Scanner) ([]walkEcosystem, []Scanner) {
 // blocks) bytes for a path, plus the hard-linked inodes it counted so a caller
 // can dedup blocks shared across artifacts (e.g. pnpm store ↔ node_modules).
 type SizeStat struct {
-	Apparent int64
-	Disk     int64
-	Links    map[model.InodeKey]int64 // Nlink>1 inode → disk blocks, keyed by (dev, ino)
+	Apparent    int64
+	Disk        int64
+	Links       map[model.InodeKey]int64 // Nlink>1 inode → disk blocks, keyed by (dev, ino)
+	Reclaim     int64                    // what deleting path frees; Disk unless clone-aware
+	CloneShares map[model.CloneKey]model.CloneShare
 }
 
 // Measure walks path with fstree, the traversal deletion is checked with, and
@@ -183,14 +185,20 @@ type SizeStat struct {
 // artifact and recorded in Links so a caller can net out blocks shared across
 // artifacts.
 func Measure(path string) SizeStat {
-	return measure(context.Background(), path)
+	return measure(context.Background(), path, nil, "")
 }
 
-// measure is Measure that stops once ctx is done.
-func measure(ctx context.Context, path string) SizeStat {
+// measure is Measure that stops once ctx is done. A non-nil clones makes it
+// clone-aware (see clone.go), netting out blocks shared with the files under
+// source, if given.
+func measure(ctx context.Context, path string, clones *cloneSources, source string) SizeStat {
 	var st SizeStat
 	seen := make(map[model.InodeKey]struct{})
-	add := func(info fs.FileInfo) {
+	var extents []extent
+	var extentBlocks, groupBlocks int64 // st_blocks of files counted by extent or group instead
+	var groups map[uint64]*cloneGroup
+	var rootDev uint64
+	add := func(dir, name string, info fs.FileInfo) {
 		sys, ok := info.Sys().(*syscall.Stat_t)
 		if !ok {
 			if !info.IsDir() && info.Mode()&fs.ModeSymlink == 0 {
@@ -219,28 +227,83 @@ func measure(ctx context.Context, path string) SizeStat {
 				st.Links = make(map[model.InodeKey]int64)
 			}
 			st.Links[key] = blocks
+		} else if clones != nil && blocks > 0 {
+			full := filepath.Join(dir, name)
+			ci, ok := fileCloneInfo(full)
+			switch {
+			case ok && ci.refcnt > 1:
+				g := groups[ci.id]
+				if g == nil {
+					if groups == nil {
+						groups = make(map[uint64]*cloneGroup)
+					}
+					g = &cloneGroup{CloneShare: model.CloneShare{Refcnt: ci.refcnt, Blocks: blocks}, path: full, size: info.Size()}
+					groups[ci.id] = g
+				}
+				g.Seen++
+				groupBlocks += blocks
+			case !ok || ci.mayShare:
+				if xs, ok := fileExtents(full, info.Size()); ok {
+					extents = append(extents, xs...)
+					extentBlocks += blocks
+				}
+			}
 		}
 		st.Apparent += info.Size()
 		st.Disk += blocks
 	}
 	w := fstree.Walker{
-		Enter: func(_ string, info fs.FileInfo) bool {
-			add(info)
+		Enter: func(dir string, info fs.FileInfo) bool {
+			if sys, ok := info.Sys().(*syscall.Stat_t); ok && dir == path {
+				rootDev = uint64(sys.Dev) //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
+			}
+			add(dir, "", info)
 			return true
 		},
-		Entries: func(_ string, entries []fs.DirEntry) bool {
+		Entries: func(dir string, entries []fs.DirEntry) bool {
 			for _, e := range entries {
 				if e.IsDir() {
 					continue // counted on Enter, if on this filesystem
 				}
 				if info, err := e.Info(); err == nil {
-					add(info)
+					add(dir, e.Name(), info)
 				}
 			}
 			return true
 		},
 	}
 	_, _ = w.Walk(ctx, path)
+	st.Reclaim = st.Disk
+	if clones == nil {
+		return st
+	}
+	st.Reclaim = st.Disk - groupBlocks - extentBlocks
+	for id, g := range groups {
+		if g.Seen < g.Refcnt {
+			if st.CloneShares == nil {
+				st.CloneShares = make(map[model.CloneKey]model.CloneShare)
+			}
+			st.CloneShares[model.CloneKey{Dev: rootDev, ID: id}] = g.CloneShare
+			continue
+		}
+		// A partly rewritten copy may overlap the group: count by extent.
+		if len(extents) > 0 {
+			if xs, ok := fileExtents(g.path, g.size); ok {
+				extents = append(extents, xs...)
+				continue
+			}
+		}
+		st.Reclaim += g.Blocks
+	}
+	if len(extents) > 0 {
+		var src []extent
+		if source != "" {
+			if xs, dev, ok := clones.get(ctx, source); ok && dev == rootDev {
+				src = xs
+			}
+		}
+		st.Reclaim += bytesNotIn(mergeExtents(extents), src)
+	}
 	return st
 }
 
@@ -248,18 +311,6 @@ func measure(ctx context.Context, path string) SizeStat {
 // Measure for callers that only need the disk figure.
 func DirSize(path string) int64 {
 	return Measure(path).Disk
-}
-
-// sized fills Size, ApparentSize and Links on r by measuring r.Path — the
-// single-result form of what the walk engine's sizePending does in bulk (the
-// stat-based scanners now defer to sizePending; this remains for callers that
-// size one result at a time).
-func sized(r model.ScanResult) model.ScanResult {
-	st := Measure(r.Path)
-	r.Size = st.Disk
-	r.ApparentSize = st.Apparent
-	r.Links = st.Links
-	return r
 }
 
 // ModTime returns the modification time of a path, or zero time on error.
