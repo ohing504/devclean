@@ -238,6 +238,8 @@ type ProjectGroup struct {
 }
 
 // GroupByProject groups scan results by their project root, sorted by total size descending.
+// TotalSize counts blocks hard-linked between the project's own artifacts once
+// (DedupedTotal), so it is the space freed by cleaning that project alone.
 func GroupByProject(results []ScanResult) []ProjectGroup {
 	m := make(map[string]*ProjectGroup)
 	for _, r := range results {
@@ -250,7 +252,6 @@ func GroupByProject(results []ScanResult) []ProjectGroup {
 			}
 			m[key] = p
 		}
-		p.TotalSize += r.Size
 		p.Items = append(p.Items, r)
 		if r.LastMod.After(p.LastMod) {
 			p.LastMod = r.LastMod
@@ -262,6 +263,7 @@ func GroupByProject(results []ScanResult) []ProjectGroup {
 	}
 	var groups []ProjectGroup
 	for _, g := range m {
+		g.TotalSize = DedupedTotal(g.Items)
 		sort.Slice(g.Items, func(i, j int) bool {
 			return g.Items[i].Size > g.Items[j].Size
 		})

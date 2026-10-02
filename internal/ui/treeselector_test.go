@@ -492,3 +492,30 @@ func TestArtifactRowShowsScanTableCells(t *testing.T) {
 		t.Errorf("artifact row should show the label, not the folder name; got:\n%s", row)
 	}
 }
+
+// TestBuildTreeItemsHeadersDedupHardLinks pins that ecosystem and project rows
+// count hard-linked blocks once, so selecting a project shows the same size in
+// the footer as on its row.
+func TestBuildTreeItemsHeadersDedupHardLinks(t *testing.T) {
+	shared := map[model.InodeKey]int64{{Dev: 1, Ino: 7}: 400}
+	results := []model.ScanResult{
+		{Path: "/a/node_modules", Ecosystem: model.EcoNode, ProjectRoot: "/a", Size: 500, Links: shared, Safety: model.SafetySafe},
+		{Path: "/a/pkg/node_modules", Ecosystem: model.EcoNode, ProjectRoot: "/a", Size: 500, Links: shared, Safety: model.SafetySafe},
+		{Path: "/b/node_modules", Ecosystem: model.EcoNode, ProjectRoot: "/b", Size: 500, Links: shared, Safety: model.SafetySafe},
+	}
+	items := BuildTreeItems(results)
+	for _, it := range items {
+		switch it.Type {
+		case ItemEcoHeader:
+			// 1500 − 2×400: the inode is shared across both projects too.
+			if it.Size != 700 {
+				t.Errorf("eco header Size = %d, want 700", it.Size)
+			}
+		case ItemProject:
+			want := map[string]int64{"/a": 600, "/b": 500}[it.Path]
+			if it.Size != want {
+				t.Errorf("project %s Size = %d, want %d", it.Path, it.Size, want)
+			}
+		}
+	}
+}

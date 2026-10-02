@@ -39,12 +39,10 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 		ecoGroups = applyTopN(ecoGroups, opts.TopN)
 	}
 
-	var naiveTotal int64
 	var grandCount int
 	var allItems []model.ScanResult
 
 	for _, eg := range ecoGroups {
-		naiveTotal += eg.totalSize
 		grandCount += len(eg.items)
 		allItems = append(allItems, eg.items...)
 
@@ -85,6 +83,10 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 	// store blob also linked into node_modules), so the figures reflect space
 	// actually freed rather than an inflated sum of overlapping artifacts.
 	grandTotal := model.DedupedTotal(allItems)
+	var naiveTotal int64
+	for _, r := range allItems {
+		naiveTotal += r.Size
+	}
 	safeItems := model.FilterResults(allItems, func(r model.ScanResult) bool {
 		return r.Safety == model.SafetySafe
 	})
@@ -116,7 +118,7 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 
 type ecoGroup struct {
 	ecosystem string
-	totalSize int64
+	totalSize int64 // hard-linked blocks counted once (DedupedTotal)
 	items     []model.ScanResult
 }
 
@@ -128,12 +130,12 @@ func groupByEcosystem(results []model.ScanResult) []ecoGroup {
 			g = &ecoGroup{ecosystem: string(r.Ecosystem)}
 			m[r.Ecosystem] = g
 		}
-		g.totalSize += r.Size
 		g.items = append(g.items, r)
 	}
 
 	var groups []ecoGroup
 	for _, g := range m {
+		g.totalSize = model.DedupedTotal(g.items)
 		groups = append(groups, *g)
 	}
 	return groups
@@ -188,7 +190,7 @@ func sortGroupsBySize(groups []ecoGroup) {
 
 type subPackage struct {
 	name      string // relative dir from project root ("." for root)
-	totalSize int64
+	totalSize int64  // hard-linked blocks counted once (DedupedTotal)
 	items     []model.ScanResult
 }
 
@@ -204,12 +206,12 @@ func groupBySubPackage(items []model.ScanResult, projectRoot string) []subPackag
 			sp = &subPackage{name: dir}
 			m[dir] = sp
 		}
-		sp.totalSize += r.Size
 		sp.items = append(sp.items, r)
 	}
 
 	var result []subPackage
 	for _, sp := range m {
+		sp.totalSize = model.DedupedTotal(sp.items)
 		sort.Slice(sp.items, func(i, j int) bool {
 			return sp.items[i].Size > sp.items[j].Size
 		})
