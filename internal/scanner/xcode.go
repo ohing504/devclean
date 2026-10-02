@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -280,14 +282,30 @@ func enrichDerivedData(results []model.ScanResult) {
 			continue
 		}
 		results[i].Label = pathutil.ShortenHome(ws)
-		if _, err := os.Stat(ws); os.IsNotExist(err) {
+		if workspaceGone(ws) {
 			results[i].Recommendation = "source project no longer exists — safe to remove"
 		}
 	}
 }
 
+// workspaceGone reports whether ws is known not to exist. A workspace on an
+// external volume that is not mounted right now is not known to be gone.
+func workspaceGone(ws string) bool {
+	if _, err := os.Stat(ws); !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	if rest, ok := strings.CutPrefix(ws, "/Volumes/"); ok {
+		volume, _, _ := strings.Cut(rest, "/")
+		if _, err := os.Stat(filepath.Join("/Volumes", volume)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 // derivedDataWorkspace returns the WorkspacePath recorded in a DerivedData
-// folder's info.plist, or "" when the file is missing or not an XML plist.
+// folder's info.plist, or "" when the file is missing, not an XML plist, or the
+// recorded path is not absolute.
 func derivedDataWorkspace(dir string) string {
 	data, err := os.ReadFile(filepath.Join(dir, "info.plist"))
 	if err != nil {
@@ -308,7 +326,10 @@ func derivedDataWorkspace(dir string) string {
 	for i := 0; i+1 < len(entries); i++ {
 		if entries[i].XMLName.Local == "key" && entries[i].Value == "WorkspacePath" &&
 			entries[i+1].XMLName.Local == "string" {
-			return entries[i+1].Value
+			if ws := strings.TrimSpace(entries[i+1].Value); filepath.IsAbs(ws) {
+				return ws
+			}
+			return ""
 		}
 	}
 	return ""

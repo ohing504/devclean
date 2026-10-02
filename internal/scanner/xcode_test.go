@@ -296,6 +296,9 @@ func TestXcodeScanner_DerivedDataLabelsSourceWorkspace(t *testing.T) {
 	mustMkdir(t, live)
 	writeDerivedDataInfo(t, filepath.Join(parent, "Runner-live"), live)
 	writeDerivedDataInfo(t, filepath.Join(parent, "Runner-gone"), gone)
+	// A workspace on a volume that is not mounted is not known to be gone.
+	writeDerivedDataInfo(t, filepath.Join(parent, "Runner-unmounted"), "/Volumes/devclean-test-unmounted/app/Runner.xcworkspace")
+	mustMkdir(t, filepath.Join(parent, "Runner-noplist"))
 
 	results, err := scanner.NewXcodeScanner().Scan(context.Background(), home)
 	if err != nil {
@@ -311,6 +314,12 @@ func TestXcodeScanner_DerivedDataLabelsSourceWorkspace(t *testing.T) {
 	}
 	if r := byName["Runner-gone"]; !strings.HasSuffix(r.Label, "workspace/app-wt-1/ios/Runner.xcworkspace") || r.Recommendation != "source project no longer exists — safe to remove" {
 		t.Errorf("deleted workspace: want label ending in source path and orphan recommendation, got label=%q rec=%q", r.Label, r.Recommendation)
+	}
+	if r := byName["Runner-unmounted"]; r.Label != "/Volumes/devclean-test-unmounted/app/Runner.xcworkspace" || r.Recommendation != "" {
+		t.Errorf("unmounted volume: want source path label and no recommendation, got label=%q rec=%q", r.Label, r.Recommendation)
+	}
+	if r := byName["Runner-noplist"]; r.Label != "" || r.Recommendation != "" {
+		t.Errorf("no info.plist: want no label and no recommendation, got label=%q rec=%q", r.Label, r.Recommendation)
 	}
 }
 
