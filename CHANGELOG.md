@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1](https://github.com/ohing504/devclean/compare/v0.2.0...v0.2.1) (2026-10-02)
+
+
+### Fixed
+
+* count hard-linked blocks once in ecosystem, project and sub-package sizes and their collapsed lines ([#51](https://github.com/ohing504/devclean/issues/51)) ([0b6808f](https://github.com/ohing504/devclean/commit/0b6808f51b4b325e5c1c77a7179545104c054fab)), closes [#40](https://github.com/ohing504/devclean/issues/40)
+* order scan projects and -n by --sort, make --asc ascending, count -n by project root in table and --json, and reject unknown --sort ([#54](https://github.com/ohing504/devclean/issues/54)) ([39ec13c](https://github.com/ohing504/devclean/commit/39ec13cbaff0604ea536ef5f7023f1cdda0a0b47))
+* print equal-size projects in the same order on every run and keep ecosystems sorted with --top ([#52](https://github.com/ohing504/devclean/issues/52)) ([6542822](https://github.com/ohing504/devclean/commit/65428222ba9734ea2121f15e221b3574cc487ffe))
+* size browser code-sign copies and pnpm node_modules by the space deleting them frees on macOS ([#55](https://github.com/ohing504/devclean/issues/55)) ([67cc2f8](https://github.com/ohing504/devclean/commit/67cc2f8523c3a7cb4387affb3dc0e5ee095d3a4f)), closes [#30](https://github.com/ohing504/devclean/issues/30)
+* stop printing spinner codes into piped output and fail clean without a terminal unless --yes is given ([#58](https://github.com/ohing504/devclean/issues/58)) ([5f88dc5](https://github.com/ohing504/devclean/commit/5f88dc548b13ed2b3abc8eaf520f65c4768bba08))
+
 ## [0.2.0](https://github.com/ohing504/devclean/compare/v0.1.0...v0.2.0) (2026-10-02)
 
 
