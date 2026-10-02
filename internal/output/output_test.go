@@ -400,10 +400,10 @@ func TestWriteTable_MonorepoGrouping(t *testing.T) {
 	}
 }
 
-// TestWriteTableGroupTotalsDedupHardLinks pins that project and ecosystem
-// headers count hard-linked blocks once within their own items, like the
-// grand total.
-func TestWriteTableGroupTotalsDedupHardLinks(t *testing.T) {
+// TestWriteTableEcosystemTotalDedupsHardLinks pins that the ecosystem header
+// counts hard-linked blocks once within its own items, like the grand total.
+// Project totals are pinned in the model package.
+func TestWriteTableEcosystemTotalDedupsHardLinks(t *testing.T) {
 	shared := map[model.InodeKey]int64{{Dev: 1, Ino: 7}: 400}
 	results := []model.ScanResult{
 		{Path: "/a/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: "/a", Size: 500, Links: shared, Safety: model.SafetySafe, Activity: model.StatusDormant},
@@ -411,14 +411,35 @@ func TestWriteTableGroupTotalsDedupHardLinks(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	output.WriteTableWithOptions(&buf, results, output.TableOptions{Verbose: true})
-	out := buf.String()
-	if !strings.Contains(out, "1 projects · 600 B") {
+	if out := buf.String(); !strings.Contains(out, "1 projects · 600 B") {
 		t.Errorf("ecosystem header should show deduped 600 B; got:\n%s", out)
 	}
-	if !strings.Contains(out, "600 B · ") {
-		t.Errorf("project header should show deduped 600 B; got:\n%s", out)
+}
+
+// TestWriteTableCollapsedSummariesDedupHardLinks pins that the "... and N more"
+// lines count hard-linked blocks shared between the collapsed entries once,
+// like the headers above them.
+func TestWriteTableCollapsedSummariesDedupHardLinks(t *testing.T) {
+	shared := map[model.InodeKey]int64{{Dev: 1, Ino: 7}: 400}
+	item := func(path, root string) model.ScanResult {
+		return model.ScanResult{Path: path, Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: root, Size: 500, Links: shared, Safety: model.SafetySafe, Activity: model.StatusDormant}
 	}
-	if strings.Contains(out, "1.0 KB") {
-		t.Errorf("no header should show the naive 1.0 KB sum; got:\n%s", out)
-	}
+
+	t.Run("packages", func(t *testing.T) {
+		results := []model.ScanResult{item("/m/a/node_modules", "/m"), item("/m/b/node_modules", "/m"), item("/m/c/node_modules", "/m")}
+		var buf bytes.Buffer
+		output.WriteTable(&buf, results)
+		if out := buf.String(); !strings.Contains(out, "and 3 more packages (700 B)") {
+			t.Errorf("collapsed packages should show deduped 700 B; got:\n%s", out)
+		}
+	})
+
+	t.Run("artifacts", func(t *testing.T) {
+		results := []model.ScanResult{item("/p/node_modules", "/p"), item("/p/.cache", "/p")}
+		var buf bytes.Buffer
+		output.WriteTable(&buf, results)
+		if out := buf.String(); !strings.Contains(out, "and 2 more (600 B)") {
+			t.Errorf("collapsed artifacts should show deduped 600 B; got:\n%s", out)
+		}
+	})
 }

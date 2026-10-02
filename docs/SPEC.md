@@ -55,7 +55,7 @@ Legend: ✔ safe  ⚠ caution  ✖ protected   ● Active  ● Recent  ● Stale
         Run 'devclean list' for details
 ```
 
-A sparse artifact is shown as `8.6 GB (appears as 494.4 GB)` — real disk size, then the size it reports. When hard-linked blocks are shared across artifacts, the total counts them once and says so. Ecosystem, project and sub-package sizes (also in `clean --dry-run` and the selector) count them once within their own artifacts, so a project shows what cleaning it alone frees and projects sort by that size; blocks shared across projects make the rows add up to more than the total.
+A sparse artifact is shown as `8.6 GB (appears as 494.4 GB)` — real disk size, then the size it reports. When hard-linked blocks are shared across artifacts, the total counts them once and says so. Ecosystem, project and sub-package sizes (also in `clean --dry-run` and the selector) and the collapsed `... and N more` lines count them once within their own artifacts, so a project row shows the same size as the selector footer with only that project selected, and projects sort by that size; blocks shared across projects make the rows add up to more than the total.
 
 #### JSON (`--json`)
 

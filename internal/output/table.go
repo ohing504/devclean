@@ -234,13 +234,13 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 	}
 
 	var collapsedPkgs int
-	var collapsedPkgSize int64
+	var collapsedItems []model.ScanResult
 
 	for _, sp := range subPkgs {
 		// Collapse small sub-packages in default mode
 		if !opts.Verbose && sp.totalSize < collapseThreshold && len(subPkgs) > 2 {
 			collapsedPkgs++
-			collapsedPkgSize += sp.totalSize
+			collapsedItems = append(collapsedItems, sp.items...)
 			continue
 		}
 
@@ -277,19 +277,17 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 	if collapsedPkgs > 0 {
 		fmt.Fprintf(
 			w, "    %s\n",
-			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more packages (%s)", collapsedPkgs, model.HumanSize(collapsedPkgSize))),
+			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more packages (%s)", collapsedPkgs, model.HumanSize(model.DedupedTotal(collapsedItems)))),
 		)
 	}
 }
 
 func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot string, opts TableOptions) {
-	var collapsed int
-	var collapsedSize int64
+	var collapsed []model.ScanResult
 
 	for _, r := range items {
 		if !opts.Verbose && r.Size < collapseThreshold && len(items) > 1 {
-			collapsed++
-			collapsedSize += r.Size
+			collapsed = append(collapsed, r)
 			continue
 		}
 
@@ -307,10 +305,10 @@ func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot stri
 		)
 	}
 
-	if collapsed > 0 {
+	if len(collapsed) > 0 {
 		fmt.Fprintf(
 			w, "    %s\n",
-			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more (%s)", collapsed, model.HumanSize(collapsedSize))),
+			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more (%s)", len(collapsed), model.HumanSize(model.DedupedTotal(collapsed)))),
 		)
 	}
 }
