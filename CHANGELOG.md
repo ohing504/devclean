@@ -5,7 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0](https://github.com/ohing504/devclean/compare/v0.1.0...v0.2.0) (2026-10-02)
+
 
 ### Added
 
@@ -15,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Global Caches**: Browser Temp detection (macOS) — zombie Chromium-family code-sign clones under `/private/var/folders/*/*/X/*.code_sign_clone` left behind by force-killed browsers (headless automation like lighthouse/puppeteer), labeled with browser name and copy count. `safe` when the browser is not running; `caution` while it runs (newest copy may be in use) or for unrecognized bundle IDs.
 - **LLM Model Stores** scanner (`llm`) covering local model weights at fixed home paths: LM Studio (`~/.lmstudio/models`, per model) and Hugging Face hub (`~/.cache/huggingface/hub`, per model, `models--org--name` decoded to `org/name`), plus the Ollama (`~/.ollama/models`) and llamafile (`~/.llamafile`) stores as a whole. All `safe` with re-download notes; the Ollama note points to `ollama rm <model>` for removing individual models. Results carry a new `last_used_at` JSON field (model directory mtime; omitted when unknown), shown in the table as a dim "last used …" hint.
 - **Node.js**: a pnpm-installed `node_modules` whose pnpm store (the `storeDir` in `node_modules/.modules.yaml`) is on the same volume is annotated that its files are likely shared with the store, so deleting it frees space only after `pnpm store prune`. The note appears in both the scan table and the `clean` selector.
+- **Flutter/Dart** scanner (`flutter`): a project's `build/` and `.dart_tool/` (what `flutter clean` removes), plus the shared `~/.pub-cache` as `caution`. The Flutter SDK checkout itself is never scanned, so committed engine source is not offered for deletion.
+- **Android/Gradle** scanner (`android`): each module's `build/` and `.gradle/` in projects with `build.gradle(.kts)`; every module is its own project root.
+- **Docker** scanner (`docker`): reports the Docker Desktop disk image (`Docker.raw`) with its real on-disk size. It is protected and never deleted by path, since all images, containers and volumes live in that one file.
+- **Xcode**: each DerivedData folder shows the workspace it was built from, or notes that the source project no longer exists and the folder is safe to remove.
+
+#### Cleaning
+- `clean --vendor-cleanup` also runs each installed package manager's own cache prune (`npm`/`yarn cache clean`, `pnpm store prune`, `pip`/`uv cache prune`); managers not on `PATH` are skipped.
 
 #### Sizing
 - Sparse-aware sizing: a sparse artifact shows its real on-disk size next to the size it reports — `8.6 GB (appears as 494.4 GB)` for a `Docker.raw` image. JSON gains an `apparent_size` field alongside the disk-based `size`.
@@ -33,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Global caches of installed tools are `caution`, so `clean --yes` skips them.
 - Homebrew is reclaimed by `brew cleanup` as a scan item sized by its dry-run (was: deleting `~/Library/Caches/Homebrew`; removed from `--vendor-cleanup`).
 - The walk engine's no-follow symlink policy is now explicit: it skips any symlink entry (`os.ModeSymlink`) rather than relying on `os.ReadDir`'s incidental `IsDir()==false`, so a future refactor can't silently start following links. Behavior is unchanged — a symlink is never descended into or matched as an artifact (even a symlinked `node_modules` from pnpm/monorepos), which avoids double-counting the target's disk space and never reclaims a shared target; symlink cycles remain unwalkable. Documented in `docs/decisions/symlink-no-follow.md`.
+- The scan table and the `clean` selector show an item's name, size, last-used time and deletion note the same way.
 
 ### Fixed
 
@@ -46,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Config roots and irreplaceable user state are no longer offered for deletion. A home dotfile is now treated as config unless it is unambiguously a package/build cache. Previously listed as `caution`/`safe` and thus removable by `clean --yes`, now excluded: the whole `~/.claude` tree (session transcripts, project memory, agents, skills, plugins), `~/.codex`, `~/.gemini`, Claude Code's `~/Library/Caches/claude-cli-nodejs`, `~/.cursor` (extensions & settings), `~/.gem` (holds the RubyGems credential + installed gems), and `~/.android/avd` (emulator user data). Deleting any of it was unrecoverable data or credential loss, not reclaimed space. Only genuine caches under those trees or dedicated cache dirs remain eligible.
 - `clean --yes` now deletes only `safe` items by default; `caution` items are skipped and reported. Previously `--yes` deleted every non-protected item — so a single mis-classified `caution` entry could be removed without a human ever seeing it. Pass `--include-caution` to opt back into deleting `caution` items non-interactively. `protected` is never deleted either way; the interactive selector is unchanged.
 - Moving an artifact to the Trash across filesystems (external drive, separate partition) no longer fails. `os.Rename` returns `EXDEV` across volumes, which previously surfaced as an error; the cleaner now falls back to a recursive copy (preserving permissions and symlinks) followed by removing the original — and only removes the original after the copy fully succeeds, so a mid-copy failure leaves the source intact.
+- Scanning no longer enters mounted filesystems under the scan root (e.g. Xcode CoreDevice's `DeviceFS`): they are neither listed nor sized, and deleting an item that contains a skipped directory is refused (`clean --dry-run` marks it "would fail"). A full home scan went from ~26 minutes to about one minute.
+- pnpm store version folders and `.app` bundle contents are skipped, so a store's `next/dist` or an Electron app's bundled `node_modules` is no longer reported as a project artifact.
+- The `clean` selector scrolls to keep the cursor visible instead of printing every row, which desynced the cursor and checkboxes once results exceeded the terminal height.
 
 ## [0.1.0] - 2026-05-04
 
@@ -94,5 +106,4 @@ First tagged release. Entries are grouped by capability rather than commit.
 
 - No known issues. Report security concerns via [GitHub private vulnerability reporting](https://github.com/ohing504/devclean/security/advisories/new).
 
-[Unreleased]: https://github.com/ohing504/devclean/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/ohing504/devclean/releases/tag/v0.1.0
