@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"cmp"
-	"os"
+	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/ohing504/devclean/internal/model"
 	"github.com/ohing504/devclean/internal/output"
@@ -19,7 +17,7 @@ func newScanCmd() *cobra.Command {
 		status     string
 		minSizeStr string
 		sortBy     string
-		reverse    bool
+		ascending  bool
 		top        int
 		verbose    bool
 		jsonOutput bool
@@ -33,6 +31,9 @@ func newScanCmd() *cobra.Command {
   devclean scan --sort time --asc
   devclean scan --eco node --json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !model.IsSortKey(sortBy) {
+				return fmt.Errorf("invalid --sort %q: use size, time or name", sortBy)
+			}
 			minSize, err := parseMinSize(minSizeStr)
 			if err != nil {
 				return err
@@ -49,15 +50,20 @@ func newScanCmd() *cobra.Command {
 				return err
 			}
 
-			sortResults(results, sortBy, reverse)
+			sortResults(results, sortBy, ascending)
 
 			if jsonOutput {
-				return output.WriteJSON(os.Stdout, results)
+				if top > 0 {
+					results = model.TopProjects(results, top, model.CompareProjects(sortBy, ascending))
+				}
+				return output.WriteJSON(cmd.OutOrStdout(), results)
 			}
 
-			output.WriteTableWithOptions(os.Stdout, results, output.TableOptions{
-				TopN:    top,
-				Verbose: verbose,
+			output.WriteTableWithOptions(cmd.OutOrStdout(), results, output.TableOptions{
+				TopN:      top,
+				Verbose:   verbose,
+				SortBy:    sortBy,
+				Ascending: ascending,
 			})
 			return nil
 		},
@@ -68,8 +74,8 @@ func newScanCmd() *cobra.Command {
 	cmd.Flags().StringVar(&category, "category", "", "filter by category: cache, build, runtime, deps")
 	cmd.Flags().StringVar(&status, "status", "", "filter by status: active, recent, stale, dormant")
 	cmd.Flags().StringVar(&minSizeStr, "min-size", "", "skip artifacts smaller than this (e.g. 1MB, 500KB)")
-	cmd.Flags().StringVar(&sortBy, "sort", "size", "sort by: size, time, name")
-	cmd.Flags().BoolVar(&reverse, "asc", false, "sort ascending instead of descending")
+	cmd.Flags().StringVar(&sortBy, "sort", model.SortBySize, "sort by: size, time, name")
+	cmd.Flags().BoolVar(&ascending, "asc", false, "sort ascending: smallest or oldest first (name is always A→Z)")
 	cmd.Flags().IntVarP(&top, "top", "n", 0, "show only top N projects (0 = all)")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show all artifacts including small ones")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "JSON output for scripting and AI agents")
@@ -78,22 +84,5 @@ func newScanCmd() *cobra.Command {
 }
 
 func sortResults(results []model.ScanResult, sortBy string, ascending bool) {
-	// c orders newest/largest first, or path A→Z for "name"; --asc negates it.
-	// Equal keys fall back to path ascending in both directions so the order
-	// is the same on every run.
-	slices.SortFunc(results, func(a, b model.ScanResult) int {
-		var c int
-		switch sortBy {
-		case "time":
-			c = b.LastMod.Compare(a.LastMod)
-		case "name":
-			c = strings.Compare(a.Path, b.Path)
-		default: // "size"
-			c = cmp.Compare(b.Size, a.Size)
-		}
-		if ascending {
-			c = -c
-		}
-		return cmp.Or(c, strings.Compare(a.Path, b.Path))
-	})
+	slices.SortFunc(results, model.CompareResults(sortBy, ascending))
 }

@@ -4,12 +4,10 @@
 package model
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -274,17 +272,9 @@ func GroupByProject(results []ScanResult) []ProjectGroup {
 	var groups []ProjectGroup
 	for _, g := range m {
 		g.TotalSize = DedupedTotal(g.Items)
-		slices.SortFunc(g.Items, CompareSizeDescPath)
+		slices.SortFunc(g.Items, CompareResults(SortBySize, false))
 		groups = append(groups, *g)
 	}
-	slices.SortFunc(groups, func(a, b ProjectGroup) int {
-		return cmp.Or(cmp.Compare(b.TotalSize, a.TotalSize), strings.Compare(a.Path, b.Path))
-	})
+	slices.SortFunc(groups, CompareProjects(SortBySize, false))
 	return groups
-}
-
-// CompareSizeDescPath orders scan results by size descending, then by path
-// ascending, for use with slices.SortFunc.
-func CompareSizeDescPath(a, b ScanResult) int {
-	return cmp.Or(cmp.Compare(b.Size, a.Size), strings.Compare(a.Path, b.Path))
 }
