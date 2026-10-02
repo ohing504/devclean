@@ -32,6 +32,6 @@ go test ./internal/ -run TestGolden -update      # regenerate golden files after
 ## Commits and PRs
 
 - Conventional Commits, lowercase prefix (`feat:`, `fix:`, `docs:`, …); one change per PR, squash-merged.
-- PR titles are in English and state the user-visible change: release-please copies `feat`, `fix` and `perf` titles into `CHANGELOG.md` verbatim.
+- PR titles are in English and state the user-visible change: release-please copies `feat`, `fix`, `perf` and `revert` titles into `CHANGELOG.md` verbatim.
 - Releasing is merging the open release-please PR; do not push tags.
 - The user reviews through the PR: its body states what changed and why, and which SPEC lines and decision files changed.

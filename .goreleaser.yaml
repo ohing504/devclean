@@ -56,6 +56,8 @@ release:
   draft: false
   prerelease: auto
   mode: prepend
+  # A re-run after a partial upload replaces the assets already on the Release instead of failing.
+  replace_existing_artifacts: true
   header: |
     ## devclean {{ .Tag }}
 
