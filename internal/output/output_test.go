@@ -400,8 +400,9 @@ func TestWriteTable_MonorepoGrouping(t *testing.T) {
 	}
 }
 
-// TestWriteTableTieBreaksByName pins that ecosystems, projects and
-// sub-packages with equal sizes appear in name order on every run.
+// TestWriteTableTieBreaksByName pins that ecosystems and sub-packages with
+// equal sizes appear in name order on every run, and that -n cuts equal-size
+// projects by path. Project order itself is pinned in the model package.
 func TestWriteTableTieBreaksByName(t *testing.T) {
 	var results []model.ScanResult
 	for _, eco := range []model.Ecosystem{model.EcoRust, model.EcoGo, model.EcoNode, model.EcoPython} {
@@ -419,23 +420,28 @@ func TestWriteTableTieBreaksByName(t *testing.T) {
 	output.WriteTableWithOptions(&buf, results, output.TableOptions{TopN: 10})
 	out := buf.String()
 
-	inOrder := func(what string, names ...string) {
+	inOrder := func(t *testing.T, names ...string) {
 		t.Helper()
 		last := -1
 		for _, n := range names {
 			i := strings.Index(out, n)
 			if i < last {
-				t.Errorf("%s not in name order (%v); got:\n%s", what, names, out)
+				t.Errorf("not in name order (%v); got:\n%s", names, out)
 				return
 			}
 			last = i
 		}
 	}
-	inOrder("ecosystems", "● go", "● node", "● python", "● rust")
-	inOrder("projects", "/go/o\n", "/go/p\n", "/go/q\n")
-	inOrder("sub-packages", "    k (", "    l (", "    m (")
-	// TopN keeps the first 10 of 12 equal projects by path: rust/p and rust/q drop.
-	if strings.Contains(out, "/rust/p\n") || !strings.Contains(out, "/rust/o\n") {
-		t.Errorf("TopN should drop the last projects by path; got:\n%s", out)
-	}
+	t.Run("ecosystems", func(t *testing.T) {
+		inOrder(t, "● go", "● node", "● python", "● rust")
+	})
+	t.Run("sub-packages", func(t *testing.T) {
+		inOrder(t, "    k (", "    l (", "    m (")
+	})
+	t.Run("top N cut", func(t *testing.T) {
+		// TopN keeps the first 10 of 12 equal projects by path: rust/p and rust/q drop.
+		if strings.Contains(out, "/rust/p\n") || !strings.Contains(out, "/rust/o\n") {
+			t.Errorf("TopN should drop the last projects by path; got:\n%s", out)
+		}
+	})
 }

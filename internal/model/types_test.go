@@ -272,14 +272,20 @@ func TestGroupByProject_TieBreaksByPath(t *testing.T) {
 
 	groups := model.GroupByProject(results)
 
-	var got []string
-	for _, g := range groups {
-		got = append(got, g.Path)
-		if g.Items[0].Path > g.Items[1].Path {
-			t.Errorf("items of %s not ordered by path: %s, %s", g.Path, g.Items[0].Path, g.Items[1].Path)
+	t.Run("projects", func(t *testing.T) {
+		var got []string
+		for _, g := range groups {
+			got = append(got, g.Path)
 		}
-	}
-	if want := "/p/a /p/b /p/c /p/d /p/e"; strings.Join(got, " ") != want {
-		t.Errorf("project order = %v, want %s", got, want)
-	}
+		if want := "/p/a /p/b /p/c /p/d /p/e"; strings.Join(got, " ") != want {
+			t.Errorf("project order = %v, want %s", got, want)
+		}
+	})
+	t.Run("artifacts", func(t *testing.T) {
+		for _, g := range groups {
+			if g.Items[0].Path > g.Items[1].Path {
+				t.Errorf("items of %s not ordered by path: %s, %s", g.Path, g.Items[0].Path, g.Items[1].Path)
+			}
+		}
+	})
 }

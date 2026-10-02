@@ -4,10 +4,12 @@
 package model
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -263,19 +265,17 @@ func GroupByProject(results []ScanResult) []ProjectGroup {
 	}
 	var groups []ProjectGroup
 	for _, g := range m {
-		sort.Slice(g.Items, func(i, j int) bool {
-			if g.Items[i].Size != g.Items[j].Size {
-				return g.Items[i].Size > g.Items[j].Size
-			}
-			return g.Items[i].Path < g.Items[j].Path
-		})
+		slices.SortFunc(g.Items, CompareSizeDescPath)
 		groups = append(groups, *g)
 	}
-	sort.Slice(groups, func(i, j int) bool {
-		if groups[i].TotalSize != groups[j].TotalSize {
-			return groups[i].TotalSize > groups[j].TotalSize
-		}
-		return groups[i].Path < groups[j].Path
+	slices.SortFunc(groups, func(a, b ProjectGroup) int {
+		return cmp.Or(cmp.Compare(b.TotalSize, a.TotalSize), strings.Compare(a.Path, b.Path))
 	})
 	return groups
+}
+
+// CompareSizeDescPath orders scan results by size descending, then by path
+// ascending, for use with slices.SortFunc.
+func CompareSizeDescPath(a, b ScanResult) int {
+	return cmp.Or(cmp.Compare(b.Size, a.Size), strings.Compare(a.Path, b.Path))
 }

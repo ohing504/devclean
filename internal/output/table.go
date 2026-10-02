@@ -1,10 +1,12 @@
 package output
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"path/filepath"
-	"sort"
+	"slices"
+	"strings"
 
 	"github.com/ohing504/devclean/internal/model"
 	"github.com/ohing504/devclean/internal/pathutil"
@@ -150,11 +152,8 @@ func applyTopN(ecoGroups []ecoGroup, topN int) []ecoGroup {
 	}
 
 	// Already sorted by GroupByProject, but re-sort across ecosystems
-	sort.Slice(allProjects, func(i, j int) bool {
-		if allProjects[i].TotalSize != allProjects[j].TotalSize {
-			return allProjects[i].TotalSize > allProjects[j].TotalSize
-		}
-		return allProjects[i].Path < allProjects[j].Path
+	slices.SortFunc(allProjects, func(a, b model.ProjectGroup) int {
+		return cmp.Or(cmp.Compare(b.TotalSize, a.TotalSize), strings.Compare(a.Path, b.Path))
 	})
 
 	if topN < len(allProjects) {
@@ -182,11 +181,8 @@ func applyTopN(ecoGroups []ecoGroup, topN int) []ecoGroup {
 }
 
 func sortGroupsBySize(groups []ecoGroup) {
-	sort.Slice(groups, func(i, j int) bool {
-		if groups[i].totalSize != groups[j].totalSize {
-			return groups[i].totalSize > groups[j].totalSize
-		}
-		return groups[i].ecosystem < groups[j].ecosystem
+	slices.SortFunc(groups, func(a, b ecoGroup) int {
+		return cmp.Or(cmp.Compare(b.totalSize, a.totalSize), strings.Compare(a.ecosystem, b.ecosystem))
 	})
 }
 
@@ -216,21 +212,13 @@ func groupBySubPackage(items []model.ScanResult, projectRoot string) []subPackag
 
 	var result []subPackage
 	for _, sp := range m {
-		sort.Slice(sp.items, func(i, j int) bool {
-			if sp.items[i].Size != sp.items[j].Size {
-				return sp.items[i].Size > sp.items[j].Size
-			}
-			return sp.items[i].Path < sp.items[j].Path
-		})
+		slices.SortFunc(sp.items, model.CompareSizeDescPath)
 		result = append(result, *sp)
 	}
 
 	// Sort sub-packages by size desc
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].totalSize != result[j].totalSize {
-			return result[i].totalSize > result[j].totalSize
-		}
-		return result[i].name < result[j].name
+	slices.SortFunc(result, func(a, b subPackage) int {
+		return cmp.Or(cmp.Compare(b.totalSize, a.totalSize), strings.Compare(a.name, b.name))
 	})
 
 	return result

@@ -243,7 +243,7 @@ Table output groups results by: **ecosystem → project → sub-package → arti
 
 - Ecosystems sorted by total size descending (also after `-n` drops projects)
 - Projects sorted by total size descending within each ecosystem
-- Equal sizes (and equal `--sort` keys) are ordered by name/path ascending, so repeated runs print the same order
+- Equal sizes are ordered ascending by ecosystem name, project path, sub-package directory and artifact path, so repeated runs print the same order (`--json` breaks equal `--sort` keys by path ascending)
 - Each project shows: name, status badge, protected badge, total size, relative time
 - **Monorepo support**: artifacts grouped by git root. Sub-packages (apps/web, packages/ui) shown with headers and sizes
 - Default mode collapses small sub-packages (< 1MB) with "... and N more packages"
