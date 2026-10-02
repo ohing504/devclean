@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/ohing504/devclean/compare/v0.1.0...v0.2.0) (2026-10-02)
+
+
+### Added
+
+* clean 합계에서 하드링크 공유 블록을 한 번만 세고 pnpm node_modules에 pnpm store 공유 안내 추가 ([#37](https://github.com/ohing504/devclean/issues/37)) ([8d00469](https://github.com/ohing504/devclean/commit/8d00469c10ca741915a5cc8f96c51473a5a7dc1f))
+* **cleaner:** per-item delete strategy via DeleteMethod contract ([661aa44](https://github.com/ohing504/devclean/commit/661aa44202a52e60a0c5fa534e7e1efa2eeed408)), closes [#16](https://github.com/ohing504/devclean/issues/16)
+* **scanner:** add Android/Gradle ecosystem support ([b510f9c](https://github.com/ohing504/devclean/commit/b510f9cc429ffc5dc20dbb7fa6e618ac77e916f1))
+* **scanner:** add Docker disk image scanning (scan only) ([dcc0d1f](https://github.com/ohing504/devclean/commit/dcc0d1fd40ed64583836d683b272349c308f3948))
+* **scanner:** add Flutter/Dart ecosystem support ([f1a7154](https://github.com/ohing504/devclean/commit/f1a715457b24a9cb1d718dc09c5bb7f66f7764a8))
+* **scanner:** add Global Caches ecosystem ([c1afbe2](https://github.com/ohing504/devclean/commit/c1afbe234bc265025e46e6b24295c7c400f21f76))
+* **scanner:** global caches ×56, browser code-sign clones, LLM model stores ([17a9f97](https://github.com/ohing504/devclean/commit/17a9f9796466a92cb158c4ca4f8e42a4e4f8bdc0))
+* **scanner:** make the walk's no-follow symlink policy explicit ([297510e](https://github.com/ohing504/devclean/commit/297510e41876560bac2e4bf493457a6703f70e8d))
+* **scanner:** register global cache prune commands as vendor cleanups ([6b753db](https://github.com/ohing504/devclean/commit/6b753db5a2aa7da7aad40bfe37ea48a3783ae85e)), closes [#20](https://github.com/ohing504/devclean/issues/20)
+* **scanner:** sparse/clone-aware sizing with hard-link-deduped totals ([b39966c](https://github.com/ohing504/devclean/commit/b39966ceca981c3081436b4a1f85351236a53464))
+* **scanner:** 설치된 도구가 쓰는 전역 캐시를 caution으로 올리고 Homebrew를 brew cleanup으로 정리 ([#41](https://github.com/ohing504/devclean/issues/41)) ([5bedeaa](https://github.com/ohing504/devclean/commit/5bedeaa0a585e6d30b4b4d5d33739251a2adf854))
+* Xcode DerivedData에 원본 workspace 경로와 원본 삭제 안내를 표시하고 scan 표와 clean 화면의 항목 표시를 통일 ([#45](https://github.com/ohing504/devclean/issues/45)) ([619aae6](https://github.com/ohing504/devclean/commit/619aae6b85f8c05d3c00034e85fac3f00fa874c2))
+
+
+### Changed
+
+* **classifier:** parallelize git classification across a worker pool ([ff145df](https://github.com/ohing504/devclean/commit/ff145dfd78dfcc3edeeea8581b0f8b2ec6b39575))
+* **scanner:** parallelize per-artifact sizing across a worker pool ([425091b](https://github.com/ohing504/devclean/commit/425091b226409ac466d40d25ed93dd056901a173))
+* **scanner:** read each directory once in the walk engine ([77dc3cb](https://github.com/ohing504/devclean/commit/77dc3cb38619a1f409a4f55cd90868bd0429ea19))
+* **scanner:** size stat scanners via the shared parallel worker pool ([2f81ae3](https://github.com/ohing504/devclean/commit/2f81ae35a6bb146d55633b5884c9a65b2c25f245))
+
+
+### Fixed
+
+* --path가 상대 경로이거나 .으로 시작하는 폴더일 때 스캔 결과가 0건이던 문제 수정 ([#48](https://github.com/ohing504/devclean/issues/48)) ([4e98389](https://github.com/ohing504/devclean/commit/4e983896ab60a395af615129af9a417e00f2847e)), closes [#35](https://github.com/ohing504/devclean/issues/35)
+* **cleaner:** fall back to copy+remove when trashing across filesystems ([a876e37](https://github.com/ohing504/devclean/commit/a876e37a8b71130d52476c3e1064e9e97f0e8d53))
+* P0 hygiene batch — selector protected leak, vendor-cleanup scope, Ctrl-C ([def2bf0](https://github.com/ohing504/devclean/commit/def2bf0e82bc1c2d60280d430e25bcfee7e3e045))
+* pgrep 실행 확인이 실패하면 브라우저 code-sign clone을 safe 대신 caution으로 분류 ([#47](https://github.com/ohing504/devclean/issues/47)) ([f1691ee](https://github.com/ohing504/devclean/commit/f1691ee2d58e3b7ad3fda6172ec7ba65607c0a14)), closes [#39](https://github.com/ohing504/devclean/issues/39)
+* **scanner:** never offer irreplaceable data for deletion; gate --yes to safe ([caad061](https://github.com/ohing504/devclean/commit/caad061940657ccd0421773f2fe5b80872f755a0))
+* **scanner:** pnpm store와 .app 번들 내부를 삭제 후보에서 제외하고 walk 테스트를 전체 목록 비교로 통일 ([f758209](https://github.com/ohing504/devclean/commit/f758209db2d9f3e04c3970d988b39f965016b4a3))
+* **ui:** scroll tree selector viewport instead of dumping every row ([e93aa1d](https://github.com/ohing504/devclean/commit/e93aa1d1d139f9573eec24ae8cbf584542ef3dd1))
+* 마운트를 건너뛰도록 후보 찾기, 크기 계산, 삭제가 공통 순회 규칙을 쓰게 변경 ([#43](https://github.com/ohing504/devclean/issues/43)) ([7f5bfd0](https://github.com/ohing504/devclean/commit/7f5bfd07b5cea9f73ca7e8894df01b806eae1800))
+
 ## [Unreleased]
 
 ### Added
