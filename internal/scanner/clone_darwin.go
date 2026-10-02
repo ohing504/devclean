@@ -44,8 +44,11 @@ func fileExtents(path string, size int64) (xs []extent, ok bool) {
 		if n <= 0 {
 			return nil, false
 		}
-		// The last extent ends at EOF; round it to the block it occupies.
-		xs = append(xs, extent{dev, dev + (n+apfsBlock-1)/apfsBlock*apfsBlock})
+		// A hole (sparse range) has no device offset and holds no blocks. The
+		// last extent ends at EOF; round it to the block it occupies.
+		if dev >= 0 {
+			xs = append(xs, extent{dev, dev + (n+apfsBlock-1)/apfsBlock*apfsBlock})
+		}
 		off += n
 	}
 	return xs, true

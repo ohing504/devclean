@@ -82,7 +82,7 @@ A sparse artifact is shown as `8.6 GB (appears as 494.4 GB)` — real disk size,
 - `size` — what deleting the artifact frees: allocated blocks, sparse-aware, and on macOS clone-aware for browser code-sign copies and pnpm `node_modules` (blocks shared with files outside the artifact are not counted). Used for sorting and `--min-size`.
 - `allocated_size` — allocated blocks counted per file; present only when clone sharing makes `size` smaller.
 - `apparent_size` — logical size; omitted when zero. Much larger than `size` for sparse files.
-- `total_size` — sum of `size` with hard-linked blocks counted once.
+- `total_size` — sum of `size` with hard-linked blocks counted once, and APFS clones split across the listed artifacts counted once when all their clones are listed.
 
 Also present when known: `reason`, `project_root`, `label`, `recommendation`, `last_used_at`.
 
@@ -299,7 +299,7 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 | `coverage` | build | safe | Test coverage reports |
 | `.svelte-kit` | build | safe | SvelteKit cache |
 
-**pnpm-installed `node_modules`**: pnpm clones (macOS) or hard-links (Linux) pnpm store files into `node_modules` by default, so deleting it alone frees little; running `pnpm store prune` afterwards removes packages no project references. The result carries this note when `node_modules/.modules.yaml` (written by pnpm on install, as YAML or — pnpm 12 — JSON; `pnpm-lock.yaml` alone does not prove pnpm populated the folder) names a `storeDir` that exists on the same volume. On macOS its `size` then leaves out blocks shared with the store; hard-linked blocks (Linux) are counted once across artifacts as before. A store on another volume forces pnpm to copy, so no note is given. `packageImportMethod: copy` is not recorded in `.modules.yaml`, so such installs still get the note.
+**pnpm-installed `node_modules`**: pnpm clones (macOS) or hard-links (Linux) pnpm store files into `node_modules` by default, so deleting it alone frees little; running `pnpm store prune` afterwards removes packages no project references. The result carries this note when `node_modules/.modules.yaml` (written by pnpm on install, as YAML or — pnpm 12 — JSON; `pnpm-lock.yaml` alone does not prove pnpm populated the folder) names a `storeDir` that exists on the same volume. On macOS its `size` then leaves out blocks shared with the store or with other projects' `node_modules`; hard-linked blocks (Linux) are counted once across artifacts as before. A store on another volume forces pnpm to copy, so no note is given. `packageImportMethod: copy` is not recorded in `.modules.yaml`, so such installs still get the note.
 
 **Installed-package trees are excluded**: `node_modules`/`dist` inside a pnpm store or a macOS `.app` bundle are package content, not project output — see [decision](decisions/prune-non-project-trees.md).
 
@@ -528,7 +528,7 @@ Only genuine caches under those trees (e.g. `~/.cargo/registry`, `~/Library/Appl
 - **Matching**: a single `*.code_sign_clone` glob, not a per-browser catalog; the label carries the browser name (from the bundle ID) and the copy count.
 - **Safety follows run state**: `safe` only when `pgrep` reports no matching process (true zombies); `caution` while it runs (checked via `pgrep`, once per browser — the newest copy may be in use), when the `pgrep` check fails (missing or erroring), or when the bundle ID is unrecognized (run state unknowable).
 - **Scope**: the path lies outside home, so it is reported only when the scan root covers the home directory — a `--path` scan of a home subdirectory never surfaces system temp.
-- **Size**: the copies are APFS clones of each other and of the installed app (`/Applications` or `~/Applications`, `<process name>.app`), so `size` counts blocks shared between copies once and leaves out blocks the installed app uses. Measured: 12 copies, 11.3 GB counted per file, 0.76 GB freed by deleting them.
+- **Size**: the copies are APFS clones of each other and of the installed app (`/Applications` or `~/Applications`, named after the `<name>.app.bundle` inside the copies), so `size` counts blocks shared between copies once and leaves out blocks the installed app uses. Measured: 12 copies, 11.3 GB counted per file, 0.76 GB freed by deleting them.
 
 ### LLM Model Stores
 

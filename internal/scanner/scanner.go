@@ -174,6 +174,8 @@ type SizeStat struct {
 	// sizing ran: then blocks shared between the artifact's files count once
 	// and blocks also used by the clone source are left out.
 	Reclaim int64
+	// CloneShares are the pure clone groups only partly inside path.
+	CloneShares map[model.CloneKey]model.CloneShare
 }
 
 // cloneSizing turns on clone-aware sizing for one measure call. source, when
@@ -247,7 +249,7 @@ func measure(ctx context.Context, path string, clones *cloneSizing) SizeStat {
 				// A pure clone: refcnt files share all of these blocks.
 				g := groups[ci.id]
 				if g == nil {
-					g = &cloneGroup{refcnt: ci.refcnt, blocks: blocks}
+					g = &cloneGroup{refcnt: ci.refcnt, blocks: blocks, path: full, size: info.Size()}
 					groups[ci.id] = g
 				}
 				g.seen++
@@ -288,9 +290,24 @@ func measure(ctx context.Context, path string, clones *cloneSizing) SizeStat {
 	st.Reclaim = st.Disk
 	if clones != nil {
 		st.Reclaim = st.Disk - groupBlocks - extentBlocks
-		for _, g := range groups {
-			// Freed only when every clone of the group is inside path.
-			if g.seen >= g.refcnt {
+		for id, g := range groups {
+			switch {
+			case g.seen < g.refcnt:
+				// Clones outside path keep the blocks; a total over several
+				// artifacts may still hold them all.
+				if st.CloneShares == nil {
+					st.CloneShares = make(map[model.CloneKey]model.CloneShare)
+				}
+				st.CloneShares[model.CloneKey{Dev: rootDev, ID: id}] = model.CloneShare{Refcnt: g.refcnt, Seen: g.seen, Blocks: g.blocks}
+			case len(extents) > 0:
+				// A partly rewritten clone in path may share these blocks:
+				// count them through the extent union.
+				if xs, ok := fileExtents(g.path, g.size); ok {
+					extents = append(extents, xs...)
+				} else {
+					st.Reclaim += g.blocks
+				}
+			default:
 				st.Reclaim += g.blocks
 			}
 		}
@@ -311,18 +328,6 @@ func measure(ctx context.Context, path string, clones *cloneSizing) SizeStat {
 // Measure for callers that only need the disk figure.
 func DirSize(path string) int64 {
 	return Measure(path).Disk
-}
-
-// sized fills Size, ApparentSize and Links on r by measuring r.Path — the
-// single-result form of what the walk engine's sizePending does in bulk (the
-// stat-based scanners now defer to sizePending; this remains for callers that
-// size one result at a time).
-func sized(r model.ScanResult) model.ScanResult {
-	st := Measure(r.Path)
-	r.Size = st.Disk
-	r.ApparentSize = st.Apparent
-	r.Links = st.Links
-	return r
 }
 
 // ModTime returns the modification time of a path, or zero time on error.

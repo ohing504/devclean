@@ -36,7 +36,7 @@ Scanners report progress via context-attached callbacks: the walk batch reports 
 Three invariants keep the figures honest:
 
 - **Hard links** (`Nlink>1`) are counted once per artifact, keyed by `(dev, ino)`, so shared blocks net out across artifacts.
-- **APFS clones** in a `CloneAware` artifact count once, and not at all when a file outside the artifact (its `CloneSource`, or any file for a pure clone) shares them.
+- **APFS clones** in a `CloneAware` artifact count once, and not at all when a file outside the artifact (its `CloneSource`, or any file for a pure clone) shares them. Pure clone groups split across artifacts are kept in `CloneShares` so `DedupedTotal` counts them once when the results hold all their clones.
 - **Shared traversal**: sizing walks with `fstree`, so it counts what finding reports and deletion removes.
 
 Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through one shared bounded worker pool (`sizePending`, `min(NumCPU, 8)`) so the tree-walk I/O overlaps.

@@ -217,9 +217,11 @@ func TestDedupedTotalHardlinkAcrossArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a := sized(model.ScanResult{Path: store})
-	b := sized(model.ScanResult{Path: consumer})
-	results := []model.ScanResult{a, b}
+	results := []model.ScanResult{{Path: store}, {Path: consumer}}
+	if err := sizePending(context.Background(), results); err != nil {
+		t.Fatal(err)
+	}
+	a, b := results[0], results[1]
 
 	naive := a.Size + b.Size
 	total := model.DedupedTotal(results)

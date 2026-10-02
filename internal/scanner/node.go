@@ -17,20 +17,20 @@ var nodeWalkEcosystem = walkEcosystem{
 	Eco:     model.EcoNode,
 	Markers: []string{"package.json"},
 	Rules: []artifactRule{
-		{RelPath: "node_modules", Category: model.CatDeps, Safety: model.SafetySafe, Recommend: pnpmStoreNote, CloneSource: pnpmStoreClones}, // NPM dependencies
-		{RelPath: ".next", Category: model.CatBuild, Safety: model.SafetySafe},                                                               // Next.js build cache
-		{RelPath: ".nuxt", Category: model.CatBuild, Safety: model.SafetySafe},                                                               // Nuxt.js build cache
-		{RelPath: ".output", Category: model.CatBuild, Safety: model.SafetySafe},                                                             // Nuxt 3 output
-		{RelPath: "dist", Category: model.CatBuild, Safety: model.SafetySafe},                                                                // Build output
-		{RelPath: ".turbo", Category: model.CatCache, Safety: model.SafetySafe},                                                              // Turborepo cache
-		{RelPath: ".parcel-cache", Category: model.CatCache, Safety: model.SafetySafe},                                                       // Parcel cache
-		{RelPath: "coverage", Category: model.CatBuild, Safety: model.SafetySafe},                                                            // Test coverage reports
-		{RelPath: ".svelte-kit", Category: model.CatBuild, Safety: model.SafetySafe},                                                         // SvelteKit cache
+		{RelPath: "node_modules", Category: model.CatDeps, Safety: model.SafetySafe, Describe: describePnpmInstall}, // NPM dependencies
+		{RelPath: ".next", Category: model.CatBuild, Safety: model.SafetySafe},                                      // Next.js build cache
+		{RelPath: ".nuxt", Category: model.CatBuild, Safety: model.SafetySafe},                                      // Nuxt.js build cache
+		{RelPath: ".output", Category: model.CatBuild, Safety: model.SafetySafe},                                    // Nuxt 3 output
+		{RelPath: "dist", Category: model.CatBuild, Safety: model.SafetySafe},                                       // Build output
+		{RelPath: ".turbo", Category: model.CatCache, Safety: model.SafetySafe},                                     // Turborepo cache
+		{RelPath: ".parcel-cache", Category: model.CatCache, Safety: model.SafetySafe},                              // Parcel cache
+		{RelPath: "coverage", Category: model.CatBuild, Safety: model.SafetySafe},                                   // Test coverage reports
+		{RelPath: ".svelte-kit", Category: model.CatBuild, Safety: model.SafetySafe},                                // SvelteKit cache
 	},
 	ExtraRules: nodeExtraRules,
 }
 
-// pnpmStoreNote flags a node_modules installed by pnpm whose files likely
+// describePnpmInstall notes a node_modules installed by pnpm whose files likely
 // share disk blocks with the pnpm store: pnpm clones (macOS) or hard-links
 // (Linux) store files by default, so deleting node_modules alone frees little
 // until the store drops the now-unreferenced packages. pnpm records the store
@@ -38,19 +38,18 @@ var nodeWalkEcosystem = walkEcosystem{
 // not prove pnpm populated node_modules). A store on another volume can be
 // neither cloned nor hard-linked, so pnpm copies and no note is given; the
 // packageImportMethod=copy setting is not recorded and cannot be detected.
-func pnpmStoreNote(dir string) string {
+//
+// Such a node_modules is sized clone-aware. pnpm's clones are pure clones of
+// store files, which sizing recognizes without reading the store, so no clone
+// source is given: reading every store file's extents costs seconds per scan.
+func describePnpmInstall(dir string) artifactNote {
 	if pnpmStore(dir) == "" {
-		return ""
+		return artifactNote{}
 	}
-	return "files likely shared with pnpm store — run `pnpm store prune` after deleting to free space"
-}
-
-// pnpmStoreClones marks a pnpm-installed node_modules for clone-aware sizing
-// with the store as clone source: on macOS pnpm clones store files by default,
-// so deleting node_modules frees only what is not shared with the store.
-func pnpmStoreClones(dir string) (string, bool) {
-	store := pnpmStore(dir)
-	return store, store != ""
+	return artifactNote{
+		Recommendation: "files likely shared with pnpm store — run `pnpm store prune` after deleting to free space",
+		CloneAware:     true,
+	}
 }
 
 // pnpmStore returns the pnpm store a node_modules was installed from, or ""

@@ -142,9 +142,13 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 			}
 		}
 
+		appName := copiedAppName(m)
+		if appName == "" && known {
+			appName = browser.processName
+		}
 		source := ""
-		if known {
-			source = s.installedApp(browser.processName)
+		if appName != "" {
+			source = s.installedApp(appName)
 		}
 		out = append(out, model.ScanResult{
 			Path:           m,
@@ -163,8 +167,18 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 	return out
 }
 
+// copiedAppName returns the app name of the bundle the browser copied, from a
+// copy's "<name>.app.bundle" entry, or "" when no copy holds one.
+func copiedAppName(cloneDir string) string {
+	matches, _ := filepath.Glob(filepath.Join(cloneDir, "*", "*.app.bundle"))
+	if len(matches) == 0 {
+		return ""
+	}
+	return strings.TrimSuffix(filepath.Base(matches[0]), ".app.bundle")
+}
+
 // installedApp returns the installed bundle "<appName>.app" from AppDirs, or
-// "" when none is found. Each browser's app bundle is named after its process.
+// "" when none is found.
 func (s *GlobalScanner) installedApp(appName string) string {
 	for _, d := range s.AppDirs {
 		p := filepath.Join(d, appName+".app")

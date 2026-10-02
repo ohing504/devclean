@@ -21,11 +21,12 @@ import (
 //
 //   - A pure clone (all blocks shared) reports a clone ID and how many files
 //     share it. Its blocks count once, and only when every one of those files
-//     is inside the artifact; pnpm-installed files are of this kind.
+//     is inside the artifact; otherwise they go to CloneShares so a total over
+//     several artifacts can count them. pnpm-installed files are of this kind.
 //   - A file that may share some blocks has its physical extents read: blocks
 //     shared inside the artifact count once, and blocks the clone source (the
-//     installed app, the pnpm store) also uses are not counted. Browser
-//     code-sign copies are of this kind. The source is read only when needed.
+//     installed app) also uses are not counted. Browser code-sign copies are of
+//     this kind. The source is read only when such a file exists.
 //
 // Extents are compared as device byte ranges. Blocks held only by an APFS
 // snapshot are not seen: deleting them frees nothing until the snapshot goes.
@@ -43,7 +44,9 @@ type cloneInfo struct {
 type cloneGroup struct {
 	refcnt uint32
 	seen   uint32
-	blocks int64 // st_blocks of one member
+	blocks int64  // st_blocks of one member
+	path   string // one member, read for extents when needed
+	size   int64
 }
 
 // extent is a physical byte range [start, end) on a device.
@@ -176,6 +179,9 @@ func (s *cloneSource) load(ctx context.Context, path string) {
 		s.ok = false
 		return
 	}
+	// Files whose extents could not be read (unreadable, compressed) are
+	// missing from the source, so blocks a copy shares with them count as
+	// freed: the size errs toward the per-file block count, never below it.
 	s.extents = mergeExtents(xs)
 }
 

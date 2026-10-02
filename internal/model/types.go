@@ -140,6 +140,26 @@ type ScanResult struct {
 	// empty) also uses. Not serialized.
 	CloneAware  bool   `json:"-"`
 	CloneSource string `json:"-"`
+
+	// CloneShares holds the pure APFS clone groups only partly inside this
+	// artifact, left out of Size, so DedupedTotal can count a group's blocks
+	// once when the results together hold all of its clones. Not serialized.
+	CloneShares map[CloneKey]CloneShare `json:"-"`
+}
+
+// CloneKey identifies a group of pure APFS clones: files sharing all blocks
+// report the same clone ID, unique per device.
+type CloneKey struct {
+	Dev uint64
+	ID  uint64
+}
+
+// CloneShare is one artifact's part of a pure clone group: Refcnt files share
+// the group's Blocks, Seen of them are inside the artifact.
+type CloneShare struct {
+	Refcnt uint32
+	Seen   uint32
+	Blocks int64
 }
 
 // DeleteStrategy returns the effective delete strategy for this result:
@@ -186,7 +206,8 @@ func HumanSize(size int64) string {
 }
 
 // DedupedTotal returns the total disk usage across results with blocks shared
-// via hard links counted once. Each result's Size already counts its own
+// via hard links counted once, and with pure APFS clone groups split across
+// results counted once when the results together hold all of a group's clones. Each result's Size already counts its own
 // hard-linked inodes once (intra-artifact); this nets out inodes that recur
 // across artifacts — e.g. a pnpm store blob also hard-linked into a project's
 // node_modules — so the total reflects the space actually freed by deleting
@@ -199,7 +220,14 @@ func DedupedTotal(results []ScanResult) int64 {
 	}
 	var total int64
 	seen := make(map[InodeKey]struct{})
+	groups := make(map[CloneKey]CloneShare)
 	for _, r := range results {
+		for key, s := range r.CloneShares {
+			g := groups[key]
+			g.Refcnt, g.Blocks = s.Refcnt, s.Blocks
+			g.Seen += s.Seen
+			groups[key] = g
+		}
 		total += r.Size
 		for key, blocks := range r.Links {
 			// First artifact to hold this inode keeps it (already in r.Size);
@@ -209,6 +237,11 @@ func DedupedTotal(results []ScanResult) int64 {
 				continue
 			}
 			seen[key] = struct{}{}
+		}
+	}
+	for _, g := range groups {
+		if g.Seen >= g.Refcnt {
+			total += g.Blocks
 		}
 	}
 	return total
