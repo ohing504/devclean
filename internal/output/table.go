@@ -32,12 +32,12 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 	}
 
 	ecoGroups := groupByEcosystem(results)
-	sortGroupsBySize(ecoGroups)
 
 	// Apply top N at project level across all ecosystems
 	if opts.TopN > 0 {
 		ecoGroups = applyTopN(ecoGroups, opts.TopN)
 	}
+	sortGroupsBySize(ecoGroups)
 
 	var naiveTotal int64
 	var grandCount int
@@ -151,7 +151,10 @@ func applyTopN(ecoGroups []ecoGroup, topN int) []ecoGroup {
 
 	// Already sorted by GroupByProject, but re-sort across ecosystems
 	sort.Slice(allProjects, func(i, j int) bool {
-		return allProjects[i].TotalSize > allProjects[j].TotalSize
+		if allProjects[i].TotalSize != allProjects[j].TotalSize {
+			return allProjects[i].TotalSize > allProjects[j].TotalSize
+		}
+		return allProjects[i].Path < allProjects[j].Path
 	})
 
 	if topN < len(allProjects) {
@@ -180,7 +183,10 @@ func applyTopN(ecoGroups []ecoGroup, topN int) []ecoGroup {
 
 func sortGroupsBySize(groups []ecoGroup) {
 	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].totalSize > groups[j].totalSize
+		if groups[i].totalSize != groups[j].totalSize {
+			return groups[i].totalSize > groups[j].totalSize
+		}
+		return groups[i].ecosystem < groups[j].ecosystem
 	})
 }
 
@@ -211,14 +217,20 @@ func groupBySubPackage(items []model.ScanResult, projectRoot string) []subPackag
 	var result []subPackage
 	for _, sp := range m {
 		sort.Slice(sp.items, func(i, j int) bool {
-			return sp.items[i].Size > sp.items[j].Size
+			if sp.items[i].Size != sp.items[j].Size {
+				return sp.items[i].Size > sp.items[j].Size
+			}
+			return sp.items[i].Path < sp.items[j].Path
 		})
 		result = append(result, *sp)
 	}
 
 	// Sort sub-packages by size desc
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].totalSize > result[j].totalSize
+		if result[i].totalSize != result[j].totalSize {
+			return result[i].totalSize > result[j].totalSize
+		}
+		return result[i].name < result[j].name
 	})
 
 	return result

@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"cmp"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/ohing504/devclean/internal/model"
 	"github.com/ohing504/devclean/internal/output"
@@ -76,19 +78,25 @@ func newScanCmd() *cobra.Command {
 }
 
 func sortResults(results []model.ScanResult, sortBy string, ascending bool) {
+	// cmp < 0 puts a first in descending order; equal keys fall back to path
+	// ascending in both directions so the order is the same on every run.
 	sort.Slice(results, func(i, j int) bool {
-		var less bool
+		a, b := results[i], results[j]
+		var c int
 		switch sortBy {
 		case "time":
-			less = results[i].LastMod.After(results[j].LastMod)
+			c = b.LastMod.Compare(a.LastMod)
 		case "name":
-			less = results[i].Path < results[j].Path
+			c = strings.Compare(a.Path, b.Path)
 		default: // "size"
-			less = results[i].Size > results[j].Size
+			c = cmp.Compare(b.Size, a.Size)
 		}
 		if ascending {
-			return !less
+			c = -c
 		}
-		return less
+		if c != 0 {
+			return c < 0
+		}
+		return a.Path < b.Path
 	})
 }

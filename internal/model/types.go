@@ -238,6 +238,7 @@ type ProjectGroup struct {
 }
 
 // GroupByProject groups scan results by their project root, sorted by total size descending.
+// Equal sizes are ordered by path so the order is the same on every run.
 func GroupByProject(results []ScanResult) []ProjectGroup {
 	m := make(map[string]*ProjectGroup)
 	for _, r := range results {
@@ -263,12 +264,18 @@ func GroupByProject(results []ScanResult) []ProjectGroup {
 	var groups []ProjectGroup
 	for _, g := range m {
 		sort.Slice(g.Items, func(i, j int) bool {
-			return g.Items[i].Size > g.Items[j].Size
+			if g.Items[i].Size != g.Items[j].Size {
+				return g.Items[i].Size > g.Items[j].Size
+			}
+			return g.Items[i].Path < g.Items[j].Path
 		})
 		groups = append(groups, *g)
 	}
 	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].TotalSize > groups[j].TotalSize
+		if groups[i].TotalSize != groups[j].TotalSize {
+			return groups[i].TotalSize > groups[j].TotalSize
+		}
+		return groups[i].Path < groups[j].Path
 	})
 	return groups
 }

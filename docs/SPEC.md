@@ -241,8 +241,9 @@ Thresholds are fixed (making them configurable is planned — see [Configuration
 
 Table output groups results by: **ecosystem → project → sub-package → artifacts**
 
-- Ecosystems sorted by total size descending
+- Ecosystems sorted by total size descending (also after `-n` drops projects)
 - Projects sorted by total size descending within each ecosystem
+- Equal sizes (and equal `--sort` keys) are ordered by name/path ascending, so repeated runs print the same order
 - Each project shows: name, status badge, protected badge, total size, relative time
 - **Monorepo support**: artifacts grouped by git root. Sub-packages (apps/web, packages/ui) shown with headers and sizes
 - Default mode collapses small sub-packages (< 1MB) with "... and N more packages"

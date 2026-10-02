@@ -399,3 +399,43 @@ func TestWriteTable_MonorepoGrouping(t *testing.T) {
 		t.Errorf("expected 4 items in total, got:\n%s", out)
 	}
 }
+
+// TestWriteTableTieBreaksByName pins that ecosystems, projects and
+// sub-packages with equal sizes appear in name order on every run.
+func TestWriteTableTieBreaksByName(t *testing.T) {
+	var results []model.ScanResult
+	for _, eco := range []model.Ecosystem{model.EcoRust, model.EcoGo, model.EcoNode, model.EcoPython} {
+		for _, p := range []string{"q", "o", "p"} {
+			root := "/" + string(eco) + "/" + p
+			for _, sub := range []string{"m", "k", "l"} {
+				results = append(results, model.ScanResult{
+					Path: root + "/" + sub + "/build", Ecosystem: eco, Category: model.CatBuild,
+					ProjectRoot: root, Size: 2_000_000, Safety: model.SafetySafe, Activity: model.StatusDormant,
+				})
+			}
+		}
+	}
+	var buf bytes.Buffer
+	output.WriteTableWithOptions(&buf, results, output.TableOptions{TopN: 10})
+	out := buf.String()
+
+	inOrder := func(what string, names ...string) {
+		t.Helper()
+		last := -1
+		for _, n := range names {
+			i := strings.Index(out, n)
+			if i < last {
+				t.Errorf("%s not in name order (%v); got:\n%s", what, names, out)
+				return
+			}
+			last = i
+		}
+	}
+	inOrder("ecosystems", "● go", "● node", "● python", "● rust")
+	inOrder("projects", "/go/o\n", "/go/p\n", "/go/q\n")
+	inOrder("sub-packages", "    k (", "    l (", "    m (")
+	// TopN keeps the first 10 of 12 equal projects by path: rust/p and rust/q drop.
+	if strings.Contains(out, "/rust/p\n") || !strings.Contains(out, "/rust/o\n") {
+		t.Errorf("TopN should drop the last projects by path; got:\n%s", out)
+	}
+}
