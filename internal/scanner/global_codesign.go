@@ -13,14 +13,15 @@ import (
 )
 
 // RunState is the result of checking whether a browser process is running.
+// The zero value is RunStateUnknown, so an unset state never reads as safe.
 type RunState int
 
 const (
-	RunStateNotRunning RunState = iota
-	RunStateRunning
 	// RunStateUnknown means the check itself failed (pgrep missing or
 	// erroring), so the browser may be running.
-	RunStateUnknown
+	RunStateUnknown RunState = iota
+	RunStateNotRunning
+	RunStateRunning
 )
 
 // processRunState checks for a process named exactly name with pgrep -x. Only
@@ -44,10 +45,10 @@ func processRunState(name string) RunState {
 // check fails, or for bundle IDs we cannot map to a process name, the run state
 // is unknowable (caution).
 const (
-	codeSignCloneRec            = "zombie copies from killed browser processes (headless automation like lighthouse/puppeteer); the browser cleans these on next normal exit. Size may overstate if copies are APFS clones."
-	codeSignCloneRunningRec     = "browser is currently running — newest copy may be in use; it cleans up leftovers on normal exit"
-	codeSignCloneUnknownRec     = "unrecognized browser — cannot check whether it is running (newest copy may be in use); it cleans up leftovers on normal exit"
-	codeSignCloneCheckFailedRec = "cannot check whether the browser is running (pgrep failed) — newest copy may be in use; it cleans up leftovers on normal exit"
+	codeSignCloneRec             = "zombie copies from killed browser processes (headless automation like lighthouse/puppeteer); the browser cleans these on next normal exit. Size may overstate if copies are APFS clones."
+	codeSignCloneRunningRec      = "browser is currently running — newest copy may be in use; it cleans up leftovers on normal exit"
+	codeSignCloneUnrecognizedRec = "unrecognized browser — cannot check whether it is running (newest copy may be in use); it cleans up leftovers on normal exit"
+	codeSignCloneCheckFailedRec  = "cannot check whether the browser is running (pgrep failed) — newest copy may be in use; it cleans up leftovers on normal exit"
 )
 
 // codeSignCloneBrowser describes a known Chromium-family browser: the display
@@ -129,7 +130,7 @@ func (s *GlobalScanner) scanCodeSignClones(ctx context.Context, found int) []mod
 		// run state is unknowable; stay conservative.
 		name := bundleID
 		safety := model.SafetyCaution
-		rec := codeSignCloneUnknownRec
+		rec := codeSignCloneUnrecognizedRec
 		if known {
 			name = browser.displayName
 			switch runState(browser.processName) {
