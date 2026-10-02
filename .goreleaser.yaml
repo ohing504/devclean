@@ -47,31 +47,15 @@ checksum:
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
+# release-please writes the notes when it creates the Release; goreleaser adds the assets
+# and prepends the install header to those notes.
 changelog:
-  sort: asc
-  use: github
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
-      - "^ci:"
-      - "Merge pull request"
-      - "Merge branch"
-  groups:
-    - title: Features
-      regexp: "^.*feat[(\\w)]*:+.*$"
-      order: 0
-    - title: Bug fixes
-      regexp: "^.*fix[(\\w)]*:+.*$"
-      order: 1
-    - title: Other
-      order: 999
+  disable: true
 
 release:
   draft: false
   prerelease: auto
-  mode: replace
+  mode: prepend
   header: |
     ## devclean {{ .Tag }}
 
@@ -80,5 +64,3 @@ release:
     go install github.com/ohing504/devclean/cmd/devclean@{{ .Tag }}
     ```
     Or download a pre-built binary from the assets below and put it on your PATH.
-  footer: |
-    **Full Changelog**: https://github.com/ohing504/devclean/compare/{{ .PreviousTag }}...{{ .Tag }}
