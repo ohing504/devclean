@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `--path` with a relative path ending in `.` or `..` (e.g. `--path .`), or naming a directory that starts with `.`, reported "No items found" because the scan root was skipped as a hidden directory. The root is now always scanned, and relative paths are resolved to absolute ones, so results show absolute paths.
 - Browser Temp: when the `pgrep` run-state check fails (not installed or erroring), a known browser's code-sign clones are now `caution` instead of `safe`, so `clean --yes` no longer deletes a copy a running browser may be using.
 - Directories listed by several ecosystems (e.g. `coverage/` in a project with both `package.json` and `Gemfile`) were reported once per ecosystem, double-counting their size. They are now reported once, attributed to the first ecosystem in scanner order (node → rust → ruby → python → go) among those active in the scan — a full scan attributes a shared `coverage/` to node, while `--eco ruby` attributes it to ruby.
 - Scanners no longer walk into another ecosystem's matched artifact: `__pycache__` directories inside `node_modules` were previously reported separately by the Python scanner, and `node_modules` itself was fully traversed by four other scanners.

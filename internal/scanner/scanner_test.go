@@ -270,3 +270,28 @@ func TestRegistryScanWith_ContextCanceled(t *testing.T) {
 		t.Errorf("ScanWith(cancelled) error = %v, want context.Canceled", err)
 	}
 }
+
+// TestRegistry_ResolvesRelativeRoot runs a stat scanner through the registry
+// with a relative root: the registry resolves it, so the home-rooted store is
+// in scope and reported with an absolute path.
+func TestRegistry_ResolvesRelativeRoot(t *testing.T) {
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	ollama := filepath.Join(home, ".ollama", "models")
+	mustMkdir(t, ollama)
+	mustWriteFile(t, filepath.Join(ollama, "manifest"), make([]byte, 512))
+	t.Chdir(home)
+
+	reg := scanner.NewRegistry()
+	reg.Register(scanner.NewLLMScanner())
+	results, err := reg.ScanWith(context.Background(), ".", reg.All())
+	if err != nil {
+		t.Fatalf("ScanWith error: %v", err)
+	}
+	if len(results) != 1 || results[0].Path != ollama {
+		t.Errorf("expected only %s, got %+v", ollama, results)
+	}
+}

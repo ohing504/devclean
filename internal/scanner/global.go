@@ -289,15 +289,10 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 		return nil, nil
 	}
 
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		absRoot = root
-	}
-
 	// Like code-sign clones, the Homebrew item reaches outside home, so it
 	// needs a scan root covering home.
 	var homebrew <-chan homebrewScan
-	if isUnderRoot(home, absRoot) {
+	if isUnderRoot(home, root) {
 		if brew, err := s.lookPath("brew"); err == nil {
 			homebrew = s.startHomebrewScan(ctx, brew)
 		}
@@ -312,7 +307,7 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 		}
 
 		full := filepath.Join(home, c.relPath)
-		if !isUnderRoot(full, absRoot) || !isDir(full) {
+		if !isUnderRoot(full, root) || !isDir(full) {
 			continue
 		}
 		results = append(results, s.catalogResult(c, full))
@@ -324,7 +319,7 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 	// way as the home caches: include only when the scan root covers the
 	// home directory (the default scan root is ~). A --path scan of a home
 	// subdirectory must not surface system temp entries.
-	if runtime.GOOS == "darwin" && isUnderRoot(home, absRoot) {
+	if runtime.GOOS == "darwin" && isUnderRoot(home, root) {
 		results = append(results, s.scanCodeSignClones(ctx, len(results))...)
 	}
 

@@ -141,3 +141,25 @@ func TestWalkScan_SymlinkedRoot(t *testing.T) {
 		t.Errorf("results = %v, want %v", got, want)
 	}
 }
+
+// TestWalkScan_HiddenNamedRootIsScanned pins that the scan root is always
+// entered: the hidden-dir rule applies only below it, so a root named like a
+// hidden directory (".dotproj") is still scanned.
+func TestWalkScan_HiddenNamedRootIsScanned(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".dotproj")
+	cache := filepath.Join(root, ".mypy_cache")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "pyproject.toml"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	results, err := WalkScan(context.Background(), root, model.EcoPython)
+	if err != nil {
+		t.Fatalf("WalkScan error: %v", err)
+	}
+	if len(results) != 1 || results[0].Path != cache {
+		t.Errorf("expected only %s, got %+v", cache, results)
+	}
+}
