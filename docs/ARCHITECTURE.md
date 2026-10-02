@@ -1,6 +1,6 @@
 # Architecture
 
-Module boundaries and the contracts several modules keep together. User-visible behavior is in [SPEC.md](SPEC.md); package layout and type definitions are in the code.
+Module boundaries and the contracts several modules keep together. User-visible behavior is in [SPEC.md](SPEC.md); package responsibilities are in each package's doc comment (`go doc ./internal/<pkg>`), type definitions in the code.
 
 ## Pipeline
 

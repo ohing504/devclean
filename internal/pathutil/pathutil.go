@@ -1,3 +1,4 @@
+// Package pathutil holds path helpers shared across packages.
 package pathutil
 
 import (

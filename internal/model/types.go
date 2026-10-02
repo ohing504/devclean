@@ -1,3 +1,6 @@
+// Package model holds the domain types every stage shares: ecosystems,
+// categories, safety levels, scan results, artifact definitions and the
+// DeleteMethod execution contract.
 package model
 
 import (

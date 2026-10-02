@@ -226,7 +226,7 @@ Uses the most recent of three timestamps:
 2. Git last commit time (`git log -1 --format=%ct`)
 3. Project directory mtime
 
-Thresholds are configurable:
+Thresholds are fixed (making them configurable is planned — see [Configuration](#configuration)):
 
 | Status | Default |
 |--------|---------|
@@ -358,6 +358,7 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 | `.venv`, `venv` | deps | **caution** | Virtual environments — often hand-curated; not auto-deletable. See kondo PR #182 |
 
 **Notes**:
+
 - `dist`/`build` are intentionally **not** Python artifacts: those names collide with Node and would double-count for mixed projects. Users who need them deleted can do it manually or rely on the Node scanner.
 - Nested projects (e.g. monorepo with sub-packages each having `pyproject.toml`) attribute artifacts to the **deepest** matching project root.
 
@@ -372,8 +373,9 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 | `vendor` | deps | **caution** | Vendored modules (regenerate with `go mod vendor`) |
 
 **Notes**:
+
 - `vendor/` is `caution` because `go mod vendor` is an opt-in choice — devs who vendor often do so for offline builds, reproducibility, or supply-chain pinning. Regeneration requires network access plus the original `go.sum`.
-- Go's two big disk hogs — `~/.cache/go-build` (build cache) and `~/go/pkg/mod` (module cache) — are global, not per-project. They will be handled by the Global Caches scanner so they aren't double-attributed to every Go project on the machine.
+- Go's two big disk hogs — `~/.cache/go-build` (build cache) and `~/go/pkg/mod` (module cache) — are global, not per-project. They are reported by the Global Caches scanner so they aren't double-attributed to every Go project on the machine.
 
 ### Flutter/Dart
 
@@ -387,6 +389,7 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 | `.dart_tool` | build | safe | Build-runner / tooling state (regenerates on next build) |
 
 **Notes**:
+
 - `build/` and `.dart_tool/` are exactly the two directories `flutter clean` deletes; both regenerate on the next build.
 - **The Flutter SDK checkout is excluded.** The SDK is itself a git repo full of `pubspec.yaml` roots, and its `engine/src/build` / `engine/src/flutter/build` are committed GN build-system *source* trees — not build output. Matching `build` by name would offer real SDK source for deletion, and gitignore-aware protection misses it (committed-clean files are not `protected`). The scanner detects the SDK root by its invariant bootstrap layout (`bin/flutter` + `bin/internal/engine.version`, location-independent — never a hardcoded path) and skips the whole subtree. See [decision](decisions/prune-non-project-trees.md).
 - The global pub package cache `~/.pub-cache` (macOS/Linux default) is home-rooted and handled by the Global Caches scanner as `caution` — it is shared by every Flutter project and re-downloads on the next `flutter pub get`. The `PUB_CACHE` env override is not tracked; only the default location is scanned.
@@ -403,6 +406,7 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 | `.gradle` | cache | safe | Per-project Gradle cache (regenerates on next build) |
 
 **Notes**:
+
 - Because each module has its own marker, the single `build` rule reclaims every module's output (`build`, `app/build`, `feature/build`, ...) without enumerating module names.
 - **Scope is per-project only.** The shared Gradle user home (`~/.gradle/caches`), AVD images, and NDK / system-images are home-rooted and handled by the Global Caches scanner, not here — no duplicate registration.
 - **No SDK exclusion needed** (unlike Flutter): the Android SDK ships no `build.gradle`, so it never establishes a project context and nothing inside it is offered for deletion.
@@ -441,6 +445,7 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 `xcrun simctl` is best-effort — if Xcode CLI tools are not installed, simulator devices fall back to UUID display with no label/recommendation, but the rest of the scan still works.
 
 **Notes**:
+
 - `Archives` is `caution` because losing an archive means losing the ability to symbolicate crash reports for that release.
 - `CoreSimulator/Devices` is `caution` because it contains app installs, settings, and user data inside simulators currently in use.
 
@@ -457,6 +462,7 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 | `Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw` | runtime | protected | Docker Desktop VM disk image — holds every image, container and volume |
 
 **Notes**:
+
 - **Protected, never path-deleted.** The image is a single sparse file holding all Docker state; deleting it destroys every image, container and volume. It is reported as `protected` so the cleaner refuses to remove it (`Protected: true`).
 - **Sparse-aware sizing.** `Size` is the real on-disk usage (allocated blocks, `st_blocks×512`); `ApparentSize` is the image's declared size. A 460G-declared image reads as its real ~8G on disk — the shared sparse-aware `Measure` handles this with no Docker-specific code.
 - **Reclaiming space is deferred.** Space inside the image is reclaimed by Docker's own prune (`docker system prune`), which is destructive (removes images/containers/volumes/build cache). That vendor cleanup is gated behind a future `--include-destructive` flag and is **not** wired up yet — this scanner reports the image and its real footprint only.
@@ -539,7 +545,7 @@ Like the global caches, stores are home-rooted and reported only when the scan r
 
 ### Location
 
-```
+```text
 ~/.devclean/settings.json
 ```
 

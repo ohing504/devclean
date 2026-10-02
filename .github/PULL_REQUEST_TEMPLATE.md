@@ -4,7 +4,7 @@
 
 ## Spec and decisions
 
-<!-- Changed lines in docs/SPEC.md and added/changed files in docs/decisions/, or "none". -->
+<!-- Changed lines in docs/SPEC.md and added/changed files in docs/decisions/, or "none". A user-visible change also adds a CHANGELOG.md [Unreleased] entry. -->
 
 ## Real-world run
 

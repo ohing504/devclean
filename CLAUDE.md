@@ -10,9 +10,10 @@ go test -race -count=1 ./...                     # all tests (same as CI)
 go test ./internal/model/ -run TestHumanSize -v  # single test
 golangci-lint run ./...                          # lint
 golangci-lint fmt                                # format (gofumpt + goimports)
+go test ./internal/ -run TestGolden -update      # regenerate golden files after an intended output change
 ```
 
-- lefthook pre-commit runs lint + format on staged `.go` files.
+- lefthook pre-commit (enable once with `lefthook install`) runs lint + format on staged `.go` files.
 - CI (`.github/workflows/ci.yml`) runs build, `go test -race -count=1` and lint on Ubuntu and macOS.
 - Tool versions: `.tool-versions` (`mise install`; CI reads the same file). Go: `go.mod`.
 

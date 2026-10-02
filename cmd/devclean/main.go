@@ -1,3 +1,5 @@
+// Command devclean scans developer environments for reclaimable disk space
+// and cleans it up. It only wires the CLI; the commands live in internal/cli.
 package main
 
 import (
