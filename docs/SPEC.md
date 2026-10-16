@@ -209,7 +209,7 @@ The clean command uses a tree selector matching scan's output style:
 2. Tree selector: select projects/artifacts interactively
 3. Choose: Move to Trash / Permanently delete / Cancel
 4. Execute with per-artifact results — items with an attached `DeleteMethod` run it instead of path removal (see [Deletion Strategy](ARCHITECTURE.md#deletion-strategy))
-5. Summary: items cleaned and their total size, hard-linked blocks counted once (as in the selector footer and confirm prompt) — reported as `moved to Trash` for trash moves and `freed` for permanent deletes and `DeleteMethod` items (which run regardless of the trash/force choice)
+5. Summary: items cleaned and their total size, hard-linked blocks counted once (as in the selector footer and confirm prompt) — reported as `moved to Trash` for trash moves and `freed` for permanent deletes and `DeleteMethod` items (which run regardless of the trash/force choice). Trashed items keep their names; when some start with a dot, the summary says how many and how to show hidden files (Cmd+Shift+. in Finder), since a Trash holding only such items looks empty
 
 #### Trash across filesystems
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -260,6 +261,9 @@ func newCleanCmd() *cobra.Command {
 				summary += " (" + strings.Join(reclaimed, ", ") + ")"
 			}
 			fmt.Printf("\n%s\n", ui.SafeStyle.Render(summary))
+			if hint := hiddenInTrashHint(trashed); hint != "" {
+				fmt.Println(ui.DimStyle.Render(hint))
+			}
 			if failed > 0 {
 				fmt.Printf("%s\n", ui.ErrStyle.Render(fmt.Sprintf("%d items failed", failed)))
 			}
@@ -423,4 +427,27 @@ func runVendorCleanups(ecosystems []model.Ecosystem, dryRun bool) {
 		}
 		fmt.Printf("%s %s\n", header, ui.SafeStyle.Render("✔"))
 	}
+}
+
+// hiddenInTrashHint tells how to see trashed items whose name starts with a
+// dot: they keep their name in the Trash, where Finder hides them, so a Trash
+// holding only such items looks empty.
+func hiddenInTrashHint(trashed []model.ScanResult) string {
+	hidden := 0
+	for _, r := range trashed {
+		if strings.HasPrefix(filepath.Base(r.Path), ".") {
+			hidden++
+		}
+	}
+	if hidden == 0 {
+		return ""
+	}
+	show := "Cmd+Shift+. in Finder"
+	if runtime.GOOS != "darwin" {
+		show = "your file manager's show-hidden-files option"
+	}
+	if hidden == 1 {
+		return "1 of them starts with a dot and is hidden in the Trash; use " + show + " to see it"
+	}
+	return fmt.Sprintf("%d of them start with a dot and are hidden in the Trash; use %s to see them", hidden, show)
 }
