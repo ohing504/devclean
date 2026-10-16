@@ -17,7 +17,7 @@ go test ./internal/cleaner/ -run 'TestCopyTree_PreservesSymlinkAsLink' -v
 - A symlink's target is real content that lives on disk elsewhere, so following it would double-count that space and inflate the reported reclaimable total.
 - Deleting a symlinked artifact reclaims only the link (bytes) while risking a target shared by other projects.
 - No-follow means symlink cycles can never be walked, so no separate cycle guard is needed.
-- The reclaimable content behind these links is surfaced instead by the Global Caches scanner (e.g. the pnpm store) and hardlink-aware sizing. Hugging Face shared blobs are sized and deleted through their reference manifests, not by following links ([hf-shared-blobs.md](hf-shared-blobs.md)).
+- The reclaimable content behind these links is surfaced instead by the Global Caches scanner (e.g. the pnpm store) and hardlink-aware sizing. Hugging Face shared blobs: [hf-shared-blobs.md](hf-shared-blobs.md).
 
 ## Rejected alternatives
 

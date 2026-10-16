@@ -120,8 +120,6 @@ func (s *LLMScanner) Scan(ctx context.Context, root string) ([]model.ScanResult,
 	if err := sizePending(ctx, results); err != nil {
 		return results, err
 	}
-	// A hub with a shared blob store keeps model files outside the model
-	// directories, so add them to the sizes after the directory walk.
 	if store, ok := openHFStore(hfRoot); ok && isUnderRoot(hfRoot, root) {
 		results = addHFBlobs(results, store)
 	}

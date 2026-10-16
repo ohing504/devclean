@@ -141,14 +141,12 @@ type ScanResult struct {
 	// CloneShares are pure clone groups only partly inside this artifact, left
 	// out of Size; DedupedTotal counts one once the results hold all its clones.
 	CloneShares map[CloneKey]CloneShare `json:"-"`
-	// BlobShares are shared-store files this artifact references together
-	// with others (Hugging Face shared blobs), keyed by inode and left out of
-	// Size; DedupedTotal counts one once the results hold all its references.
+	// BlobShares are Hugging Face shared blobs other repos also reference,
+	// left out of Size like CloneShares.
 	BlobShares map[InodeKey]CloneShare `json:"-"`
 
-	// Release runs after Path is removed and deletes, through remove (trash
-	// or permanent, as Path was), content outside Path that the removal left
-	// unreferenced: a Hugging Face model's shared blobs. Nil means nothing.
+	// Release runs after Path is removed, deleting through remove what the
+	// removal left unreferenced (a Hugging Face model's shared blobs).
 	Release func(ctx context.Context, remove func(path string) error) error `json:"-"`
 }
 

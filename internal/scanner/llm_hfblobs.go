@@ -13,13 +13,8 @@ import (
 	"github.com/ohing504/devclean/internal/model"
 )
 
-// Hugging Face hub's shared blob store (huggingface_hub
-// utils/_shared_blobs.py): payloads live at <hub>/blobs/<2 hex>/<xet hash> as
-// regular files, each repo's blobs/<etag> is a relative symlink to one, and
-// <hash>.refs lists those symlinks relative to <hub>. A repo folder holds only
-// the links, so its size and its deletion both have to go through the store.
-// The rules below mirror huggingface_hub's: the manifest is checked against
-// the filesystem, and a missing or unreadable manifest never permits deletion.
+// Hugging Face shared blob store, read with huggingface_hub's rules
+// (utils/_shared_blobs.py): see docs/decisions/hf-shared-blobs.md.
 
 const (
 	hfStoreMarker        = ".huggingface-shared-blobs"
@@ -43,8 +38,7 @@ type hfStore struct {
 	dir string // <hub>/blobs
 }
 
-// openHFStore returns hub's shared blob store, or false when hub has none (an
-// older huggingface_hub, or shared blobs disabled).
+// openHFStore returns hub's shared blob store, or false when hub has none.
 func openHFStore(hub string) (hfStore, bool) {
 	s := hfStore{hub: hub, dir: filepath.Join(hub, "blobs")}
 	if info, err := os.Lstat(s.dir); err != nil || !info.IsDir() {
@@ -80,9 +74,8 @@ func (s hfStore) payloads() []string {
 	return out
 }
 
-// references returns the manifest entries of payload that are still repo
-// blob symlinks pointing at it, relative to the hub. ok is false when the
-// manifest is missing or unreadable.
+// references returns payload's manifest entries whose symlink still points
+// at it; ok is false when the manifest is unreadable.
 func (s hfStore) references(payload string) (refs []string, ok bool) {
 	manifest := payload + hfManifestSuffix
 	if !isRegularFile(manifest) {
@@ -108,8 +101,7 @@ func (s hfStore) references(payload string) (refs []string, ok bool) {
 	return refs, true
 }
 
-// target returns the payload a repo blob symlink points at, or "" when link
-// is not a symlink into the store.
+// target returns the payload link points at, or "" if none.
 func (s hfStore) target(link string) string {
 	info, err := os.Lstat(link)
 	if err != nil || info.Mode()&fs.ModeSymlink == 0 {
@@ -133,9 +125,7 @@ func (s hfStore) target(link string) string {
 	return filepath.Join(s.dir, prefix, hash)
 }
 
-// sweep deletes payload and its manifest through remove once no valid
-// reference remains, holding huggingface_hub's lock for that payload. A
-// payload whose lock is held (a download in progress) is left in place.
+// sweep deletes payload and its manifest once nothing references it.
 func (s hfStore) sweep(payload string, remove func(string) error) error {
 	unlock, ok := lockHFPayload(payload)
 	if !ok {
@@ -152,9 +142,8 @@ func (s hfStore) sweep(payload string, remove func(string) error) error {
 	return remove(payload + hfManifestSuffix)
 }
 
-// lockHFPayload takes the flock huggingface_hub takes on <payload>.lock
-// before publishing, linking or collecting it. It does not wait: false means
-// the lock is held or could not be taken.
+// lockHFPayload takes huggingface_hub's flock on <payload>.lock without
+// waiting; false means it is held.
 func lockHFPayload(payload string) (unlock func(), ok bool) {
 	f, err := os.OpenFile(payload+hfLockSuffix, os.O_WRONLY|os.O_CREATE|syscall.O_NOFOLLOW, 0o666)
 	if err != nil {
@@ -170,10 +159,8 @@ func lockHFPayload(payload string) (unlock func(), ok bool) {
 	}, true
 }
 
-// addHFBlobs folds the shared store into results already sized: each model
-// gains the payloads only it references, shares the payloads it references
-// with other repos through BlobShares, and on deletion sweeps them. Payloads
-// no repo references become one result appended to results.
+// addHFBlobs adds the store's payloads to the sized model results and
+// appends one result for the payloads no repo references.
 func addHFBlobs(results []model.ScanResult, s hfStore) []model.ScanResult {
 	models := make(map[string]*model.ScanResult) // repo dir name → its result
 	for i := range results {
@@ -264,8 +251,7 @@ func addHFBlobs(results []model.ScanResult, s hfStore) []model.ScanResult {
 	})
 }
 
-// isRegularFile reports whether path is a regular file, without following a
-// symlink.
+// isRegularFile reports whether path is a regular file (not via a symlink).
 func isRegularFile(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode().IsRegular()
