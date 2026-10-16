@@ -8,7 +8,7 @@ Module boundaries and the contracts several modules keep together. User-visible 
 Scan → Classify → Filter/Sort → Output/Clean
 ```
 
-devclean is a monolithic Go CLI binary: every ecosystem scanner is built in, with no external plugins.
+devclean is a monolithic Go CLI binary: every ecosystem scanner is built in, with no external scanner plugins.
 
 1. **Scan**: Registry batches all project (walk-based) scanners into a single filesystem pass, then runs stat scanners (fixed paths) sequentially. Real-time progress via spinner.
 2. **Classify**: activity status + gitignore-aware protection ([SPEC](SPEC.md#classification))
@@ -106,6 +106,10 @@ Implemented commands: [SPEC](SPEC.md#vendor-cleanups). Natural future fits: Dock
 ## Classification
 
 Classification forks git per repo (`git rev-parse` to resolve roots, `git status` + `git log` for protection and last-commit time, `git check-ignore` per dirty root). These run across a bounded worker pool (`min(NumCPU, 8)`) — root resolution over distinct project dirs, then git info over distinct roots, then check-ignore over dirty roots — instead of serially. As with sizing, the win is overlapping the forks, not replacing them; results are applied serially afterwards so output stays deterministic regardless of scheduling.
+
+## Claude Code plugin
+
+`plugins/devclean/` is a Claude Code plugin holding one skill; the repository root's `.claude-plugin/marketplace.json` lists it ([decision](decisions/claude-code-plugin.md)). The skill drives the installed binary through `scan --json` and `clean --item … --yes`, so it depends on the flags, JSON fields and safety gates in SPEC.
 
 ## Adding an ecosystem
 

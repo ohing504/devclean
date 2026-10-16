@@ -1,0 +1,14 @@
+{
+  "name": "devclean",
+  "description": "devclean plugin for Claude Code",
+  "owner": {
+    "name": "Youngsup Oh"
+  },
+  "plugins": [
+    {
+      "name": "devclean",
+      "source": "./plugins/devclean",
+      "description": "Find reclaimable disk space in developer environments and clean the artifacts you approve, using the devclean CLI"
+    }
+  ]
+}

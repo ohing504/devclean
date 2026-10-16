@@ -1,0 +1,10 @@
+{
+  "name": "devclean",
+  "description": "Find reclaimable disk space in developer environments and clean the artifacts you approve, using the devclean CLI",
+  "author": {
+    "name": "Youngsup Oh"
+  },
+  "homepage": "https://github.com/ohing504/devclean",
+  "repository": "https://github.com/ohing504/devclean",
+  "license": "MIT"
+}
