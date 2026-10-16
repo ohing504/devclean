@@ -109,6 +109,9 @@ devclean clean --eco node --force --yes
 # Skip artifacts smaller than 50 MB
 devclean clean --eco node --min-size 50MB
 
+# Clean only the named artifact(s)
+devclean clean --eco global --item ~/.npm --yes --include-caution
+
 # Also run ecosystem-native cleanup commands (e.g. xcrun simctl delete unavailable)
 devclean clean --eco xcode --vendor-cleanup --yes
 ```
@@ -124,6 +127,25 @@ artifacts crowd out the real targets. Sizes use SI/IEC suffixes:
 - Plain integer = bytes
 
 `devclean scan --min-size 100MB` keeps only artifacts ≥ 100 MB.
+
+#### `--item`
+
+`clean --item <path>` keeps only the scanned artifact at that path, so a
+non-interactive run can target one artifact the other filters cannot separate.
+Repeat the flag for more; a comma is part of the path. Paths are the `path`
+field of `scan --json`; a leading `~/` is expanded and relative paths resolve
+against the working directory. Other filters and the `--yes` safety gate still
+apply: a `caution` item needs `--include-caution`, and a `protected` item is
+never deleted.
+
+`clean` exits with status 1 before deleting anything when any `--item` matches
+no scanned artifact, or when `--yes` would leave a named artifact uncleaned
+(each is listed with its reason):
+
+```text
+Error: --item matched no scanned artifact: /Users/me/.npmx (artifact paths are the "path" field of 'devclean scan --json'; --eco, --path, --status, --safe and --min-size also narrow what is scanned)
+Error: --item artifacts not cleaned with --yes: /Users/me/app/.venv (caution, pass --include-caution)
+```
 
 #### Non-interactive safety (`--yes` / `--include-caution`)
 
@@ -144,7 +166,7 @@ Without `--yes`, `clean` needs a terminal on stdin to prompt. When stdin is not 
 terminal it exits with status 1 before scanning:
 
 ```text
-Error: stdin is not a terminal: pass --yes to clean without prompts (add --dry-run to preview)
+Error: stdin is not a terminal: pass --yes to clean without prompts, or --dry-run --yes to preview
 ```
 
 #### Vendor Cleanups
