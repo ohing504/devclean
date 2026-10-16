@@ -1,9 +1,14 @@
 package scanner_test
 
 import (
+	"bytes"
 	"context"
+	"maps"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -112,4 +117,212 @@ func labels(results []model.ScanResult) []string {
 		out[i] = r.Label
 	}
 	return out
+}
+
+// hfHub builds a Hugging Face hub cache with a shared blob store the way
+// huggingface_hub lays it out: payloads under blobs/<2 hex>/<hash>, repo
+// blobs/<etag> symlinks to them, and a <hash>.refs manifest per payload.
+type hfHub struct {
+	t   *testing.T
+	dir string
+}
+
+func newHFHub(t *testing.T, home string) hfHub {
+	t.Helper()
+	dir := filepath.Join(home, ".cache", "huggingface", "hub")
+	mustMkdir(t, filepath.Join(dir, "blobs"))
+	mustWriteFile(t, filepath.Join(dir, "blobs", ".huggingface-shared-blobs"), []byte("1\n"))
+	return hfHub{t: t, dir: dir}
+}
+
+// payload writes a store payload whose hash is c repeated and returns its path.
+func (h hfHub) payload(c string, size int) string {
+	h.t.Helper()
+	hash := strings.Repeat(c, 64)
+	p := filepath.Join(h.dir, "blobs", hash[:2], hash)
+	mustMkdir(h.t, filepath.Dir(p))
+	mustWriteFile(h.t, p, bytes.Repeat([]byte{1}, size))
+	return p
+}
+
+// link points repo's blobs/<etag> at payload and, with manifest, lists it in
+// the payload's .refs.
+func (h hfHub) link(repo, etag, payload string, manifest bool) {
+	h.t.Helper()
+	blobs := filepath.Join(h.dir, repo, "blobs")
+	mustMkdir(h.t, blobs)
+	rel, err := filepath.Rel(blobs, payload)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if err := os.Symlink(rel, filepath.Join(blobs, etag)); err != nil {
+		h.t.Fatal(err)
+	}
+	if !manifest {
+		return
+	}
+	f, err := os.OpenFile(payload+".refs", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o666)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(repo + "/blobs/" + etag + "\n"); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+func diskBlocks(t *testing.T, path string) int64 {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Sys().(*syscall.Stat_t).Blocks * 512
+}
+
+func exists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+func scanLLM(t *testing.T, home string) map[string]model.ScanResult {
+	t.Helper()
+	results, err := scanner.NewLLMScanner().Scan(t.Context(), home)
+	if err != nil {
+		t.Fatalf("Scan error: %v", err)
+	}
+	byLabel := make(map[string]model.ScanResult, len(results))
+	for _, r := range results {
+		byLabel[r.Label] = r
+	}
+	return byLabel
+}
+
+// TestLLMScanner_HFSharedBlobSizes: a model's size includes the payloads only
+// it references; a payload two models share counts once in the total, and
+// only when both are present; a payload a dataset also references is never
+// counted; payloads no repo references form one result of their own.
+func TestLLMScanner_HFSharedBlobSizes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hub := newHFHub(t, home)
+
+	own := hub.payload("a", 64*1024)
+	shared := hub.payload("b", 32*1024)
+	withDataset := hub.payload("c", 16*1024)
+	orphan := hub.payload("d", 8*1024)
+	hub.link("models--o--m1", "e1", own, true)
+	hub.link("models--o--m1", "e2", shared, true)
+	hub.link("models--o--m2", "e2", shared, true)
+	hub.link("models--o--m2", "e3", withDataset, true)
+	hub.link("datasets--o--d", "e3", withDataset, true)
+	mustWriteFile(t, orphan+".refs", nil)
+
+	got := scanLLM(t, home)
+	m1, m2 := got["o/m1"], got["o/m2"]
+
+	if want := scanner.Measure(m1.Path).Disk + diskBlocks(t, own); m1.Size != want {
+		t.Errorf("m1 size = %d, want its directory plus its own payload = %d", m1.Size, want)
+	}
+	if want := scanner.Measure(m2.Path).Disk; m2.Size != want {
+		t.Errorf("m2 size = %d, want its directory only = %d", m2.Size, want)
+	}
+	if got := model.DedupedTotal([]model.ScanResult{m1}); got != m1.Size {
+		t.Errorf("m1 alone totals %d, want %d: the shared payload stays while m2 references it", got, m1.Size)
+	}
+	if got, want := model.DedupedTotal([]model.ScanResult{m1, m2}), m1.Size+m2.Size+diskBlocks(t, shared); got != want {
+		t.Errorf("m1+m2 total = %d, want %d: shared payload once, dataset payload never", got, want)
+	}
+
+	o, ok := got["Hugging Face unreferenced shared blobs"]
+	if !ok {
+		t.Fatalf("expected an unreferenced shared blobs result, got labels %v", slices.Collect(maps.Keys(got)))
+	}
+	if o.Size != diskBlocks(t, orphan) {
+		t.Errorf("unreferenced blobs size = %d, want %d", o.Size, diskBlocks(t, orphan))
+	}
+	if o.DeleteStrategy() != model.DeleteKindAPI {
+		t.Errorf("unreferenced blobs delete strategy = %s, want api (the store directory itself must stay)", o.DeleteStrategy())
+	}
+}
+
+// TestLLMScanner_HFReleaseSweepsUnreferencedPayloads: after a model folder is
+// removed, its Release deletes the payloads and manifests nothing references
+// any more and leaves the rest — still referenced, or with no manifest.
+func TestLLMScanner_HFReleaseSweepsUnreferencedPayloads(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hub := newHFHub(t, home)
+
+	own := hub.payload("a", 4096)
+	shared := hub.payload("b", 4096)
+	unlisted := hub.payload("c", 4096)
+	hub.link("models--o--m1", "e1", own, true)
+	hub.link("models--o--m1", "e2", shared, true)
+	hub.link("models--o--m1", "e3", unlisted, false)
+	hub.link("models--o--m2", "e2", shared, true)
+
+	got := scanLLM(t, home)
+	release := func(r model.ScanResult) {
+		t.Helper()
+		if err := os.RemoveAll(r.Path); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.Release(t.Context(), os.RemoveAll); err != nil {
+			t.Fatalf("Release: %v", err)
+		}
+	}
+
+	release(got["o/m1"])
+	if exists(own) || exists(own+".refs") {
+		t.Error("m1's own payload and manifest should be deleted with m1")
+	}
+	if !exists(shared) {
+		t.Error("shared payload must stay while m2 references it")
+	}
+	if !exists(unlisted) {
+		t.Error("a payload without a manifest must never be deleted")
+	}
+
+	release(got["o/m2"])
+	if exists(shared) || exists(shared+".refs") {
+		t.Error("shared payload should be deleted once no model references it")
+	}
+}
+
+// TestLLMScanner_HFOrphanDelete: deleting the unreferenced blobs result
+// removes those payloads and manifests, but leaves a payload whose
+// huggingface_hub lock is held (a download in progress).
+func TestLLMScanner_HFOrphanDelete(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hub := newHFHub(t, home)
+
+	free := hub.payload("a", 4096)
+	locked := hub.payload("b", 4096)
+	mustWriteFile(t, free+".refs", nil)
+	mustWriteFile(t, locked+".refs", nil)
+
+	lock, err := os.OpenFile(locked+".lock", os.O_WRONLY|os.O_CREATE, 0o666)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	o := scanLLM(t, home)["Hugging Face unreferenced shared blobs"]
+	if err := o.Delete.Run(t.Context()); err != nil {
+		t.Fatalf("Delete.Run: %v", err)
+	}
+	if exists(free) || exists(free+".refs") {
+		t.Error("unreferenced payload and manifest should be deleted")
+	}
+	if !exists(locked) {
+		t.Error("a payload whose lock is held must be left in place")
+	}
+	if !exists(hub.dir + "/blobs/.huggingface-shared-blobs") {
+		t.Error("the store marker must stay")
+	}
 }

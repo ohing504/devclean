@@ -364,3 +364,50 @@ func TestRefusesUncheckedTree(t *testing.T) {
 		}
 	}
 }
+
+// TestClean_ReleaseRunsAfterPathRemoval: an item's Release runs once its path
+// is gone and removes what it is handed the same way the path was removed —
+// here, into the Trash.
+func TestClean_ReleaseRunsAfterPathRemoval(t *testing.T) {
+	dir := t.TempDir()
+	trash := filepath.Join(dir, "trash")
+	target := filepath.Join(dir, "models--o--m")
+	extra := filepath.Join(dir, "blob")
+	mustMkdir(t, target)
+	mustWriteFile(t, extra, []byte("x"))
+
+	result := model.ScanResult{
+		Path:   target,
+		Safety: model.SafetySafe,
+		Release: func(_ context.Context, remove func(string) error) error {
+			if _, err := os.Lstat(target); !os.IsNotExist(err) {
+				t.Error("Release ran before the path was removed")
+			}
+			return remove(extra)
+		},
+	}
+	if err := cleaner.New(cleaner.Options{TrashDir: trash}).Clean(t.Context(), result); err != nil {
+		t.Fatalf("Clean error: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(trash, "blob")); err != nil {
+		t.Errorf("expected the released file in the trash: %v", err)
+	}
+}
+
+// TestClean_DryRunSkipsRelease: dry-run removes nothing, Release included.
+func TestClean_DryRunSkipsRelease(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "models--o--m")
+	mustMkdir(t, target)
+
+	result := model.ScanResult{
+		Path:   target,
+		Safety: model.SafetySafe,
+		Release: func(context.Context, func(string) error) error {
+			t.Error("Release ran in dry-run")
+			return nil
+		},
+	}
+	if err := cleaner.New(cleaner.Options{DryRun: true}).Clean(t.Context(), result); err != nil {
+		t.Fatalf("Clean error: %v", err)
+	}
+}

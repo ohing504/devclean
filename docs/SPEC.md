@@ -568,7 +568,15 @@ Local LLM model stores at fixed home paths. Model weights dominate these directo
 | `~/.ollama/models` | store as a whole | `Ollama model store` |
 | `~/.llamafile` | store as a whole | `llamafile store` |
 
-LM Studio and Hugging Face hub lay each model out as its own directory, so they are reported per model — delete only the models you no longer use. Ollama stores weights as content-addressed blobs shared across models, so it is reported as one entry; to remove individual models, prefer `ollama rm <model>` (noted in `recommendation`).
+LM Studio and Hugging Face hub lay each model out as its own directory, so they are reported per model — delete only the models you no longer use.
+
+**Hugging Face shared blobs**: when the hub has a shared blob store (`hub/blobs/.huggingface-shared-blobs`), model files live in `hub/blobs/<2 hex>/<hash>` and the model directory holds only symlinks to them; each payload's `<hash>.refs` lists the repo symlinks that use it ([decision](decisions/hf-shared-blobs.md)).
+
+- **Size**: a model's `size` adds the payloads only it references. A payload several models reference counts once in totals, only when all of them are listed; one a dataset or space also references is not counted.
+- **Delete**: after the model directory is removed, payloads with no valid reference left are removed with their `.refs`, the same way (Trash or permanent). A payload with no readable `.refs`, or whose lock (`<hash>.lock`) huggingface_hub holds, is left in place.
+- **Unreferenced blobs**: payloads no repo references (left when a repo directory was deleted directly) form one result, `Hugging Face unreferenced shared blobs`, deleted permanently by an `api` method under the same rules.
+
+Ollama stores weights as content-addressed blobs shared across models, so it is reported as one entry; to remove individual models, prefer `ollama rm <model>` (noted in `recommendation`).
 
 **Last used**: each result carries `last_used_at` (JSON) / a dim "last used …" hint (table), derived from the model directory's mtime (store mtime for Ollama/llamafile) — a rough signal for spotting models that haven't been touched in months. Log-based usage analysis is a possible future refinement.
 
