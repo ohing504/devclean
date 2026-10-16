@@ -379,7 +379,7 @@ func TestClean_ReleaseRunsAfterPathRemoval(t *testing.T) {
 	result := model.ScanResult{
 		Path:   target,
 		Safety: model.SafetySafe,
-		Release: func(_ context.Context, remove func(string) error) error {
+		Release: func(remove func(string) error) error {
 			if _, err := os.Lstat(target); !os.IsNotExist(err) {
 				t.Error("Release ran before the path was removed")
 			}
@@ -402,7 +402,7 @@ func TestClean_DryRunSkipsRelease(t *testing.T) {
 	result := model.ScanResult{
 		Path:   target,
 		Safety: model.SafetySafe,
-		Release: func(context.Context, func(string) error) error {
+		Release: func(func(string) error) error {
 			t.Error("Release ran in dry-run")
 			return nil
 		},

@@ -79,7 +79,8 @@ func (s *LLMScanner) Scan(ctx context.Context, root string) ([]model.ScanResult,
 	// Hugging Face hub: one result per model directory
 	// (~/.cache/huggingface/hub/models--<org>--<name>).
 	hfRoot := filepath.Join(home, ".cache", "huggingface", "hub")
-	if isUnderRoot(hfRoot, root) {
+	hfInRoot := isUnderRoot(hfRoot, root)
+	if hfInRoot {
 		for _, dir := range subdirs(hfRoot) {
 			base := filepath.Base(dir)
 			if !strings.HasPrefix(base, "models--") {
@@ -120,8 +121,10 @@ func (s *LLMScanner) Scan(ctx context.Context, root string) ([]model.ScanResult,
 	if err := sizePending(ctx, results); err != nil {
 		return results, err
 	}
-	if store, ok := openHFStore(hfRoot); ok && isUnderRoot(hfRoot, root) {
-		results = addHFBlobs(results, store)
+	if hfInRoot {
+		if store, ok := openHFStore(hfRoot); ok {
+			results = addHFBlobs(results, store)
+		}
 	}
 	return results, nil
 }

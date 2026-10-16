@@ -147,7 +147,7 @@ type ScanResult struct {
 
 	// Release runs after Path is removed, deleting through remove what the
 	// removal left unreferenced (a Hugging Face model's shared blobs).
-	Release func(ctx context.Context, remove func(path string) error) error `json:"-"`
+	Release func(remove func(path string) error) error `json:"-"`
 }
 
 // CloneKey identifies a group of pure APFS clones on a device.
@@ -224,18 +224,8 @@ func DedupedTotal(results []ScanResult) int64 {
 	groups := make(map[CloneKey]CloneShare)
 	blobs := make(map[InodeKey]CloneShare)
 	for _, r := range results {
-		for key, s := range r.CloneShares {
-			g := groups[key]
-			g.Refcnt, g.Blocks = s.Refcnt, s.Blocks
-			g.Seen += s.Seen
-			groups[key] = g
-		}
-		for key, s := range r.BlobShares {
-			g := blobs[key]
-			g.Refcnt, g.Blocks = s.Refcnt, s.Blocks
-			g.Seen += s.Seen
-			blobs[key] = g
-		}
+		mergeShares(groups, r.CloneShares)
+		mergeShares(blobs, r.BlobShares)
 		total += r.Size
 		for key, blocks := range r.Links {
 			// First artifact to hold this inode keeps it (already in r.Size);
@@ -247,12 +237,23 @@ func DedupedTotal(results []ScanResult) int64 {
 			seen[key] = struct{}{}
 		}
 	}
-	for _, g := range groups {
-		if g.Seen >= g.Refcnt {
-			total += g.Blocks
-		}
+	return total + fullShares(groups) + fullShares(blobs)
+}
+
+// mergeShares adds each artifact's part of a shared group into dst.
+func mergeShares[K comparable](dst, src map[K]CloneShare) {
+	for key, s := range src {
+		g := dst[key]
+		g.Refcnt, g.Blocks = s.Refcnt, s.Blocks
+		g.Seen += s.Seen
+		dst[key] = g
 	}
-	for _, g := range blobs {
+}
+
+// fullShares sums the blocks of groups whose every holder is present.
+func fullShares[K comparable](groups map[K]CloneShare) int64 {
+	var total int64
+	for _, g := range groups {
 		if g.Seen >= g.Refcnt {
 			total += g.Blocks
 		}

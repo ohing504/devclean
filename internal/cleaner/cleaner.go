@@ -67,7 +67,7 @@ func (c *Cleaner) Clean(ctx context.Context, r model.ScanResult) error {
 		return err
 	}
 	if r.Release != nil {
-		return r.Release(ctx, c.remove)
+		return r.Release(c.remove)
 	}
 	return nil
 }

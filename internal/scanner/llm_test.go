@@ -171,15 +171,6 @@ func (h hfHub) link(repo, etag, payload string, manifest bool) {
 	}
 }
 
-func diskBlocks(t *testing.T, path string) int64 {
-	t.Helper()
-	info, err := os.Lstat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return info.Sys().(*syscall.Stat_t).Blocks * 512
-}
-
 func exists(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil
@@ -221,7 +212,7 @@ func TestLLMScanner_HFSharedBlobSizes(t *testing.T) {
 	got := scanLLM(t, home)
 	m1, m2 := got["o/m1"], got["o/m2"]
 
-	if want := scanner.Measure(m1.Path).Disk + diskBlocks(t, own); m1.Size != want {
+	if want := scanner.Measure(m1.Path).Disk + scanner.DirSize(own); m1.Size != want {
 		t.Errorf("m1 size = %d, want its directory plus its own payload = %d", m1.Size, want)
 	}
 	if want := scanner.Measure(m2.Path).Disk; m2.Size != want {
@@ -230,7 +221,7 @@ func TestLLMScanner_HFSharedBlobSizes(t *testing.T) {
 	if got := model.DedupedTotal([]model.ScanResult{m1}); got != m1.Size {
 		t.Errorf("m1 alone totals %d, want %d: the shared payload stays while m2 references it", got, m1.Size)
 	}
-	if got, want := model.DedupedTotal([]model.ScanResult{m1, m2}), m1.Size+m2.Size+diskBlocks(t, shared); got != want {
+	if got, want := model.DedupedTotal([]model.ScanResult{m1, m2}), m1.Size+m2.Size+scanner.DirSize(shared); got != want {
 		t.Errorf("m1+m2 total = %d, want %d: shared payload once, dataset payload never", got, want)
 	}
 
@@ -238,8 +229,8 @@ func TestLLMScanner_HFSharedBlobSizes(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected an unreferenced shared blobs result, got labels %v", slices.Collect(maps.Keys(got)))
 	}
-	if o.Size != diskBlocks(t, orphan) {
-		t.Errorf("unreferenced blobs size = %d, want %d", o.Size, diskBlocks(t, orphan))
+	if o.Size != scanner.DirSize(orphan) {
+		t.Errorf("unreferenced blobs size = %d, want %d", o.Size, scanner.DirSize(orphan))
 	}
 	if o.DeleteStrategy() != model.DeleteKindAPI {
 		t.Errorf("unreferenced blobs delete strategy = %s, want api (the store directory itself must stay)", o.DeleteStrategy())
@@ -268,7 +259,7 @@ func TestLLMScanner_HFReleaseSweepsUnreferencedPayloads(t *testing.T) {
 		if err := os.RemoveAll(r.Path); err != nil {
 			t.Fatal(err)
 		}
-		if err := r.Release(t.Context(), os.RemoveAll); err != nil {
+		if err := r.Release(os.RemoveAll); err != nil {
 			t.Fatalf("Release: %v", err)
 		}
 	}

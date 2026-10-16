@@ -56,18 +56,13 @@ func openHFStore(hub string) (hfStore, bool) {
 func (s hfStore) payloads() []string {
 	var out []string
 	for _, prefix := range subdirs(s.dir) {
-		name := filepath.Base(prefix)
-		if !hfPrefixRe.MatchString(name) {
-			continue
-		}
 		entries, err := os.ReadDir(prefix)
 		if err != nil {
 			continue
 		}
 		for _, e := range entries {
-			p := filepath.Join(prefix, e.Name())
-			if hfHashRe.MatchString(e.Name()) && strings.HasPrefix(e.Name(), name) && isRegularFile(p) {
-				out = append(out, p)
+			if e.Type().IsRegular() && isPayloadName(filepath.Base(prefix), e.Name()) {
+				out = append(out, filepath.Join(prefix, e.Name()))
 			}
 		}
 	}
@@ -119,10 +114,24 @@ func (s hfStore) target(link string) string {
 		return ""
 	}
 	prefix, hash, found := strings.Cut(rel, string(filepath.Separator))
-	if !found || !hfHashRe.MatchString(hash) || !strings.HasPrefix(hash, prefix) || len(prefix) != 2 {
+	if !found || !isPayloadName(prefix, hash) {
 		return ""
 	}
 	return filepath.Join(s.dir, prefix, hash)
+}
+
+// isPayloadName reports whether blobs/<prefix>/<hash> names a store payload.
+func isPayloadName(prefix, hash string) bool {
+	return hfPrefixRe.MatchString(prefix) && hfHashRe.MatchString(hash) && strings.HasPrefix(hash, prefix)
+}
+
+// sweepAll sweeps each payload, collecting the errors.
+func (s hfStore) sweepAll(payloads []string, remove func(string) error) error {
+	var errs []error
+	for _, p := range payloads {
+		errs = append(errs, s.sweep(p, remove))
+	}
+	return errors.Join(errs...)
 }
 
 // sweep deletes payload and its manifest once nothing references it.
@@ -168,7 +177,7 @@ func addHFBlobs(results []model.ScanResult, s hfStore) []model.ScanResult {
 			models[filepath.Base(results[i].Path)] = &results[i]
 		}
 	}
-	held := make(map[string][]string) // repo dir name → payloads it references
+	held := make(map[*model.ScanResult][]string) // model → payloads it references
 
 	var orphans []string
 	var orphanSize int64
@@ -186,6 +195,7 @@ func addHFBlobs(results []model.ScanResult, s hfStore) []model.ScanResult {
 			continue
 		}
 		blocks := int64(sys.Blocks) * 512
+		key := model.InodeKey{Dev: uint64(sys.Dev), Ino: uint64(sys.Ino)} //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
 		if len(refs) == 0 {
 			orphans = append(orphans, p)
 			orphanSize += blocks
@@ -200,7 +210,7 @@ func addHFBlobs(results []model.ScanResult, s hfStore) []model.ScanResult {
 			if r == nil {
 				continue
 			}
-			held[repo] = append(held[repo], p)
+			held[r] = append(held[r], p)
 			if len(seen) == 1 {
 				r.Size += blocks
 				continue
@@ -208,45 +218,33 @@ func addHFBlobs(results []model.ScanResult, s hfStore) []model.ScanResult {
 			if r.BlobShares == nil {
 				r.BlobShares = make(map[model.InodeKey]model.CloneShare)
 			}
-			key := model.InodeKey{Dev: uint64(sys.Dev), Ino: uint64(sys.Ino)} //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
 			r.BlobShares[key] = model.CloneShare{Refcnt: uint32(len(refs)), Seen: n, Blocks: blocks}
 		}
 	}
 
-	for repo, payloads := range held {
-		models[repo].Release = func(_ context.Context, remove func(string) error) error {
-			var errs []error
-			for _, p := range payloads {
-				errs = append(errs, s.sweep(p, remove))
-			}
-			return errors.Join(errs...)
-		}
+	for r, payloads := range held {
+		r.Release = func(remove func(string) error) error { return s.sweepAll(payloads, remove) }
 	}
 
 	if len(orphans) == 0 {
 		return results
 	}
+	mod := ModTime(s.dir)
 	return append(results, model.ScanResult{
 		Path:           s.dir,
 		Ecosystem:      model.EcoLLM,
 		Category:       model.CatCache,
 		Size:           orphanSize,
-		LastMod:        ModTime(s.dir),
+		LastMod:        mod,
 		Safety:         model.SafetySafe,
 		ProjectRoot:    s.hub,
 		Label:          "Hugging Face unreferenced shared blobs",
 		Recommendation: hfOrphanRec,
-		LastUsedAt:     ModTime(s.dir),
+		LastUsedAt:     mod,
 		Delete: &model.DeleteMethod{
 			Kind:    model.DeleteKindAPI,
 			Display: hfOrphanDisplay,
-			Run: func(context.Context) error {
-				var errs []error
-				for _, p := range orphans {
-					errs = append(errs, s.sweep(p, os.Remove))
-				}
-				return errors.Join(errs...)
-			},
+			Run:     func(context.Context) error { return s.sweepAll(orphans, os.Remove) },
 		},
 	})
 }
