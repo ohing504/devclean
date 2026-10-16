@@ -4,7 +4,7 @@
 
 The walk engine skips these trees whole — no artifact matching, no project context, no descent — so nothing inside is ever a deletion target:
 
-- **Installed-package trees**, engine-wide regardless of which ecosystems are active: their marker files belong to shipped packages, not projects. Detected by invariant layout, never install path.
+- **Installed-package trees**, engine-wide regardless of which ecosystems are active: their marker files belong to shipped packages, not projects. Detected by invariant layout or by a directory name only package managers create, never install path.
   - pnpm store version dir (`v<N>` with `files/` and `index/` or `index.db`)
   - macOS app bundle (`*.app` with `Contents/`)
   - `node_modules` reached without matching a project's `node_modules` rule (a global install prefix such as `lib/node_modules`, or a tool's bundled dependencies)

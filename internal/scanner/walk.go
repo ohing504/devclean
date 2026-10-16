@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -187,6 +186,11 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 				ReportProgress(ctx, len(results))
 				return false // matched artifact: do not descend
 			}
+			// Checked after artifact matching, so a project's own node_modules
+			// is still reported; by name alone, so the tree is never read.
+			if installedPackageDirNames[name] {
+				return false
+			}
 			// The root is always entered: the hidden-dir rule applies below it.
 			return dir == root || !strings.HasPrefix(name, ".") || hiddenDescend[name]
 		},
@@ -264,31 +268,40 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 	return results, nil
 }
 
+// installedPackageDirNames are directories that hold only installed packages
+// whenever the walk reaches them without matching an artifact rule; Enter
+// prunes them by name. Their packages' own markers (package.json, setup.py)
+// would otherwise root projects whose shipped dist/ or __pycache__ match.
+//
+//   - node_modules: a global install prefix (lib/node_modules) or a tool's
+//     bundled dependencies, whose packages' dist/ is their shipped code.
+//   - site-packages / dist-packages: installed Python distributions.
+var installedPackageDirNames = map[string]bool{
+	"node_modules":  true,
+	"site-packages": true,
+	"dist-packages": true,
+}
+
 // isInstalledPackageTree reports whether a directory roots a tree of installed
-// packages, whose marker files belong to shipped packages, not projects.
-// Checked for every ecosystem, so results don't depend on the --eco subset.
+// packages identified by its entries. Checked for every ecosystem, so results
+// don't depend on the --eco subset.
 //
 //   - pnpm store version dir: v<N> with files/ and index/ (v10) or index.db
 //     (v11). v11's links/ unpacks packages whose dist/ would match; deleting
 //     it corrupts the store every pnpm project hard-links from.
-//   - macOS app bundle: *.app with Contents/ (e.g. Electron node_modules).
-//   - node_modules reached without matching a project's node_modules rule:
-//     a global install prefix (lib/node_modules) or a tool's bundled
-//     dependencies, whose packages' dist/ is their shipped code.
-//   - Python site-packages / dist-packages: installed distributions.
+//   - macOS app bundle: *.app with Contents/ (e.g. an app's bundled dist/).
 //   - Go module cache: mod/ with cache/download/ (read-only module sources).
 func isInstalledPackageTree(dir string, names map[string]bool) bool {
 	name := filepath.Base(dir)
 	switch {
 	case strings.HasSuffix(name, ".app") && names["Contents"]:
 		return true
-	case name == "node_modules", name == "site-packages", name == "dist-packages":
-		return true
 	case name == "mod" && names["cache"]:
-		info, err := os.Stat(filepath.Join(dir, "cache", "download"))
-		return err == nil && info.IsDir()
+		return isDir(filepath.Join(dir, "cache", "download"))
+	case isPnpmStoreVersionDir(name) && names["files"] && (names["index"] || names["index.db"]):
+		return true
 	}
-	return isPnpmStoreVersionDir(name) && names["files"] && (names["index"] || names["index.db"])
+	return false
 }
 
 func isPnpmStoreVersionDir(name string) bool {
