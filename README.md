@@ -31,6 +31,16 @@ go build -o devclean ./cmd/devclean
 > A Homebrew formula is planned for a later release. Until then, use one of the
 > options above.
 
+## Claude Code plugin
+
+Install the binary first, then the plugin (Claude Code 2.1.275 or later), and ask Claude to free disk space:
+
+```text
+/plugin install devclean --marketplace ohing504/devclean
+```
+
+The skill scans with `devclean scan --json`, proposes artifacts, and cleans only the paths you approve.
+
 ## Usage and documentation
 
 - [Spec](docs/SPEC.md) — commands and flags, safety levels, supported ecosystems, configuration
