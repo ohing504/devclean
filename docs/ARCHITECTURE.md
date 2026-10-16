@@ -67,7 +67,7 @@ Tables can also:
 - opt into **`ScanResult.ProjectRoot` attribution** — the Python table sets the matched root on every result because its artifacts sit at arbitrary depth and output grouping needs explicit attribution (nested project roots win over parents);
 - declare a **`PruneRoot`** hook that skips the ecosystem's own SDK checkout.
 
-**Pruned trees** are skipped whole — no artifact matching, no project context, no descent — so nothing inside is ever a deletion target: installed-package trees (pnpm store version dirs, macOS `.app` bundles) engine-wide, and an ecosystem's SDK checkout via `PruneRoot` — [decision](decisions/prune-non-project-trees.md).
+**Pruned trees** are skipped whole — no artifact matching, no project context, no descent — so nothing inside is ever a deletion target: installed-package trees (pnpm store version dirs, macOS `.app` bundles, `node_modules` not matched as a project artifact, Python `site-packages`/`dist-packages`, the Go module cache) engine-wide, and an ecosystem's SDK checkout via `PruneRoot` — [decision](decisions/prune-non-project-trees.md).
 
 **Deduplication**: a directory matching rules of several active ecosystems is reported once, attributed to the first table in order (node → rust → ruby → python → go → flutter → android), and no scanner descends into another's matched artifact (`__pycache__` inside `node_modules` is not reported separately). Attribution can therefore differ between a full scan and an `--eco` subset scan.
 

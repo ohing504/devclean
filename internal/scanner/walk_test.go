@@ -74,8 +74,8 @@ func TestWalkScan_DedupCoverage(t *testing.T) {
 
 // TestWalkScan_DedupNodeModulesShieldsPython pins the second double-count
 // fix: a matched artifact is skipped entirely, so no other active ecosystem
-// reports anything inside it. With python alone, node_modules is not an
-// artifact and its contents are scanned as before.
+// reports anything inside it. With python alone, node_modules is still an
+// installed-package tree and is skipped whole.
 func TestWalkScan_DedupNodeModulesShieldsPython(t *testing.T) {
 	root := t.TempDir()
 
@@ -108,16 +108,14 @@ func TestWalkScan_DedupNodeModulesShieldsPython(t *testing.T) {
 		t.Errorf("expected node_modules attributed to node, got %s (%s)", results[0].Path, results[0].Ecosystem)
 	}
 
-	// python alone: descends into node_modules and finds the __pycache__.
+	// python alone: node_modules is an installed-package tree, so nothing
+	// inside it is reported either.
 	results, err = WalkScan(context.Background(), root, model.EcoPython)
 	if err != nil {
 		t.Fatalf("WalkScan error: %v", err)
 	}
-	if len(results) != 1 {
-		t.Fatalf("expected exactly 1 result for python alone, got %d", len(results))
-	}
-	if results[0].Path != pyc || results[0].Ecosystem != model.EcoPython {
-		t.Errorf("expected __pycache__ attributed to python, got %s (%s)", results[0].Path, results[0].Ecosystem)
+	if len(results) != 0 {
+		t.Fatalf("expected no result for python alone, got %d (%s)", len(results), results[0].Path)
 	}
 }
 

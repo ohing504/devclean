@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -197,7 +198,7 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 
 			// Prune before establishing any context or descending, so nothing
 			// inside is ever a deletion target.
-			if isInstalledPackageTree(filepath.Base(dir), names) {
+			if isInstalledPackageTree(dir, names) {
 				return false
 			}
 			for i := range tables {
@@ -271,9 +272,21 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 //     (v11). v11's links/ unpacks packages whose dist/ would match; deleting
 //     it corrupts the store every pnpm project hard-links from.
 //   - macOS app bundle: *.app with Contents/ (e.g. Electron node_modules).
-func isInstalledPackageTree(name string, names map[string]bool) bool {
-	if strings.HasSuffix(name, ".app") && names["Contents"] {
+//   - node_modules reached without matching a project's node_modules rule:
+//     a global install prefix (lib/node_modules) or a tool's bundled
+//     dependencies, whose packages' dist/ is their shipped code.
+//   - Python site-packages / dist-packages: installed distributions.
+//   - Go module cache: mod/ with cache/download/ (read-only module sources).
+func isInstalledPackageTree(dir string, names map[string]bool) bool {
+	name := filepath.Base(dir)
+	switch {
+	case strings.HasSuffix(name, ".app") && names["Contents"]:
 		return true
+	case name == "node_modules", name == "site-packages", name == "dist-packages":
+		return true
+	case name == "mod" && names["cache"]:
+		info, err := os.Stat(filepath.Join(dir, "cache", "download"))
+		return err == nil && info.IsDir()
 	}
 	return isPnpmStoreVersionDir(name) && names["files"] && (names["index"] || names["index.db"])
 }
