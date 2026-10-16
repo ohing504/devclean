@@ -30,6 +30,7 @@ func newCleanCmd() *cobra.Command {
 		yes            bool
 		includeCaution bool
 		vendorCleanup  bool
+		items          []string
 	)
 
 	cmd := &cobra.Command{
@@ -39,6 +40,7 @@ func newCleanCmd() *cobra.Command {
   devclean clean --eco node --status dormant --yes
   devclean clean --eco node --safe --dry-run
   devclean clean --eco node --force
+  devclean clean --eco global --item ~/.npm --yes --include-caution  # only this artifact
   devclean clean --eco xcode --vendor-cleanup --yes  # also runs 'xcrun simctl delete unavailable'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			minSize, err := parseMinSize(minSizeStr)
@@ -60,6 +62,14 @@ func newCleanCmd() *cobra.Command {
 			})
 			if err != nil {
 				return err
+			}
+			if len(items) > 0 {
+				var missing []string
+				results, missing = keepItems(results, items)
+				if len(missing) > 0 {
+					cmd.SilenceUsage = true
+					return fmt.Errorf("--item matched no scanned artifact: %s (artifact paths are the \"path\" field of 'devclean scan --json')", strings.Join(missing, ", "))
+				}
 			}
 
 			if len(results) == 0 {
@@ -255,6 +265,7 @@ func newCleanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview without deleting")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip confirmation and interactive selection (deletes only safe items unless --include-caution)")
 	cmd.Flags().BoolVar(&includeCaution, "include-caution", false, "with --yes, also delete caution items (shared impact or hard to regenerate); protected is still never deleted")
+	cmd.Flags().StringSliceVar(&items, "item", nil, "clean only the artifacts at these paths (the \"path\" field of 'devclean scan --json'; repeatable)")
 	cmd.Flags().BoolVar(&vendorCleanup, "vendor-cleanup", false, "also run ecosystem-native cleanup commands (e.g. 'xcrun simctl delete unavailable' for xcode)")
 
 	return cmd
@@ -285,6 +296,39 @@ func selectForYes(results []model.ScanResult, includeCaution bool) (toClean []mo
 		}
 	}
 	return toClean, skippedCaution
+}
+
+// keepItems narrows results to the artifacts whose path is one of items, so a
+// non-interactive clean can target single artifacts the other filters cannot
+// separate. A leading "~/" is expanded and relative paths resolve against the
+// working directory. missing lists the items that matched no result, as given.
+func keepItems(results []model.ScanResult, items []string) (kept []model.ScanResult, missing []string) {
+	norm := make([]string, len(items))
+	want := make(map[string]bool, len(items))
+	for i, it := range items {
+		p := it
+		if rest, ok := strings.CutPrefix(p, "~/"); ok {
+			p = filepath.Join(pathutil.CachedHomeDir(), rest)
+		}
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		norm[i] = p
+		want[p] = true
+	}
+	found := make(map[string]bool, len(want))
+	for _, r := range results {
+		if p := filepath.Clean(r.Path); want[p] {
+			kept = append(kept, r)
+			found[p] = true
+		}
+	}
+	for i, it := range items {
+		if !found[norm[i]] {
+			missing = append(missing, it)
+		}
+	}
+	return kept, missing
 }
 
 // vendorEcos resolves the vendor-cleanup scope: the explicit --eco selection,

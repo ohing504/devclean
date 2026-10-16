@@ -109,6 +109,9 @@ devclean clean --eco node --force --yes
 # Skip artifacts smaller than 50 MB
 devclean clean --eco node --min-size 50MB
 
+# Clean only the named artifact(s)
+devclean clean --eco global --item ~/.npm --yes --include-caution
+
 # Also run ecosystem-native cleanup commands (e.g. xcrun simctl delete unavailable)
 devclean clean --eco xcode --vendor-cleanup --yes
 ```
@@ -124,6 +127,22 @@ artifacts crowd out the real targets. Sizes use SI/IEC suffixes:
 - Plain integer = bytes
 
 `devclean scan --min-size 100MB` keeps only artifacts ≥ 100 MB.
+
+#### `--item`
+
+`clean --item <path>` (repeatable, or comma-separated) keeps only the scanned
+artifacts at those paths, so a non-interactive run can target one artifact the
+other filters cannot separate. Paths are the `path` field of `scan --json`; a
+leading `~/` is expanded and relative paths resolve against the working
+directory. Other filters and the `--yes` safety gate still apply: a `caution`
+item needs `--include-caution`, and a `protected` item is never deleted.
+
+If any `--item` matches no scanned artifact, `clean` exits with status 1 before
+deleting anything:
+
+```text
+Error: --item matched no scanned artifact: /Users/me/.npmx (artifact paths are the "path" field of 'devclean scan --json')
+```
 
 #### Non-interactive safety (`--yes` / `--include-caution`)
 

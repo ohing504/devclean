@@ -1,7 +1,11 @@
 package cli
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -50,6 +54,67 @@ func TestSelectForYes(t *testing.T) {
 			t.Error("a git-protected (dirty) item must not be deleted even if safety=safe")
 		}
 	})
+}
+
+// nodeProject creates a node project with node_modules and dist under a temp
+// root and returns the root and the project dir.
+func nodeProject(t *testing.T) (root, proj string) {
+	t.Helper()
+	root = t.TempDir()
+	proj = filepath.Join(root, "app")
+	for _, f := range []string{"package.json", "node_modules/x/index.js", "dist/main.js"} {
+		p := filepath.Join(proj, f)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root, proj
+}
+
+func runClean(t *testing.T, args ...string) error {
+	t.Helper()
+	cmd := newCleanCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs(args)
+	return cmd.Execute()
+}
+
+// TestCleanItemDeletesOnlyNamedArtifact verifies --item narrows a --yes clean
+// to the named artifact and leaves the project's other artifacts in place.
+func TestCleanItemDeletesOnlyNamedArtifact(t *testing.T) {
+	root, proj := nodeProject(t)
+
+	err := runClean(t, "--eco", "node", "--path", root, "--item", filepath.Join(proj, "dist"), "--yes", "--force")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(proj, "dist")); !os.IsNotExist(err) {
+		t.Errorf("dist should be deleted, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(proj, "node_modules")); err != nil {
+		t.Errorf("node_modules must be kept: %v", err)
+	}
+}
+
+// TestCleanItemUnmatchedFailsBeforeDeleting verifies an --item that names no
+// scanned artifact fails the command and deletes nothing, even alongside a
+// matching one.
+func TestCleanItemUnmatchedFailsBeforeDeleting(t *testing.T) {
+	root, proj := nodeProject(t)
+	missing := filepath.Join(proj, "build")
+
+	err := runClean(t, "--eco", "node", "--path", root,
+		"--item", filepath.Join(proj, "dist"), "--item", missing, "--yes", "--force")
+	if err == nil || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("want an error naming %s, got %v", missing, err)
+	}
+	if _, err := os.Stat(filepath.Join(proj, "dist")); err != nil {
+		t.Errorf("dist must not be deleted when another --item is unmatched: %v", err)
+	}
 }
 
 func paths(rs []model.ScanResult) []string {
