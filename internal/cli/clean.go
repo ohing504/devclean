@@ -83,8 +83,14 @@ func newCleanCmd() *cobra.Command {
 			var toClean []model.ScanResult
 
 			if yes {
+				var skipped []skippedItem
+				toClean, skipped = selectForYes(results, includeCaution)
 				var skippedCaution int
-				toClean, skippedCaution = selectForYes(results, includeCaution)
+				for _, sk := range skipped {
+					if sk.Reason == reasonCaution {
+						skippedCaution++
+					}
+				}
 				if skippedCaution > 0 {
 					fmt.Printf(
 						"%s\n",
@@ -94,11 +100,15 @@ func newCleanCmd() *cobra.Command {
 						)),
 					)
 				}
-				// A named artifact the safety gate drops is a failed request, not
+				// A named artifact the safety gate keeps is a failed request, not
 				// a choice: fail before deleting so a script sees it.
-				if len(items) > 0 && len(toClean) < len(results) {
+				if len(items) > 0 && len(skipped) > 0 {
+					named := make([]string, len(skipped))
+					for i, sk := range skipped {
+						named[i] = fmt.Sprintf("%s (%s)", sk.Result.Path, sk.Reason)
+					}
 					cmd.SilenceUsage = true
-					return fmt.Errorf("--item artifacts not cleaned with --yes: %s", strings.Join(gatedItems(results, toClean), ", "))
+					return fmt.Errorf("--item artifacts not cleaned with --yes: %s", strings.Join(named, ", "))
 				}
 			} else {
 				// Interactive tree selection
@@ -277,83 +287,75 @@ func newCleanCmd() *cobra.Command {
 	return cmd
 }
 
+// skippedItem is a result the --yes safety gate kept, with the reason.
+type skippedItem struct {
+	Result model.ScanResult
+	Reason string
+}
+
+const (
+	reasonCaution   = "caution, pass --include-caution"
+	reasonProtected = "protected, never deleted"
+)
+
 // selectForYes chooses which results a non-interactive (--yes) clean deletes.
 // It deletes only `safe` (auto-regenerated) items by default; `caution` items
 // carry shared impact or hold state that is slow or impossible to regenerate,
 // so removing them without a human looking is opt-in via includeCaution.
 // `protected` items (git-tracked dirty, or protected safety) are never deleted.
 // This keeps a single mis-classified catalog entry from becoming silent data
-// loss under --yes. It returns the items to clean and how many caution items
-// were skipped (for the user-facing notice).
-func selectForYes(results []model.ScanResult, includeCaution bool) (toClean []model.ScanResult, skippedCaution int) {
+// loss under --yes. It returns the items to clean and the items it kept, each
+// with the reason (for the user-facing notice and --item failures).
+func selectForYes(results []model.ScanResult, includeCaution bool) (toClean []model.ScanResult, skipped []skippedItem) {
 	for _, r := range results {
-		if r.Protected {
-			continue
-		}
-		switch r.Safety {
-		case model.SafetySafe:
+		switch {
+		case r.Protected:
+			skipped = append(skipped, skippedItem{r, reasonProtected})
+		case r.Safety == model.SafetySafe, r.Safety == model.SafetyCaution && includeCaution:
 			toClean = append(toClean, r)
-		case model.SafetyCaution:
-			if includeCaution {
-				toClean = append(toClean, r)
-			} else {
-				skippedCaution++
-			}
+		case r.Safety == model.SafetyCaution:
+			skipped = append(skipped, skippedItem{r, reasonCaution})
+		default:
+			skipped = append(skipped, skippedItem{r, reasonProtected})
 		}
 	}
-	return toClean, skippedCaution
+	return toClean, skipped
 }
 
-// gatedItems describes the results selectForYes left out of toClean, each with
-// the reason it was kept.
-func gatedItems(results, toClean []model.ScanResult) []string {
-	cleaned := make(map[string]bool, len(toClean))
-	for _, r := range toClean {
-		cleaned[r.Path] = true
-	}
-	var out []string
-	for _, r := range results {
-		if cleaned[r.Path] {
-			continue
+// resolveItem turns an --item argument into the absolute path it names. A
+// leading "~/" is expanded; without a home dir it stays literal, so the item
+// fails to match instead of resolving against the working directory.
+func resolveItem(item string) string {
+	p := item
+	if home := pathutil.CachedHomeDir(); home != "" {
+		if rest, ok := strings.CutPrefix(p, "~/"); ok {
+			p = filepath.Join(home, rest)
 		}
-		reason := "protected, never deleted"
-		if !r.Protected && r.Safety == model.SafetyCaution {
-			reason = "caution, pass --include-caution"
-		}
-		out = append(out, fmt.Sprintf("%s (%s)", r.Path, reason))
 	}
-	return out
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
 }
 
 // keepItems narrows results to the artifacts whose path is one of items, so a
 // non-interactive clean can target single artifacts the other filters cannot
-// separate. A leading "~/" is expanded and relative paths resolve against the
-// working directory. missing lists the items that matched no result, as given.
+// separate. Relative items resolve against the working directory. missing
+// lists the items that matched no result, as given.
 func keepItems(results []model.ScanResult, items []string) (kept []model.ScanResult, missing []string) {
-	norm := make([]string, len(items))
-	want := make(map[string]bool, len(items))
-	for i, it := range items {
-		p := it
-		// Without a home dir "~/" stays literal, so the item fails to match
-		// instead of resolving against the working directory.
-		if rest, ok := strings.CutPrefix(p, "~/"); ok && pathutil.CachedHomeDir() != "" {
-			p = filepath.Join(pathutil.CachedHomeDir(), rest)
-		}
-		if abs, err := filepath.Abs(p); err == nil {
-			p = abs
-		}
-		norm[i] = p
-		want[p] = true
+	matched := make(map[string]bool, len(items)) // resolved path → matched
+	for _, it := range items {
+		matched[resolveItem(it)] = false
 	}
-	found := make(map[string]bool, len(want))
 	for _, r := range results {
-		if p := filepath.Clean(r.Path); want[p] {
+		p := filepath.Clean(r.Path)
+		if _, ok := matched[p]; ok {
 			kept = append(kept, r)
-			found[p] = true
+			matched[p] = true
 		}
 	}
-	for i, it := range items {
-		if !found[norm[i]] {
+	for _, it := range items {
+		if !matched[resolveItem(it)] {
 			missing = append(missing, it)
 		}
 	}

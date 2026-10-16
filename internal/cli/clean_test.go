@@ -28,8 +28,8 @@ func TestSelectForYes(t *testing.T) {
 		if len(toClean) != 1 || toClean[0].Path != "/safe" {
 			t.Errorf("expected only /safe, got %v", paths(toClean))
 		}
-		if skipped != 1 {
-			t.Errorf("expected 1 skipped caution, got %d", skipped)
+		if n := countReason(skipped, reasonCaution); n != 1 {
+			t.Errorf("expected 1 skipped caution, got %d", n)
 		}
 	})
 
@@ -38,8 +38,8 @@ func TestSelectForYes(t *testing.T) {
 		if got := paths(toClean); len(got) != 2 || !contains(got, "/safe") || !contains(got, "/caution") {
 			t.Errorf("expected /safe and /caution, got %v", got)
 		}
-		if skipped != 0 {
-			t.Errorf("expected 0 skipped, got %d", skipped)
+		if n := countReason(skipped, reasonCaution); n != 0 {
+			t.Errorf("expected 0 skipped caution, got %d", n)
 		}
 		// Protected safety and git-protected must never appear.
 		for _, r := range toClean {
@@ -57,14 +57,28 @@ func TestSelectForYes(t *testing.T) {
 	})
 }
 
-// nodeProject creates a node project with node_modules and dist under a temp
-// root and returns the root and the project dir.
-func nodeProject(t *testing.T) (root, proj string) {
+func countReason(skipped []skippedItem, reason string) int {
+	n := 0
+	for _, sk := range skipped {
+		if sk.Reason == reason {
+			n++
+		}
+	}
+	return n
+}
+
+// writeFiles creates each "/"-separated rel path under root as a file, or as
+// a directory when it ends in "/".
+func writeFiles(t *testing.T, root string, rels ...string) {
 	t.Helper()
-	root = t.TempDir()
-	proj = filepath.Join(root, "app")
-	for _, f := range []string{"package.json", "node_modules/x/index.js", "dist/main.js"} {
-		p := filepath.Join(proj, f)
+	for _, rel := range rels {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if strings.HasSuffix(rel, "/") {
+			if err := os.MkdirAll(p, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -72,7 +86,29 @@ func nodeProject(t *testing.T) (root, proj string) {
 			t.Fatal(err)
 		}
 	}
-	return root, proj
+}
+
+// nodeProject creates a node project named name with node_modules and dist
+// under a temp root and returns the root and the project dir.
+func nodeProject(t *testing.T, name string) (root, proj string) {
+	t.Helper()
+	root = t.TempDir()
+	writeFiles(t, root, name+"/package.json", name+"/node_modules/x/index.js", name+"/dist/main.js")
+	return root, filepath.Join(root, name)
+}
+
+func assertGone(t *testing.T, p string) {
+	t.Helper()
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Errorf("%s should be deleted, stat err = %v", p, err)
+	}
+}
+
+func assertExists(t *testing.T, p string) {
+	t.Helper()
+	if _, err := os.Stat(p); err != nil {
+		t.Errorf("%s must be kept: %v", p, err)
+	}
 }
 
 func runClean(t *testing.T, args ...string) error {
@@ -87,25 +123,20 @@ func runClean(t *testing.T, args ...string) error {
 // TestCleanItemDeletesOnlyNamedArtifact verifies --item narrows a --yes clean
 // to the named artifact and leaves the project's other artifacts in place.
 func TestCleanItemDeletesOnlyNamedArtifact(t *testing.T) {
-	root, proj := nodeProject(t)
+	root, proj := nodeProject(t, "app")
 
-	err := runClean(t, "--eco", "node", "--path", root, "--item", filepath.Join(proj, "dist"), "--yes", "--force")
-	if err != nil {
+	if err := runClean(t, "--eco", "node", "--path", root, "--item", filepath.Join(proj, "dist"), "--yes", "--force"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(proj, "dist")); !os.IsNotExist(err) {
-		t.Errorf("dist should be deleted, stat err = %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(proj, "node_modules")); err != nil {
-		t.Errorf("node_modules must be kept: %v", err)
-	}
+	assertGone(t, filepath.Join(proj, "dist"))
+	assertExists(t, filepath.Join(proj, "node_modules"))
 }
 
 // TestCleanItemUnmatchedFailsBeforeDeleting verifies an --item that names no
 // scanned artifact fails the command and deletes nothing, even alongside a
 // matching one.
 func TestCleanItemUnmatchedFailsBeforeDeleting(t *testing.T) {
-	root, proj := nodeProject(t)
+	root, proj := nodeProject(t, "app")
 	missing := filepath.Join(proj, "build")
 
 	err := runClean(t, "--eco", "node", "--path", root,
@@ -113,51 +144,32 @@ func TestCleanItemUnmatchedFailsBeforeDeleting(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), missing) {
 		t.Fatalf("want an error naming %s, got %v", missing, err)
 	}
-	if _, err := os.Stat(filepath.Join(proj, "dist")); err != nil {
-		t.Errorf("dist must not be deleted when another --item is unmatched: %v", err)
-	}
+	assertExists(t, filepath.Join(proj, "dist"))
 }
 
 // TestCleanItemGatedBySafetyFails verifies a named caution artifact that --yes
 // would skip fails the command with the reason and deletes nothing.
 func TestCleanItemGatedBySafetyFails(t *testing.T) {
 	root := t.TempDir()
+	writeFiles(t, root, "app/pyproject.toml", "app/.venv/lib/")
 	venv := filepath.Join(root, "app", ".venv")
-	if err := os.MkdirAll(filepath.Join(venv, "lib"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "app", "pyproject.toml"), []byte(""), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
 	err := runClean(t, "--eco", "python", "--path", root, "--item", venv, "--yes", "--force")
 	if err == nil || !strings.Contains(err.Error(), "--include-caution") {
 		t.Fatalf("want an error naming --include-caution, got %v", err)
 	}
-	if _, err := os.Stat(venv); err != nil {
-		t.Errorf(".venv must not be deleted: %v", err)
-	}
+	assertExists(t, venv)
 }
 
 // TestCleanItemKeepsCommaInPath verifies --item takes a path with a comma as
 // one path.
 func TestCleanItemKeepsCommaInPath(t *testing.T) {
-	root := t.TempDir()
-	proj := filepath.Join(root, "a,b")
-	dist := filepath.Join(proj, "dist")
-	if err := os.MkdirAll(dist, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(proj, "package.json"), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	root, proj := nodeProject(t, "a,b")
 
-	if err := runClean(t, "--eco", "node", "--path", root, "--item", dist, "--yes", "--force"); err != nil {
+	if err := runClean(t, "--eco", "node", "--path", root, "--item", filepath.Join(proj, "dist"), "--yes", "--force"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(dist); !os.IsNotExist(err) {
-		t.Errorf("dist should be deleted, stat err = %v", err)
-	}
+	assertGone(t, filepath.Join(proj, "dist"))
 }
 
 // TestKeepItemsResolvesHomeAndRelativePaths verifies a "~/" item and a
