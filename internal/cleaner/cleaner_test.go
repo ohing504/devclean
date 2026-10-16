@@ -81,21 +81,18 @@ func TestProtectedNotDeleted(t *testing.T) {
 	}
 }
 
-// TestTrashDelete: a trashed artifact is named after its project and loses its
-// leading dot, so Finder shows it: app/.venv → "app .venv".
 func TestTrashDelete(t *testing.T) {
 	dir := t.TempDir()
-	project := filepath.Join(dir, "app")
-	target := filepath.Join(project, ".venv")
-	mustMkdir(t, filepath.Join(target, "lib"))
-	mustWriteFile(t, filepath.Join(target, "lib", "site.py"), []byte("x"))
+	target := filepath.Join(dir, "node_modules")
+	mustMkdir(t, filepath.Join(target, "pkg"))
+	mustWriteFile(t, filepath.Join(target, "pkg", "index.js"), []byte("x"))
 
 	// Use custom trash dir for testing (not actual system Trash)
 	trashDir := filepath.Join(dir, "trash")
 	mustMkdir(t, trashDir)
 
 	c := cleaner.New(cleaner.Options{TrashDir: trashDir})
-	result := model.ScanResult{Path: target, ProjectRoot: project, Size: 100, Safety: model.SafetySafe}
+	result := model.ScanResult{Path: target, Size: 100, Safety: model.SafetySafe}
 
 	err := c.Clean(t.Context(), result)
 	if err != nil {
@@ -107,50 +104,10 @@ func TestTrashDelete(t *testing.T) {
 		t.Error("expected target to be moved from original location")
 	}
 
-	if _, err := os.Stat(filepath.Join(trashDir, "app .venv", "lib", "site.py")); err != nil {
-		t.Errorf("expected target in trash as %q: %v", "app .venv", err)
-	}
-}
-
-// TestTrashDelete_SameNameFromTwoProjects: same-named artifacts from two
-// projects land under names that tell the projects apart.
-func TestTrashDelete_SameNameFromTwoProjects(t *testing.T) {
-	dir := t.TempDir()
-	trashDir := filepath.Join(dir, "trash")
-	c := cleaner.New(cleaner.Options{TrashDir: trashDir})
-
-	for _, name := range []string{"web", "api"} {
-		project := filepath.Join(dir, name)
-		target := filepath.Join(project, "node_modules")
-		mustMkdir(t, target)
-		if err := c.Clean(t.Context(), model.ScanResult{Path: target, ProjectRoot: project, Safety: model.SafetySafe}); err != nil {
-			t.Fatalf("Clean %s: %v", target, err)
-		}
-	}
-
-	for _, want := range []string{"web node_modules", "api node_modules"} {
-		if _, err := os.Stat(filepath.Join(trashDir, want)); err != nil {
-			t.Errorf("expected %q in trash: %v", want, err)
-		}
-	}
-}
-
-// TestTrashDelete_HomeArtifactLosesDot: an artifact directly in the home
-// directory has no project to name and is trashed without its dot.
-func TestTrashDelete_HomeArtifactLosesDot(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	target := filepath.Join(home, ".npm")
-	mustMkdir(t, target)
-	trashDir := filepath.Join(home, "trash")
-
-	result := model.ScanResult{Path: target, ProjectRoot: home, Safety: model.SafetySafe}
-	if err := cleaner.New(cleaner.Options{TrashDir: trashDir}).Clean(t.Context(), result); err != nil {
-		t.Fatalf("Clean error: %v", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(trashDir, "npm")); err != nil {
-		t.Errorf("expected %q in trash: %v", "npm", err)
+	// Should exist in trash
+	trashed := filepath.Join(trashDir, "node_modules")
+	if _, err := os.Stat(trashed); os.IsNotExist(err) {
+		t.Error("expected target to exist in trash dir")
 	}
 }
 
@@ -159,21 +116,21 @@ func TestTrashDelete_NameConflict(t *testing.T) {
 	trashDir := filepath.Join(dir, "trash")
 	mustMkdir(t, trashDir)
 	// Pre-create conflicting name in trash
-	mustMkdir(t, filepath.Join(trashDir, "app node_modules"))
+	mustMkdir(t, filepath.Join(trashDir, "node_modules"))
 
-	project := filepath.Join(dir, "app")
-	target := filepath.Join(project, "node_modules")
+	target := filepath.Join(dir, "node_modules")
 	mustMkdir(t, target)
 
 	c := cleaner.New(cleaner.Options{TrashDir: trashDir})
-	result := model.ScanResult{Path: target, ProjectRoot: project, Safety: model.SafetySafe}
+	result := model.ScanResult{Path: target, Safety: model.SafetySafe}
 	err := c.Clean(t.Context(), result)
 	if err != nil {
 		t.Fatalf("Clean error: %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(trashDir, "app node_modules_1")); err != nil {
-		t.Errorf("expected %q in trash for name conflict: %v", "app node_modules_1", err)
+	// Should create node_modules_1 in trash
+	if _, err := os.Stat(filepath.Join(trashDir, "node_modules_1")); os.IsNotExist(err) {
+		t.Error("expected node_modules_1 in trash for name conflict")
 	}
 }
 

@@ -209,11 +209,7 @@ The clean command uses a tree selector matching scan's output style:
 2. Tree selector: select projects/artifacts interactively
 3. Choose: Move to Trash / Permanently delete / Cancel
 4. Execute with per-artifact results — items with an attached `DeleteMethod` run it instead of path removal (see [Deletion Strategy](ARCHITECTURE.md#deletion-strategy))
-5. Summary: items cleaned and their total size, hard-linked blocks counted once (as in the selector footer and confirm prompt) — reported as `moved to Trash` for trash moves and `freed` for permanent deletes and `DeleteMethod` items (which run regardless of the trash/force choice)
-
-#### Trash names
-
-A trashed artifact is named `<project folder name> <artifact name>` with any leading dot removed, so Finder does not hide it and same-named artifacts from different projects stay apart: `~/work/app/.venv` → `app .venv`. An artifact directly in the home directory has no project to name and only loses its dot: `~/.npm` → `npm`. A name already in the Trash gets `_1`, `_2`, … appended. The Trash keeps no record of the original location; restoring means moving the item back and renaming it.
+5. Summary: items cleaned and their total size, hard-linked blocks counted once (as in the selector footer and confirm prompt) — reported as `moved to Trash` for trash moves and `freed` for permanent deletes and `DeleteMethod` items (which run regardless of the trash/force choice). Trashed items keep their names; when some start with a dot, the summary says how many and how to show hidden files (Cmd+Shift+. in Finder), since a Trash holding only such items looks empty
 
 #### Trash across filesystems
 
