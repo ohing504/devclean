@@ -24,7 +24,7 @@ go test ./internal/ -run TestGolden -update      # regenerate golden files after
 | `docs/SPEC.md` | behavior the user approved: commands, flags, JSON, safety levels, ecosystem catalog, config | behavior changes |
 | `docs/ARCHITECTURE.md` | module boundaries, cross-module contracts, adding an ecosystem | a boundary or contract changes |
 | `plugins/devclean/skills/devclean/SKILL.md` | the Claude Code skill that runs the binary for the user | commands, flags, JSON fields or safety gates change |
-| `docs/decisions/` | one costly-to-reverse choice per file: decision, verification, rationale, rejected alternatives | such a choice is made or reversed |
+| `docs/decisions/` | one costly-to-reverse choice per file: decision, rationale, rejected alternatives | such a choice is made or reversed |
 | `CHANGELOG.md` | release sections written by release-please from PR titles | never by hand (`docs/decisions/release-please.md`) |
 
 - Update docs in the same commit as the code.
