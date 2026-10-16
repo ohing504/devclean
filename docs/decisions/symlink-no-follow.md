@@ -4,14 +4,6 @@
 
 `fstree` never descends into a symlink and never matches one as an artifact, even when it is named like one (a symlinked `node_modules`, as pnpm and some monorepos produce). Only the scan root is read through, and only for `--path`. Deleting a symlink removes only the link; the cleaner's cross-filesystem trash copy recreates symlinks as links.
 
-## Verification
-
-```bash
-go test ./internal/fstree/ -run 'Symlink' -v
-go test ./internal/scanner/ -run 'Symlink' -v
-go test ./internal/cleaner/ -run 'TestCopyTree_PreservesSymlinkAsLink' -v
-```
-
 ## Rationale
 
 - A symlink's target is real content that lives on disk elsewhere, so following it would double-count that space and inflate the reported reclaimable total.

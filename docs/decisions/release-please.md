@@ -6,17 +6,8 @@ release-please keeps a release PR open on `main`. Merging it bumps the version, 
 
 - Version: Conventional Commits, `feat` bumps minor, `fix`/`perf` bump patch; below 1.0 a breaking change bumps minor (`bump-minor-pre-major`).
 - Sections: `feat` → Added, `fix` → Fixed, `perf`/`revert` → Changed; other types are hidden.
+- The repository squash-merges only, with the PR title as the commit title, so the PR title is what release-please reads.
 - Token: the default `GITHUB_TOKEN`. Its tag does not trigger other workflows, so GoReleaser runs as a job of the release-please workflow. CI on the release PR waits for a manual approval because `GITHUB_TOKEN` opened it.
-
-## Verification
-
-```bash
-goreleaser check
-```
-
-CI runs the same check on every PR. The first release PR shows the generated version and section; its merge run shows the Release with assets.
-
-The repository squash-merges only, with the PR title as the commit title, so the PR title is what release-please reads.
 
 ## Rationale
 

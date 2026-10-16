@@ -11,12 +11,6 @@ The walk engine skips these trees whole — no artifact matching, no project con
 
 When adding an ecosystem or rule, scan that tool's real SDK/toolchain checkout and verify what gets flagged. A scanner's own false positive is fixed in that scanner's PR.
 
-## Verification
-
-```bash
-go test ./internal/scanner/ -run 'TestWalkExcludesInstalledPackageTrees|TestFlutterWalk' -v
-```
-
 ## Rationale
 
 - Each package in an installed-package tree, including the runtime an app ships inside its bundle, carries its own marker (`package.json`, `setup.py`, `go.mod`). Without pruning it roots a project, and its shipped `dist/`, `__pycache__` or `vendor/` matches as `safe` output — deleting the `dist/` of the npm bundled in a GitHub Actions runner breaks the runner. A project's own `node_modules` matches as an artifact before the name check, so it is still reported.

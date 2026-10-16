@@ -9,15 +9,6 @@
 
 The per-file block sum is kept as `allocated_size` when larger.
 
-## Verification
-
-```bash
-go test ./internal/scanner/ -run 'Clone|Pnpm' -v
-go test ./internal/output/ -run SharedBlocks -v
-```
-
-Measured 2026-10-02: Chrome copies 11.3 GB → 0.76 GB; a pnpm `node_modules` 448 MB → 3.9 MB; home scan time unchanged (~60 s).
-
 ## Rationale
 
 - Sizes that are mostly shared blocks (Chrome copies ~15×) lead users to delete for space that never comes back.
