@@ -51,7 +51,7 @@ func newCleanCmd() *cobra.Command {
 			// prompt; fail so a script or agent sees why nothing was cleaned.
 			if !yes && !isatty.IsTerminal(os.Stdin.Fd()) {
 				cmd.SilenceUsage = true
-				return errors.New("stdin is not a terminal: pass --yes to clean without prompts (add --dry-run to preview)")
+				return errors.New("stdin is not a terminal: pass --yes to clean without prompts, or --dry-run --yes to preview")
 			}
 			results, err := runScanPipeline(ScanPipelineOptions{
 				Path:     scanPath,

@@ -166,7 +166,7 @@ Without `--yes`, `clean` needs a terminal on stdin to prompt. When stdin is not 
 terminal it exits with status 1 before scanning:
 
 ```text
-Error: stdin is not a terminal: pass --yes to clean without prompts (add --dry-run to preview)
+Error: stdin is not a terminal: pass --yes to clean without prompts, or --dry-run --yes to preview
 ```
 
 #### Vendor Cleanups
