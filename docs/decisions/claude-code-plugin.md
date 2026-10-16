@@ -8,13 +8,6 @@ The repository root is a Claude Code marketplace (`.claude-plugin/marketplace.js
 - The skill measures with `scan --json` and deletes with `clean --item … --yes`; size accounting and the safety gates (`protected` never deleted, `caution` only with `--include-caution`) stay in the binary.
 - The human interface (table, interactive selector) stays; removing it is a separate decision after the skill has been used.
 
-## Verification
-
-```bash
-claude plugin validate .
-claude --plugin-dir plugins/devclean   # the skill is listed as devclean:devclean
-```
-
 ## Rationale
 
 - Skills under a repository's `.claude/skills/` load only in sessions working in that repository; devclean is run from any directory, and Claude Code's docs direct skills used across repositories to a plugin.
