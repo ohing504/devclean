@@ -186,6 +186,11 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 				ReportProgress(ctx, len(results))
 				return false // matched artifact: do not descend
 			}
+			// After artifact matching, so a project's own node_modules is
+			// still reported.
+			if installedPackageDirNames[name] {
+				return false
+			}
 			// The root is always entered: the hidden-dir rule applies below it.
 			return dir == root || !strings.HasPrefix(name, ".") || hiddenDescend[name]
 		},
@@ -197,7 +202,7 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 
 			// Prune before establishing any context or descending, so nothing
 			// inside is ever a deletion target.
-			if isInstalledPackageTree(filepath.Base(dir), names) {
+			if isInstalledPackageTree(dir, names) {
 				return false
 			}
 			for i := range tables {
@@ -263,19 +268,34 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 	return results, nil
 }
 
+// installedPackageDirNames hold only installed packages when the walk reaches
+// them without matching an artifact rule (a global lib/node_modules, a tool's
+// bundled dependencies, a Python environment's site-packages). Enter prunes
+// them by name, so they are never read.
+var installedPackageDirNames = map[string]bool{
+	"node_modules":  true,
+	"site-packages": true,
+	"dist-packages": true,
+}
+
 // isInstalledPackageTree reports whether a directory roots a tree of installed
-// packages, whose marker files belong to shipped packages, not projects.
-// Checked for every ecosystem, so results don't depend on the --eco subset.
+// packages identified by its entries:
 //
 //   - pnpm store version dir: v<N> with files/ and index/ (v10) or index.db
-//     (v11). v11's links/ unpacks packages whose dist/ would match; deleting
-//     it corrupts the store every pnpm project hard-links from.
-//   - macOS app bundle: *.app with Contents/ (e.g. Electron node_modules).
-func isInstalledPackageTree(name string, names map[string]bool) bool {
-	if strings.HasSuffix(name, ".app") && names["Contents"] {
+//     (v11). Deleting v11's links/ corrupts the store.
+//   - macOS app bundle: *.app with Contents/.
+//   - Go module cache: mod/ with cache/download/.
+func isInstalledPackageTree(dir string, names map[string]bool) bool {
+	name := filepath.Base(dir)
+	switch {
+	case strings.HasSuffix(name, ".app") && names["Contents"]:
+		return true
+	case name == "mod" && names["cache"]:
+		return isDir(filepath.Join(dir, "cache", "download"))
+	case isPnpmStoreVersionDir(name) && names["files"] && (names["index"] || names["index.db"]):
 		return true
 	}
-	return isPnpmStoreVersionDir(name) && names["files"] && (names["index"] || names["index.db"])
+	return false
 }
 
 func isPnpmStoreVersionDir(name string) bool {

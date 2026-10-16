@@ -40,6 +40,36 @@ func TestWalkExcludesInstalledPackageTrees(t *testing.T) {
 			want: []artifact{{"app/node_modules", model.EcoNode, model.CatDeps, model.SafetySafe, ""}},
 		},
 		{
+			name: "node_modules outside a project",
+			ecos: node,
+			tree: []string{
+				"sdk-cache/darwin-arm64/node_modules/hono/package.json",
+				"sdk-cache/darwin-arm64/node_modules/hono/dist/index.js",
+				"runner/node20/lib/node_modules/npm/package.json",
+				"runner/node20/lib/node_modules/npm/node_modules/abbrev/",
+				"app/package.json", "app/tools/node_modules/x/package.json", "app/tools/node_modules/x/dist/",
+			},
+		},
+		{
+			name: "python site-packages",
+			ecos: []model.Ecosystem{model.EcoPython},
+			tree: []string{
+				"tool/.venv/lib/python3.12/site-packages/numpy/f2py/setup.py",
+				"tool/.venv/lib/python3.12/site-packages/numpy/f2py/__pycache__/x.pyc",
+				"usr/lib/python3/dist-packages/pkg/setup.py",
+				"usr/lib/python3/dist-packages/pkg/__pycache__/x.pyc",
+			},
+		},
+		{
+			name: "go module cache",
+			ecos: []model.Ecosystem{model.EcoGo},
+			tree: []string{
+				"go/pkg/mod/cache/download/x/@v/list",
+				"go/pkg/mod/github.com/briandowns/spinner@v1.23.2/go.mod",
+				"go/pkg/mod/github.com/briandowns/spinner@v1.23.2/vendor/",
+			},
+		},
+		{
 			name: "app bundle without node in the scan",
 			ecos: []model.Ecosystem{model.EcoPython},
 			tree: []string{
