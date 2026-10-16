@@ -186,8 +186,8 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 				ReportProgress(ctx, len(results))
 				return false // matched artifact: do not descend
 			}
-			// Checked after artifact matching, so a project's own node_modules
-			// is still reported; by name alone, so the tree is never read.
+			// After artifact matching, so a project's own node_modules is
+			// still reported.
 			if installedPackageDirNames[name] {
 				return false
 			}
@@ -268,14 +268,10 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 	return results, nil
 }
 
-// installedPackageDirNames are directories that hold only installed packages
-// whenever the walk reaches them without matching an artifact rule; Enter
-// prunes them by name. Their packages' own markers (package.json, setup.py)
-// would otherwise root projects whose shipped dist/ or __pycache__ match.
-//
-//   - node_modules: a global install prefix (lib/node_modules) or a tool's
-//     bundled dependencies, whose packages' dist/ is their shipped code.
-//   - site-packages / dist-packages: installed Python distributions.
+// installedPackageDirNames hold only installed packages when the walk reaches
+// them without matching an artifact rule (a global lib/node_modules, a tool's
+// bundled dependencies, a Python environment's site-packages). Enter prunes
+// them by name, so they are never read.
 var installedPackageDirNames = map[string]bool{
 	"node_modules":  true,
 	"site-packages": true,
@@ -283,14 +279,12 @@ var installedPackageDirNames = map[string]bool{
 }
 
 // isInstalledPackageTree reports whether a directory roots a tree of installed
-// packages identified by its entries. Checked for every ecosystem, so results
-// don't depend on the --eco subset.
+// packages identified by its entries:
 //
 //   - pnpm store version dir: v<N> with files/ and index/ (v10) or index.db
-//     (v11). v11's links/ unpacks packages whose dist/ would match; deleting
-//     it corrupts the store every pnpm project hard-links from.
-//   - macOS app bundle: *.app with Contents/ (e.g. an app's bundled dist/).
-//   - Go module cache: mod/ with cache/download/ (read-only module sources).
+//     (v11). Deleting v11's links/ corrupts the store.
+//   - macOS app bundle: *.app with Contents/.
+//   - Go module cache: mod/ with cache/download/.
 func isInstalledPackageTree(dir string, names map[string]bool) bool {
 	name := filepath.Base(dir)
 	switch {
