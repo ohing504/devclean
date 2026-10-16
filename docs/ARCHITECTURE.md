@@ -109,7 +109,7 @@ Classification forks git per repo (`git rev-parse` to resolve roots, `git status
 
 ## Claude Code plugin
 
-`plugins/devclean/` is a Claude Code plugin holding one skill; the repository root's `.claude-plugin/marketplace.json` lists it ([decision](decisions/claude-code-plugin.md)). The skill drives the installed binary through `scan --json` and `clean --item … --yes`, so it depends on the flags, JSON fields and safety gates in SPEC. A PR that changes them updates `SKILL.md` in the same diff.
+`plugins/devclean/` is a Claude Code plugin holding one skill; the repository root's `.claude-plugin/marketplace.json` lists it ([decision](decisions/claude-code-plugin.md)). The skill drives the installed binary through `scan --json` and `clean --item … --yes`, so it depends on the flags, JSON fields and safety gates in SPEC.
 
 ## Adding an ecosystem
 
