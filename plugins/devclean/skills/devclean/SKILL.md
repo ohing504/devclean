@@ -5,7 +5,7 @@ description: Find reclaimable disk space in a developer machine (node_modules, b
 
 # devclean
 
-devclean measures and deletes; you choose what to show and ask the user. Never measure with `du` or delete with `rm`: devclean's `size` is the space a delete frees (aware of APFS clones, hard links and sparse files), and its `clean` moves to Trash and refuses `protected` items.
+Use devclean for every size and every delete; decide only which artifacts to propose. Never measure with `du` or delete with `rm`: devclean's `size` is the space a delete frees (aware of APFS clones, hard links and sparse files), and its `clean` moves to Trash and refuses `protected` artifacts.
 
 ## 1. Check the binary
 
@@ -27,7 +27,12 @@ devclean scan --json [--path <dir>] [--eco <eco,...>] [--status <status>] [--min
 - The JSON can be large (one object per artifact). Pass `--min-size` and `-n`, and summarize it with `jq` or a short script instead of reading it whole.
 - `devclean list` prints the ecosystems, categories, statuses and safety levels; `devclean scan --help` prints every flag.
 
-Fields to use per artifact: `path`, `project_root`, `ecosystem`, `category`, `size` (bytes freed by deleting), `activity` (`active` < 7 days, `recent`, `stale`, `dormant` 90+ days), `safety`, `reason`, `recommendation`. `total_size` counts shared blocks once, so it can be less than the sum of `size`.
+Fields to use per artifact:
+
+- `path`, `project_root`, `ecosystem`, `category`
+- `size` — bytes freed by deleting the artifact. `total_size` counts shared blocks once, so it can be less than the sum of `size`.
+- `activity` — `active` < 7 days, `recent` 7–30 days, `stale` 30–90 days, `dormant` 90+ days since the last change
+- `safety`, `reason`, `recommendation`
 
 Safety levels:
 
@@ -37,25 +42,39 @@ Safety levels:
 
 ## 3. Propose and get approval
 
-Show the candidates grouped by project with size, activity and safety, largest or most dormant first. Propose `safe` items in `stale`/`dormant` projects first; propose `active` projects only when the user asks. Wait for the user to approve a list of paths in chat. Approval of a group ("all dormant node_modules") is approval of the paths you listed for it, not of new ones.
+- **Show**: artifacts grouped by project, with size, activity and safety, ordered by `size` descending.
+- **Propose first**: `safe` artifacts in `stale`/`dormant` projects. Propose `active` projects only when the user asks.
+- **Wait**: the user approves a list of paths in chat before any `clean` run.
+- **Group approval**: approving a group ("all dormant node_modules") approves the paths listed for it, not paths found later.
 
-## 4. Clean the approved paths
+## 4. Clean the approved artifacts
 
-Name every approved artifact with `--item` (the `path` field), and preview first:
+Name every approved artifact with `--item` (its `path` field), and preview first:
 
 ```bash
 devclean clean --item <path> [--item <path> ...] --dry-run --yes
 devclean clean --item <path> [--item <path> ...] --yes
 ```
 
+Scope:
+
 - Always pass `--item`. `clean --yes` without it deletes every `safe` artifact in the scanned scope.
-- `clean` scans again before deleting: pass the same `--path` and `--eco` as the scan, or it rescans `~` (slow) and an `--item` outside the scope matches nothing.
-- Add `--include-caution` only when the user approved those caution paths by name.
-- Items go to Trash. Add `--force` (permanent delete) only when the user asks for it.
-- Without `--yes`, `clean` opens an interactive selector and fails when stdin is not a terminal. Use it only by telling the user to run it themselves.
-- A non-zero exit before deletion lists each `--item` that matched nothing or would be skipped, with the reason. Report it; do not retry with broader flags.
-- `--vendor-cleanup` also runs tool cleanup commands (`npm cache clean --force`, `pnpm store prune`, `xcrun simctl delete unavailable`, …) for the targeted ecosystems. Use it only when the user approves those commands.
+- Pass the same `--path` and `--eco` as the scan. `clean` scans again before deleting; without them it rescans `~` (slow), and an `--item` outside the scope matches nothing.
+- Always pass `--yes`. When the user wants to pick interactively, give them the `devclean clean` command to run in their terminal.
+
+Flags that need the user's approval:
+
+- `--include-caution` — only for `caution` paths the user approved by name.
+- `--force` — permanent delete instead of Trash; only when the user asks for it.
+- `--vendor-cleanup` — also runs tool cleanup commands (`npm cache clean --force`, `pnpm store prune`, `xcrun simctl delete unavailable`, …) for the targeted ecosystems; only when the user approves those commands.
+
+Failures:
+
+- Exit status 1 before deletion lists each `--item` that matched nothing or would be skipped, with the reason. Report it; do not retry with broader flags.
 
 ## 5. Report
 
-Report the freed size and Trash/permanent from the `clean` output, the items that failed with their errors, and every `recommendation` on the cleaned artifacts (for example, run `pnpm store prune` after deleting pnpm `node_modules`). If items went to Trash, say the space is freed when the Trash is emptied.
+- Freed size, and whether the artifacts went to Trash or were deleted permanently, from the `clean` output.
+- Artifacts that failed, with their errors.
+- Every `recommendation` on the cleaned artifacts (for example, run `pnpm store prune` after deleting pnpm `node_modules`).
+- For Trash moves: the space is freed when the Trash is emptied.
