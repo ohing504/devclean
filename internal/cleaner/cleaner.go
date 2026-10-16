@@ -36,7 +36,8 @@ func New(opts Options) *Cleaner {
 
 // Clean reclaims a scan result item: protection and dry-run gates apply to
 // every strategy; execution then goes through the item's DeleteMethod when one
-// is attached, or falls back to path removal (trash or permanent).
+// is attached, or falls back to path removal (trash or permanent) followed by
+// the item's Release, if any.
 func (c *Cleaner) Clean(ctx context.Context, r model.ScanResult) error {
 	if r.Protected {
 		return fmt.Errorf("refusing to delete protected item: %s (%s)", r.Path, r.Reason)
@@ -62,11 +63,21 @@ func (c *Cleaner) Clean(ctx context.Context, r model.ScanResult) error {
 		return r.Delete.Run(ctx)
 	}
 
-	if c.opts.Force {
-		return os.RemoveAll(r.Path)
+	if err := c.remove(r.Path); err != nil {
+		return err
 	}
+	if r.Release != nil {
+		return r.Release(c.remove)
+	}
+	return nil
+}
 
-	return c.moveToTrash(r.Path)
+// remove deletes path permanently with Force, else moves it to the Trash.
+func (c *Cleaner) remove(path string) error {
+	if c.opts.Force {
+		return os.RemoveAll(path)
+	}
+	return c.moveToTrash(path)
 }
 
 // CleanResult holds the outcome of a single clean operation.

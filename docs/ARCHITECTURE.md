@@ -37,6 +37,7 @@ Three invariants keep the figures honest:
 
 - **Hard links** (`Nlink>1`) are counted once per artifact, keyed by `(dev, ino)`, so shared blocks net out across artifacts.
 - **APFS clones** in a `CloneAware` artifact count once; clone groups split across artifacts go to `CloneShares` so `DedupedTotal` counts them once.
+- **Hugging Face shared blobs** referenced by several models go to `BlobShares` so `DedupedTotal` counts them once.
 - **Shared traversal**: sizing walks with `fstree`, so it counts what finding reports and deletion removes.
 
 Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through one shared bounded worker pool (`sizePending`, `min(NumCPU, 8)`) so the tree-walk I/O overlaps.
@@ -89,6 +90,8 @@ Use this pattern when a single ecosystem produces directories whose names alone 
 Reclaiming is not always `os.RemoveAll` on a path — Docker images or simulator devices are reclaimed through vendor commands or API calls. Each `ScanResult` carries an optional `Delete *model.DeleteMethod` (kind path/command/api + display + `Run`); nil means path removal.
 
 The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached, otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal. Path removal (including dry-run) is refused when `fstree` skips any directory in the item: a recursive delete does not stop at mounts. Example: the global scanner's Homebrew item (`brew cleanup`).
+
+After path removal the cleaner runs the item's `Release`, if any, with the same trash/permanent removal; dry-run skips it.
 
 In JSON output, non-path items serialize as `"delete": {"kind": "command", "display": "..."}` (`Run` never serializes), so agents can tell strategies apart; absence of the key means path removal.
 

@@ -568,7 +568,11 @@ Local LLM model stores at fixed home paths. Model weights dominate these directo
 | `~/.ollama/models` | store as a whole | `Ollama model store` |
 | `~/.llamafile` | store as a whole | `llamafile store` |
 
-LM Studio and Hugging Face hub lay each model out as its own directory, so they are reported per model — delete only the models you no longer use. Ollama stores weights as content-addressed blobs shared across models, so it is reported as one entry; to remove individual models, prefer `ollama rm <model>` (noted in `recommendation`).
+LM Studio and Hugging Face hub lay each model out as its own directory, so they are reported per model — delete only the models you no longer use.
+
+**Hugging Face shared blobs** (`hub/blobs/.huggingface-shared-blobs`): model directories hold only symlinks into `hub/blobs`. A model's `size` adds the blobs only it references, and deleting a model also deletes the blobs nothing references any more. Blobs no repo references are one result, `Hugging Face unreferenced shared blobs`, deleted permanently ([decision](decisions/hf-shared-blobs.md)).
+
+Ollama stores weights as content-addressed blobs shared across models, so it is reported as one entry; to remove individual models, prefer `ollama rm <model>` (noted in `recommendation`).
 
 **Last used**: each result carries `last_used_at` (JSON) / a dim "last used …" hint (table), derived from the model directory's mtime (store mtime for Ollama/llamafile) — a rough signal for spotting models that haven't been touched in months. Log-based usage analysis is a possible future refinement.
 

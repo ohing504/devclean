@@ -141,6 +141,13 @@ type ScanResult struct {
 	// CloneShares are pure clone groups only partly inside this artifact, left
 	// out of Size; DedupedTotal counts one once the results hold all its clones.
 	CloneShares map[CloneKey]CloneShare `json:"-"`
+	// BlobShares are Hugging Face shared blobs other repos also reference,
+	// left out of Size like CloneShares.
+	BlobShares map[InodeKey]CloneShare `json:"-"`
+
+	// Release runs after Path is removed, deleting through remove what the
+	// removal left unreferenced (a Hugging Face model's shared blobs).
+	Release func(remove func(path string) error) error `json:"-"`
 }
 
 // CloneKey identifies a group of pure APFS clones on a device.
@@ -201,7 +208,7 @@ func HumanSize(size int64) string {
 }
 
 // DedupedTotal returns the total disk usage across results with blocks shared
-// via hard links or split APFS clone groups counted once. Each result's Size
+// via hard links, split APFS clone groups or shared blobs counted once. Each result's Size
 // already counts its own hard-linked inodes once (intra-artifact); this nets
 // out inodes that recur across artifacts — e.g. a pnpm store blob also
 // hard-linked into a project's node_modules — so the total reflects the space
@@ -215,13 +222,10 @@ func DedupedTotal(results []ScanResult) int64 {
 	var total int64
 	seen := make(map[InodeKey]struct{})
 	groups := make(map[CloneKey]CloneShare)
+	blobs := make(map[InodeKey]CloneShare)
 	for _, r := range results {
-		for key, s := range r.CloneShares {
-			g := groups[key]
-			g.Refcnt, g.Blocks = s.Refcnt, s.Blocks
-			g.Seen += s.Seen
-			groups[key] = g
-		}
+		mergeShares(groups, r.CloneShares)
+		mergeShares(blobs, r.BlobShares)
 		total += r.Size
 		for key, blocks := range r.Links {
 			// First artifact to hold this inode keeps it (already in r.Size);
@@ -233,6 +237,22 @@ func DedupedTotal(results []ScanResult) int64 {
 			seen[key] = struct{}{}
 		}
 	}
+	return total + fullShares(groups) + fullShares(blobs)
+}
+
+// mergeShares adds each artifact's part of a shared group into dst.
+func mergeShares[K comparable](dst, src map[K]CloneShare) {
+	for key, s := range src {
+		g := dst[key]
+		g.Refcnt, g.Blocks = s.Refcnt, s.Blocks
+		g.Seen += s.Seen
+		dst[key] = g
+	}
+}
+
+// fullShares sums the blocks of groups whose every holder is present.
+func fullShares[K comparable](groups map[K]CloneShare) int64 {
+	var total int64
 	for _, g := range groups {
 		if g.Seen >= g.Refcnt {
 			total += g.Blocks
