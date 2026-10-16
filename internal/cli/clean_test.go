@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
+	"github.com/ohing504/devclean/internal/pathutil"
 )
 
 // TestSelectForYes verifies the non-interactive (--yes) safety gate: only safe
@@ -114,6 +115,75 @@ func TestCleanItemUnmatchedFailsBeforeDeleting(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(proj, "dist")); err != nil {
 		t.Errorf("dist must not be deleted when another --item is unmatched: %v", err)
+	}
+}
+
+// TestCleanItemGatedBySafetyFails verifies a named caution artifact that --yes
+// would skip fails the command with the reason and deletes nothing.
+func TestCleanItemGatedBySafetyFails(t *testing.T) {
+	root := t.TempDir()
+	venv := filepath.Join(root, "app", ".venv")
+	if err := os.MkdirAll(filepath.Join(venv, "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "app", "pyproject.toml"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runClean(t, "--eco", "python", "--path", root, "--item", venv, "--yes", "--force")
+	if err == nil || !strings.Contains(err.Error(), "--include-caution") {
+		t.Fatalf("want an error naming --include-caution, got %v", err)
+	}
+	if _, err := os.Stat(venv); err != nil {
+		t.Errorf(".venv must not be deleted: %v", err)
+	}
+}
+
+// TestCleanItemKeepsCommaInPath verifies --item takes a path with a comma as
+// one path.
+func TestCleanItemKeepsCommaInPath(t *testing.T) {
+	root := t.TempDir()
+	proj := filepath.Join(root, "a,b")
+	dist := filepath.Join(proj, "dist")
+	if err := os.MkdirAll(dist, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, "package.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runClean(t, "--eco", "node", "--path", root, "--item", dist, "--yes", "--force"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dist); !os.IsNotExist(err) {
+		t.Errorf("dist should be deleted, stat err = %v", err)
+	}
+}
+
+// TestKeepItemsResolvesHomeAndRelativePaths verifies a "~/" item and a
+// relative item match the absolute scan paths they name, and an unmatched item
+// is reported as given.
+func TestKeepItemsResolvesHomeAndRelativePaths(t *testing.T) {
+	home := pathutil.CachedHomeDir()
+	if home == "" {
+		t.Skip("no home directory")
+	}
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	results := []model.ScanResult{
+		{Path: filepath.Join(home, ".npm")},
+		{Path: filepath.Join(cwd, "app", "dist")},
+		{Path: filepath.Join(cwd, "app", "node_modules")},
+	}
+
+	kept, missing := keepItems(results, []string{"~/.npm", "app/dist/", "nope"})
+
+	want := []string{filepath.Join(home, ".npm"), filepath.Join(cwd, "app", "dist")}
+	if !slices.Equal(paths(kept), want) {
+		t.Errorf("kept = %v, want %v", paths(kept), want)
+	}
+	if !slices.Equal(missing, []string{"nope"}) {
+		t.Errorf("missing = %v, want [nope]", missing)
 	}
 }
 

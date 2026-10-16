@@ -68,7 +68,7 @@ func newCleanCmd() *cobra.Command {
 				results, missing = keepItems(results, items)
 				if len(missing) > 0 {
 					cmd.SilenceUsage = true
-					return fmt.Errorf("--item matched no scanned artifact: %s (artifact paths are the \"path\" field of 'devclean scan --json')", strings.Join(missing, ", "))
+					return fmt.Errorf("--item matched no scanned artifact: %s (artifact paths are the \"path\" field of 'devclean scan --json'; --eco, --path, --status, --safe and --min-size also narrow what is scanned)", strings.Join(missing, ", "))
 				}
 			}
 
@@ -93,6 +93,12 @@ func newCleanCmd() *cobra.Command {
 							skippedCaution,
 						)),
 					)
+				}
+				// A named artifact the safety gate drops is a failed request, not
+				// a choice: fail before deleting so a script sees it.
+				if len(items) > 0 && len(toClean) < len(results) {
+					cmd.SilenceUsage = true
+					return fmt.Errorf("--item artifacts not cleaned with --yes: %s", strings.Join(gatedItems(results, toClean), ", "))
 				}
 			} else {
 				// Interactive tree selection
@@ -265,7 +271,7 @@ func newCleanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview without deleting")
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip confirmation and interactive selection (deletes only safe items unless --include-caution)")
 	cmd.Flags().BoolVar(&includeCaution, "include-caution", false, "with --yes, also delete caution items (shared impact or hard to regenerate); protected is still never deleted")
-	cmd.Flags().StringSliceVar(&items, "item", nil, "clean only the artifacts at these paths (the \"path\" field of 'devclean scan --json'; repeatable)")
+	cmd.Flags().StringArrayVar(&items, "item", nil, "clean only the artifact at this path (the \"path\" field of 'devclean scan --json'); repeat for more")
 	cmd.Flags().BoolVar(&vendorCleanup, "vendor-cleanup", false, "also run ecosystem-native cleanup commands (e.g. 'xcrun simctl delete unavailable' for xcode)")
 
 	return cmd
@@ -298,6 +304,27 @@ func selectForYes(results []model.ScanResult, includeCaution bool) (toClean []mo
 	return toClean, skippedCaution
 }
 
+// gatedItems describes the results selectForYes left out of toClean, each with
+// the reason it was kept.
+func gatedItems(results, toClean []model.ScanResult) []string {
+	cleaned := make(map[string]bool, len(toClean))
+	for _, r := range toClean {
+		cleaned[r.Path] = true
+	}
+	var out []string
+	for _, r := range results {
+		if cleaned[r.Path] {
+			continue
+		}
+		reason := "protected, never deleted"
+		if !r.Protected && r.Safety == model.SafetyCaution {
+			reason = "caution, pass --include-caution"
+		}
+		out = append(out, fmt.Sprintf("%s (%s)", r.Path, reason))
+	}
+	return out
+}
+
 // keepItems narrows results to the artifacts whose path is one of items, so a
 // non-interactive clean can target single artifacts the other filters cannot
 // separate. A leading "~/" is expanded and relative paths resolve against the
@@ -307,7 +334,9 @@ func keepItems(results []model.ScanResult, items []string) (kept []model.ScanRes
 	want := make(map[string]bool, len(items))
 	for i, it := range items {
 		p := it
-		if rest, ok := strings.CutPrefix(p, "~/"); ok {
+		// Without a home dir "~/" stays literal, so the item fails to match
+		// instead of resolving against the working directory.
+		if rest, ok := strings.CutPrefix(p, "~/"); ok && pathutil.CachedHomeDir() != "" {
 			p = filepath.Join(pathutil.CachedHomeDir(), rest)
 		}
 		if abs, err := filepath.Abs(p); err == nil {

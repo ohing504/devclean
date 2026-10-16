@@ -130,18 +130,21 @@ artifacts crowd out the real targets. Sizes use SI/IEC suffixes:
 
 #### `--item`
 
-`clean --item <path>` (repeatable, or comma-separated) keeps only the scanned
-artifacts at those paths, so a non-interactive run can target one artifact the
-other filters cannot separate. Paths are the `path` field of `scan --json`; a
-leading `~/` is expanded and relative paths resolve against the working
-directory. Other filters and the `--yes` safety gate still apply: a `caution`
-item needs `--include-caution`, and a `protected` item is never deleted.
+`clean --item <path>` keeps only the scanned artifact at that path, so a
+non-interactive run can target one artifact the other filters cannot separate.
+Repeat the flag for more; a comma is part of the path. Paths are the `path`
+field of `scan --json`; a leading `~/` is expanded and relative paths resolve
+against the working directory. Other filters and the `--yes` safety gate still
+apply: a `caution` item needs `--include-caution`, and a `protected` item is
+never deleted.
 
-If any `--item` matches no scanned artifact, `clean` exits with status 1 before
-deleting anything:
+`clean` exits with status 1 before deleting anything when any `--item` matches
+no scanned artifact, or when `--yes` would leave a named artifact uncleaned
+(each is listed with its reason):
 
 ```text
-Error: --item matched no scanned artifact: /Users/me/.npmx (artifact paths are the "path" field of 'devclean scan --json')
+Error: --item matched no scanned artifact: /Users/me/.npmx (artifact paths are the "path" field of 'devclean scan --json'; --eco, --path, --status, --safe and --min-size also narrow what is scanned)
+Error: --item artifacts not cleaned with --yes: /Users/me/app/.venv (caution, pass --include-caution)
 ```
 
 #### Non-interactive safety (`--yes` / `--include-caution`)
