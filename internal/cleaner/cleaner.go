@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/ohing504/devclean/internal/fstree"
@@ -63,21 +64,42 @@ func (c *Cleaner) Clean(ctx context.Context, r model.ScanResult) error {
 		return r.Delete.Run(ctx)
 	}
 
-	if err := c.remove(r.Path); err != nil {
+	if err := c.remove(r.Path, trashName(r)); err != nil {
 		return err
 	}
 	if r.Release != nil {
-		return r.Release(c.remove)
+		return r.Release(func(path string) error {
+			return c.remove(path, filepath.Base(path))
+		})
 	}
 	return nil
 }
 
-// remove deletes path permanently with Force, else moves it to the Trash.
-func (c *Cleaner) remove(path string) error {
+// remove deletes path permanently with Force, else moves it to the Trash as
+// name.
+func (c *Cleaner) remove(path, name string) error {
 	if c.opts.Force {
 		return os.RemoveAll(path)
 	}
-	return c.moveToTrash(path)
+	return c.moveToTrash(path, name)
+}
+
+// trashName names an artifact in the Trash after its project, so same-named
+// artifacts from different projects stay apart, and without a leading dot,
+// which Finder hides: ~/app/.venv → "app .venv". An artifact directly in the
+// home directory has no project to name and only loses its dot: ~/.npm → "npm".
+func trashName(r model.ScanResult) string {
+	base := filepath.Base(r.Path)
+	name := base
+	project := r.ProjectKey()
+	home, _ := os.UserHomeDir()
+	if prefix := filepath.Base(project); project != home && prefix != string(filepath.Separator) && prefix != "." {
+		name = prefix + " " + base
+	}
+	if trimmed := strings.TrimLeft(name, "."); trimmed != "" {
+		return trimmed
+	}
+	return base
 }
 
 // CleanResult holds the outcome of a single clean operation.
@@ -96,7 +118,7 @@ func (c *Cleaner) CleanAll(ctx context.Context, results []model.ScanResult) []Cl
 	return out
 }
 
-func (c *Cleaner) moveToTrash(path string) error {
+func (c *Cleaner) moveToTrash(path, name string) error {
 	trashDir := c.opts.TrashDir
 	if trashDir == "" {
 		trashDir = defaultTrashDir()
@@ -106,7 +128,7 @@ func (c *Cleaner) moveToTrash(path string) error {
 		return fmt.Errorf("cannot create trash dir: %w", err)
 	}
 
-	return moveToDir(path, trashDir)
+	return moveToDir(path, trashDir, name)
 }
 
 func defaultTrashDir() string {
@@ -122,8 +144,7 @@ func defaultTrashDir() string {
 	return filepath.Join(xdgData, "Trash", "files")
 }
 
-func moveToDir(src, destDir string) error {
-	name := filepath.Base(src)
+func moveToDir(src, destDir, name string) error {
 	dest := filepath.Join(destDir, name)
 
 	// Handle name conflicts
