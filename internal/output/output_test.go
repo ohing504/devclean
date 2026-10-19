@@ -282,7 +282,7 @@ func TestWriteTable_TopNByProject(t *testing.T) {
 	out := buf.String()
 
 	// Top 2 by project size: A (500MB) and B (400MB). C should be excluded.
-	if strings.Contains(out, "/c\n") {
+	if strings.Contains(out, "\n  /c ") {
 		t.Errorf("project C should not appear in top 2:\n%s", out)
 	}
 	// Should show 2 projects, not 3
@@ -295,37 +295,8 @@ func TestWriteTable_TopNByProject(t *testing.T) {
 	}
 }
 
-func TestWriteTable_MonorepoRelativePaths(t *testing.T) {
-	// Monorepo artifacts should be grouped by sub-package with headers.
-	fixedTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	results := []model.ScanResult{
-		{Path: "/monorepo/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, Size: 500000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/monorepo"},
-		{Path: "/monorepo/apps/web/.next", Ecosystem: model.EcoNode, Category: model.CatBuild, Size: 300000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/monorepo"},
-		{Path: "/monorepo/apps/admin/.next", Ecosystem: model.EcoNode, Category: model.CatBuild, Size: 200000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/monorepo"},
-	}
-
-	var buf bytes.Buffer
-	output.WriteTableWithOptions(&buf, results, output.TableOptions{Verbose: true})
-	out := buf.String()
-
-	// Sub-package headers should appear
-	if !strings.Contains(out, "apps/web (") {
-		t.Errorf("expected sub-package header 'apps/web (':\n%s", out)
-	}
-	if !strings.Contains(out, "apps/admin (") {
-		t.Errorf("expected sub-package header 'apps/admin (':\n%s", out)
-	}
-	// Artifacts show just basename under sub-package
-	if !strings.Contains(out, "node_modules") {
-		t.Errorf("expected 'node_modules':\n%s", out)
-	}
-	if !strings.Contains(out, ".next") {
-		t.Errorf("expected '.next':\n%s", out)
-	}
-}
-
-func TestWriteTable_SubPackageGrouping(t *testing.T) {
-	// Monorepo artifacts should be grouped by sub-package.
+func TestWriteTable_DirectoryGrouping(t *testing.T) {
+	// Monorepo artifacts should be grouped by directory.
 	fixedTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	results := []model.ScanResult{
 		{Path: "/mono/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, Size: 500000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
@@ -339,53 +310,23 @@ func TestWriteTable_SubPackageGrouping(t *testing.T) {
 	output.WriteTableWithOptions(&buf, results, output.TableOptions{Verbose: true})
 	out := buf.String()
 
-	// Should show sub-package headers with size totals (not just artifact relative paths)
-	// Root group should exist
-	if !strings.Contains(out, ". (") {
-		t.Errorf("expected root sub-package header '. (':\n%s", out)
+	if !strings.Contains(out, ". (root) (") {
+		t.Errorf("expected root directory header '. (root) (':\n%s", out)
 	}
-	// apps/web group header with size
 	if !strings.Contains(out, "apps/web (") {
-		t.Errorf("expected sub-package header 'apps/web (':\n%s", out)
+		t.Errorf("expected directory header 'apps/web (':\n%s", out)
 	}
-	// apps/admin group header with size
 	if !strings.Contains(out, "apps/admin (") {
-		t.Errorf("expected sub-package header 'apps/admin (':\n%s", out)
+		t.Errorf("expected directory header 'apps/admin (':\n%s", out)
 	}
-	// Artifacts should show just the filename, not the full relative path
-	if !strings.Contains(out, ".next") {
-		t.Errorf("expected artifact '.next':\n%s", out)
-	}
-}
-
-func TestWriteTable_DefaultCollapseSmallPackages(t *testing.T) {
-	// Default mode should collapse small sub-packages in monorepos.
-	fixedTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	results := []model.ScanResult{
-		{Path: "/mono/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, Size: 500000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
-		{Path: "/mono/.turbo", Ecosystem: model.EcoNode, Category: model.CatCache, Size: 200000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
-		{Path: "/mono/apps/web/.next", Ecosystem: model.EcoNode, Category: model.CatBuild, Size: 300000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
-		{Path: "/mono/apps/admin/.next", Ecosystem: model.EcoNode, Category: model.CatBuild, Size: 100000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
-		{Path: "/mono/packages/ui/.turbo", Ecosystem: model.EcoNode, Category: model.CatCache, Size: 100, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
-		{Path: "/mono/packages/db/.turbo", Ecosystem: model.EcoNode, Category: model.CatCache, Size: 50, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
-	}
-
-	var buf bytes.Buffer
-	output.WriteTable(&buf, results)
-	out := buf.String()
-
-	// Small sub-packages (packages/ui, packages/db) should be collapsed
-	if !strings.Contains(out, "more packages") {
-		t.Errorf("expected small packages collapsed with 'more packages', got:\n%s", out)
-	}
-	// Large sub-packages should still show
-	if !strings.Contains(out, "apps/web") {
-		t.Errorf("expected apps/web to show, got:\n%s", out)
+	// Artifacts are named relative to their directory header.
+	if strings.Contains(out, "apps/web/.next") || !strings.Contains(out, ".next (build)") {
+		t.Errorf("expected '.next' named relative to apps/web:\n%s", out)
 	}
 }
 
 func TestWriteTable_MonorepoGrouping(t *testing.T) {
-	// Monorepo: artifacts spread across sub-packages should be grouped
+	// Monorepo: artifacts spread across directories should be grouped
 	// under one project when they share the same ProjectRoot (git root).
 	fixedTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	results := []model.ScanResult{
@@ -460,24 +401,28 @@ func TestWriteTableEcosystemTotalDedupsHardLinks(t *testing.T) {
 
 // TestWriteTableCollapsedSummariesDedupHardLinks pins that the "... and N more"
 // lines count hard-linked blocks shared between the collapsed entries once,
-// like the headers above them.
+// like the headers above them. A larger entry comes first because the largest
+// entry is never collapsed.
 func TestWriteTableCollapsedSummariesDedupHardLinks(t *testing.T) {
 	shared := map[model.InodeKey]int64{{Dev: 1, Ino: 7}: 400}
 	item := func(path, root string) model.ScanResult {
 		return model.ScanResult{Path: path, Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: root, Size: 500, Links: shared, Safety: model.SafetySafe, Activity: model.StatusDormant}
 	}
+	largest := func(path, root string) model.ScanResult {
+		return model.ScanResult{Path: path, Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: root, Size: 2_000_000, Safety: model.SafetySafe, Activity: model.StatusDormant}
+	}
 
-	t.Run("packages", func(t *testing.T) {
-		results := []model.ScanResult{item("/m/a/node_modules", "/m"), item("/m/b/node_modules", "/m"), item("/m/c/node_modules", "/m")}
+	t.Run("directories", func(t *testing.T) {
+		results := []model.ScanResult{largest("/m/big/node_modules", "/m"), item("/m/a/node_modules", "/m"), item("/m/b/node_modules", "/m"), item("/m/c/node_modules", "/m")}
 		var buf bytes.Buffer
 		output.WriteTable(&buf, results)
-		if out := buf.String(); !strings.Contains(out, "and 3 more packages (700 B)") {
-			t.Errorf("collapsed packages should show deduped 700 B; got:\n%s", out)
+		if out := buf.String(); !strings.Contains(out, "and 3 more directories (700 B)") {
+			t.Errorf("collapsed directories should show deduped 700 B; got:\n%s", out)
 		}
 	})
 
 	t.Run("artifacts", func(t *testing.T) {
-		results := []model.ScanResult{item("/p/node_modules", "/p"), item("/p/.cache", "/p")}
+		results := []model.ScanResult{largest("/p/dist", "/p"), item("/p/node_modules", "/p"), item("/p/.cache", "/p")}
 		var buf bytes.Buffer
 		output.WriteTable(&buf, results)
 		if out := buf.String(); !strings.Contains(out, "and 2 more (600 B)") {
@@ -486,7 +431,7 @@ func TestWriteTableCollapsedSummariesDedupHardLinks(t *testing.T) {
 	})
 }
 
-// TestWriteTableTieBreaksByName pins that ecosystems and sub-packages with
+// TestWriteTableTieBreaksByName pins that ecosystems and directories with
 // equal sizes appear in name order on every run, and that -n cuts equal-size
 // projects by path. Project order itself is pinned in the model package.
 func TestWriteTableTieBreaksByName(t *testing.T) {
@@ -521,12 +466,12 @@ func TestWriteTableTieBreaksByName(t *testing.T) {
 	t.Run("ecosystems", func(t *testing.T) {
 		inOrder(t, "● go", "● node", "● python", "● rust")
 	})
-	t.Run("sub-packages", func(t *testing.T) {
+	t.Run("directories", func(t *testing.T) {
 		inOrder(t, "    k (", "    l (", "    m (")
 	})
 	t.Run("top N cut", func(t *testing.T) {
 		// TopN keeps the first 10 of 12 equal projects by path: rust/p and rust/q drop.
-		if strings.Contains(out, "/rust/p\n") || !strings.Contains(out, "/rust/o\n") {
+		if strings.Contains(out, "\n  /rust/p ") || !strings.Contains(out, "\n  /rust/o ") {
 			t.Errorf("TopN should drop the last projects by path; got:\n%s", out)
 		}
 	})
@@ -548,7 +493,7 @@ func TestWriteTableOrdersProjectsBySortKey(t *testing.T) {
 	var buf bytes.Buffer
 	output.WriteTableWithOptions(&buf, sortKeyResults(), output.TableOptions{SortBy: model.SortByTime})
 	out := buf.String()
-	if i, j, k := strings.Index(out, "/new\n"), strings.Index(out, "/mid\n"), strings.Index(out, "/big\n"); i < 0 || j < 0 || k < 0 || i > j || j > k {
+	if i, j, k := strings.Index(out, "\n  /new "), strings.Index(out, "\n  /mid "), strings.Index(out, "\n  /big "); i < 0 || j < 0 || k < 0 || i > j || j > k {
 		t.Errorf("--sort time should list /new, /mid, /big; got:\n%s", out)
 	}
 }
@@ -559,7 +504,7 @@ func TestWriteTableTopNFollowsSortKey(t *testing.T) {
 	var buf bytes.Buffer
 	output.WriteTableWithOptions(&buf, sortKeyResults(), output.TableOptions{TopN: 2, SortBy: model.SortByTime})
 	out := buf.String()
-	if strings.Contains(out, "/big\n") || !strings.Contains(out, "/new\n") || !strings.Contains(out, "/mid\n") {
+	if strings.Contains(out, "\n  /big ") || !strings.Contains(out, "\n  /new ") || !strings.Contains(out, "\n  /mid ") {
 		t.Errorf("-n 2 --sort time should keep /new and /mid and drop the oldest project /big; got:\n%s", out)
 	}
 }
@@ -577,7 +522,74 @@ func TestWriteTableTopNCountsProjectPaths(t *testing.T) {
 	output.WriteTableWithOptions(&buf, results, output.TableOptions{TopN: 2})
 	out := buf.String()
 	// /a totals 6 MB across node and python, so -n 2 keeps /a and /b, not /c.
-	if !strings.Contains(out, "/a\n") || !strings.Contains(out, "/b\n") || strings.Contains(out, "/c\n") {
+	if !strings.Contains(out, "\n  /a ") || !strings.Contains(out, "\n  /b ") || strings.Contains(out, "\n  /c ") {
 		t.Errorf("-n 2 should keep projects /a (6 MB) and /b; got:\n%s", out)
 	}
+}
+
+// TestWriteTableProjectHeaderIsPath pins that a group header is the path of
+// the directory holding its artifacts, not that directory's base name, which
+// says nothing for fixed-path caches (~/Library/Caches → "Caches").
+func TestWriteTableProjectHeaderIsPath(t *testing.T) {
+	results := []model.ScanResult{
+		{Path: "/opt/Library/Caches/ms-playwright", Ecosystem: model.EcoGlobal, Category: model.CatCache, ProjectRoot: "/opt/Library/Caches", Label: "Playwright browser binaries", Size: 2_000_000, Safety: model.SafetySafe},
+	}
+	var buf bytes.Buffer
+	output.WriteTable(&buf, results)
+	out := buf.String()
+	if !strings.Contains(out, "\n  /opt/Library/Caches ") || strings.Contains(out, "\n  Caches ") {
+		t.Errorf("want the header to be the path; got:\n%s", out)
+	}
+}
+
+// TestWriteTableKeepsLargestEntryVisible pins that a project whose entries are
+// all below the collapse threshold still shows its largest entry instead of
+// only a "... and N more" line.
+func TestWriteTableKeepsLargestEntryVisible(t *testing.T) {
+	small := func(path, root string, size int64) model.ScanResult {
+		return model.ScanResult{Path: path, Ecosystem: model.EcoPython, Category: model.CatBuild, ProjectRoot: root, Size: size, Safety: model.SafetySafe}
+	}
+	t.Run("directories", func(t *testing.T) {
+		results := []model.ScanResult{
+			small("/r/a/__pycache__", "/r", 300), small("/r/b/__pycache__", "/r", 200), small("/r/c/__pycache__", "/r", 100),
+		}
+		var buf bytes.Buffer
+		output.WriteTable(&buf, results)
+		if out := buf.String(); !strings.Contains(out, "    a (300 B)") || !strings.Contains(out, "and 2 more directories") {
+			t.Errorf("want directory a shown and the other two collapsed; got:\n%s", out)
+		}
+	})
+	t.Run("artifacts", func(t *testing.T) {
+		results := []model.ScanResult{small("/f/.ruff_cache", "/f", 300), small("/f/.pytest_cache", "/f", 200)}
+		var buf bytes.Buffer
+		output.WriteTable(&buf, results)
+		if out := buf.String(); !strings.Contains(out, ".ruff_cache") || !strings.Contains(out, "and 1 more") {
+			t.Errorf("want .ruff_cache shown and the other collapsed; got:\n%s", out)
+		}
+	})
+}
+
+// TestWriteTableCollapsesDirectoriesLikeArtifacts pins that directories and
+// the artifacts inside one follow the rule of a project's flat artifact list:
+// below the threshold collapses, the largest stays, however few there are.
+func TestWriteTableCollapsesDirectoriesLikeArtifacts(t *testing.T) {
+	item := func(path string, size int64) model.ScanResult {
+		return model.ScanResult{Path: path, Ecosystem: model.EcoNode, Category: model.CatBuild, ProjectRoot: "/m", Size: size, Safety: model.SafetySafe}
+	}
+	t.Run("two directories", func(t *testing.T) {
+		results := []model.ScanResult{item("/m/a/dist", 2_000_000), item("/m/b/dist", 300)}
+		var buf bytes.Buffer
+		output.WriteTable(&buf, results)
+		if out := buf.String(); !strings.Contains(out, "    a (") || strings.Contains(out, "    b (") || !strings.Contains(out, "and 1 more directory (300 B)") {
+			t.Errorf("want a shown and b collapsed; got:\n%s", out)
+		}
+	})
+	t.Run("artifacts in a directory", func(t *testing.T) {
+		results := []model.ScanResult{item("/m/a/dist", 2_000_000), item("/m/a/.cache", 300), item("/m/b/dist", 3_000_000)}
+		var buf bytes.Buffer
+		output.WriteTable(&buf, results)
+		if out := buf.String(); strings.Contains(out, ".cache") || !strings.Contains(out, "      ... and 1 more (300 B)") {
+			t.Errorf("want .cache collapsed under a; got:\n%s", out)
+		}
+	})
 }

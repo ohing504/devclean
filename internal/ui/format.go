@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ohing504/devclean/internal/model"
+	"github.com/ohing504/devclean/internal/pathutil"
 )
 
 // StatusBadge renders an activity status as a colored label ("" for unknown).
@@ -77,8 +78,15 @@ func RelativeTime(t time.Time) string {
 	}
 }
 
-// Artifact cells shared by every view that lists artifacts (scan table, clean
-// selector), so the same artifact reads the same everywhere.
+// Project headers and artifact cells shared by every view that lists artifacts
+// (scan table, clean selector, clean dry-run preview and results), so the same
+// project and artifact read the same everywhere.
+
+// ProjectName returns the header of a project group: the path of the
+// directory holding its artifacts, home shortened to ~.
+func ProjectName(p model.ProjectGroup) string {
+	return pathutil.ShortenHome(p.Path)
+}
 
 // ArtifactName returns the scanner-provided Label when set, else the artifact
 // path relative to root, else its basename (root empty or not an ancestor).
