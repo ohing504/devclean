@@ -31,6 +31,23 @@ func redirectStd(t *testing.T, std **os.File, writeEnd bool) (other *os.File) {
 	return other
 }
 
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns what
+// it printed.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r := redirectStd(t, &os.Stdout, true)
+	var out bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&out, r)
+		close(done)
+	}()
+	fn()
+	os.Stdout.Close()
+	<-done
+	return out.String()
+}
+
 // TestScanPipedStdoutHasNoSpinner pins that piped scan output carries no
 // spinner frames or line-clearing escape codes.
 func TestScanPipedStdoutHasNoSpinner(t *testing.T) {
@@ -43,21 +60,12 @@ func TestScanPipedStdoutHasNoSpinner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := redirectStd(t, &os.Stdout, true)
-	var piped bytes.Buffer
-	done := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(&piped, r)
-		close(done)
-	}()
-
-	_, err := runScan(t, "--path", root)
-	os.Stdout.Close()
-	<-done
+	var err error
+	got := captureStdout(t, func() { _, err = runScan(t, "--path", root) })
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	if got := piped.String(); strings.Contains(got, "\r") || strings.Contains(got, "\033[K") {
+	if strings.Contains(got, "\r") || strings.Contains(got, "\033[K") {
 		t.Errorf("piped stdout contains spinner control codes: %q", got)
 	}
 }

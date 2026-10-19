@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -211,23 +210,6 @@ func paths(rs []model.ScanResult) []string {
 
 func contains(ss []string, s string) bool {
 	return slices.Contains(ss, s)
-}
-
-// captureStdout runs fn with os.Stdout redirected to a pipe and returns what
-// it printed.
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	r := redirectStd(t, &os.Stdout, true)
-	var out bytes.Buffer
-	done := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(&out, r)
-		close(done)
-	}()
-	fn()
-	os.Stdout.Close()
-	<-done
-	return out.String()
 }
 
 // TestCleanShowsLabelLikeScan pins that clean names an artifact that has a

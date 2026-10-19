@@ -142,7 +142,7 @@ func newCleanCmd() *cobra.Command {
 				dc := cleaner.New(cleaner.Options{DryRun: true})
 				groups := model.GroupByProject(toClean)
 				for _, p := range groups {
-					fmt.Printf("  %s (%s)\n", pathutil.ShortenHome(p.Path), model.HumanSize(p.TotalSize))
+					fmt.Printf("  %s (%s)\n", ui.ProjectName(p), model.HumanSize(p.TotalSize))
 					for _, r := range p.Items {
 						fmt.Printf("    %s %s (%s)\n", ui.DimStyle.Render("•"), ui.ArtifactName(r, p.Path), ui.DimStyle.Render(model.HumanSize(r.Size)))
 						if r.Delete != nil {
@@ -220,20 +220,20 @@ func newCleanCmd() *cobra.Command {
 
 			groups := model.GroupByProject(toClean)
 			for _, p := range groups {
-				fmt.Printf("\n  %s\n", ui.ProjectStyle.Render(pathutil.ShortenHome(p.Path)))
+				fmt.Printf("\n  %s\n", ui.ProjectStyle.Render(ui.ProjectName(p)))
 				for _, r := range p.Items {
-					relPath := ui.ArtifactName(r, p.Path)
+					name := ui.ArtifactName(r, p.Path)
 					err := c.Clean(cmd.Context(), r)
 					if err != nil {
 						failed++
-						fmt.Printf("    %s %s — %v\n", ui.ErrStyle.Render("✗"), relPath, err)
+						fmt.Printf("    %s %s — %v\n", ui.ErrStyle.Render("✗"), name, err)
 					} else {
 						if r.Delete == nil && !force {
 							trashed = append(trashed, r)
 						} else {
 							freed = append(freed, r)
 						}
-						fmt.Printf("    %s %s (%s)\n", ui.SafeStyle.Render("✔"), relPath, model.HumanSize(r.Size))
+						fmt.Printf("    %s %s (%s)\n", ui.SafeStyle.Render("✔"), name, model.HumanSize(r.Size))
 					}
 				}
 			}

@@ -215,7 +215,7 @@ func HumanSize(size int64) string {
 // actually freed by deleting everything shown, not an inflated sum.
 func DedupedTotal(results []ScanResult) int64 {
 	// A lone artifact has nothing to share with; skip building the inode set.
-	// Group headers call this once per sub-package, project and ecosystem.
+	// Group headers call this once per directory, project and ecosystem.
 	if len(results) == 1 {
 		return results[0].Size
 	}

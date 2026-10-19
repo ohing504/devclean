@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ohing504/devclean/internal/model"
-	"github.com/ohing504/devclean/internal/pathutil"
 )
 
 // chromeLines is the number of lines occupied by the static header and
@@ -90,7 +89,7 @@ func BuildTreeItems(results []model.ScanResult) []TreeItem {
 			projectIdx := len(items)
 			projectItem := TreeItem{
 				Type:      ItemProject,
-				Label:     pathutil.ShortenHome(p.Path),
+				Label:     ProjectName(p),
 				Size:      p.TotalSize,
 				LastMod:   p.LastMod,
 				Activity:  p.Activity,

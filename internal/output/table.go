@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/ohing504/devclean/internal/model"
-	"github.com/ohing504/devclean/internal/pathutil"
 	"github.com/ohing504/devclean/internal/ui"
 )
 
@@ -21,7 +20,7 @@ type TableOptions struct {
 	Ascending bool   // smallest, oldest or A→Z project first
 }
 
-const collapseThreshold = 1024 * 1024 // 1 MB — hide artifacts below this in default mode
+const collapseThreshold = 1024 * 1024 // 1 MB — hide directories and artifacts below this in default mode
 
 // WriteTable writes scan results as a colored table grouped by ecosystem and project.
 func WriteTable(w io.Writer, results []model.ScanResult) {
@@ -68,15 +67,13 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 
 			fmt.Fprintf(
 				w, "  %s%s %s %s\n",
-				ui.ProjectStyle.Render(pathutil.ShortenHome(p.Path)),
+				ui.ProjectStyle.Render(ui.ProjectName(p)),
 				protectedBadge,
 				badge,
 				ui.InfoStyle.Render(fmt.Sprintf("%s · %s", model.HumanSize(p.TotalSize), ui.RelativeTime(p.LastMod))),
 			)
 
-			// Group artifacts by sub-package
-			subPkgs := groupBySubPackage(p.Items, p.Path)
-			renderSubPackages(w, subPkgs, opts)
+			renderDirs(w, groupByDir(p.Items, p.Path), opts)
 		}
 	}
 
@@ -147,127 +144,115 @@ func sortGroupsBySize(groups []ecoGroup) {
 	})
 }
 
-// --- Sub-package grouping ---
+// --- Directory grouping ---
 
-type subPackage struct {
-	name      string // relative dir from project root ("." for root)
+// artifactDir holds a project's artifacts that sit in one directory.
+type artifactDir struct {
+	name      string // relative to the project path ("." for the project path itself)
 	totalSize int64  // hard-linked blocks counted once (DedupedTotal)
 	items     []model.ScanResult
 }
 
-func groupBySubPackage(items []model.ScanResult, projectRoot string) []subPackage {
-	m := make(map[string]*subPackage)
+// groupByDir groups a project's artifacts by the directory holding each one,
+// largest directory first and largest artifact first within each.
+func groupByDir(items []model.ScanResult, projectRoot string) []artifactDir {
+	m := make(map[string]*artifactDir)
 
 	for _, r := range items {
-		rel := artifactRelPath(r.Path, projectRoot)
-		dir := filepath.Dir(rel)
-
-		sp, ok := m[dir]
+		dir := filepath.Dir(artifactRelPath(r.Path, projectRoot))
+		d, ok := m[dir]
 		if !ok {
-			sp = &subPackage{name: dir}
-			m[dir] = sp
+			d = &artifactDir{name: dir}
+			m[dir] = d
 		}
-		sp.items = append(sp.items, r)
+		d.items = append(d.items, r)
 	}
 
-	var result []subPackage
-	for _, sp := range m {
-		sp.totalSize = model.DedupedTotal(sp.items)
-		slices.SortFunc(sp.items, model.CompareResults(model.SortBySize, false))
-		result = append(result, *sp)
+	var result []artifactDir
+	for _, d := range m {
+		d.totalSize = model.DedupedTotal(d.items)
+		slices.SortFunc(d.items, model.CompareResults(model.SortBySize, false))
+		result = append(result, *d)
 	}
-
-	// Sort sub-packages by size desc
-	slices.SortFunc(result, func(a, b subPackage) int {
+	slices.SortFunc(result, func(a, b artifactDir) int {
 		return cmp.Or(cmp.Compare(b.totalSize, a.totalSize), strings.Compare(a.name, b.name))
 	})
-
 	return result
 }
 
-func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
-	// If only one sub-package (not a monorepo), render flat
-	if len(subPkgs) == 1 && subPkgs[0].name == "." {
-		renderArtifactsFlat(w, subPkgs[0].items, subPkgs[0].items[0].ProjectRoot, opts)
+// collapses reports whether default mode folds the i-th entry of a size-sorted
+// list into its "... and N more" line. The first, the largest, always shows,
+// so a list never consists of the collapsed line alone.
+func collapses(opts TableOptions, i int, size int64) bool {
+	return !opts.Verbose && i > 0 && size < collapseThreshold
+}
+
+// renderDirs lists a project's artifacts under one header per directory. A
+// project whose artifacts all sit in the project path itself gets no header.
+func renderDirs(w io.Writer, dirs []artifactDir, opts TableOptions) {
+	if len(dirs) == 1 && dirs[0].name == "." {
+		renderArtifacts(w, dirs[0].items, "    ", 30, opts)
 		return
 	}
 
-	var collapsedPkgs int
-	var collapsedItems []model.ScanResult
-
-	for i, sp := range subPkgs {
-		// Collapse small sub-packages in default mode, keeping the largest so
-		// the project never shows only a collapsed line.
-		if !opts.Verbose && i > 0 && sp.totalSize < collapseThreshold && len(subPkgs) > 2 {
-			collapsedPkgs++
-			collapsedItems = append(collapsedItems, sp.items...)
+	var collapsed []model.ScanResult
+	var collapsedDirs int
+	for i, d := range dirs {
+		if collapses(opts, i, d.totalSize) {
+			collapsedDirs++
+			collapsed = append(collapsed, d.items...)
 			continue
 		}
-
-		// Sub-package header
-		displayName := sp.name
-		if displayName == "." {
-			displayName = ". (root)"
+		name := d.name
+		if name == "." {
+			name = ". (root)"
 		}
 		fmt.Fprintf(
 			w, "    %s %s\n",
-			ui.ProjectStyle.Render(displayName),
-			ui.DimStyle.Render(fmt.Sprintf("(%s)", model.HumanSize(sp.totalSize))),
+			ui.ProjectStyle.Render(name),
+			ui.DimStyle.Render(fmt.Sprintf("(%s)", model.HumanSize(d.totalSize))),
 		)
-
-		// Artifacts in this sub-package
-		for _, r := range sp.items {
-			icon := ui.SafetyIcon(r.Safety)
-			// The sub-package header already shows the directory, so the
-			// artifact is named relative to it.
-			name := ui.ArtifactName(r, filepath.Dir(r.Path))
-			cat := ui.DimStyle.Render("(" + string(r.Category) + ")")
-			rec := ui.RecommendationTag(r)
-			fmt.Fprintf(
-				w, "      %s %-24s %10s%s%s\n",
-				icon,
-				name+" "+cat,
-				ui.InfoStyle.Render(ui.ArtifactSize(r)),
-				ui.LastUsedTag(r),
-				rec,
-			)
-		}
+		renderArtifacts(w, d.items, "      ", 24, opts)
 	}
 
-	if collapsedPkgs > 0 {
+	if collapsedDirs > 0 {
+		noun := "directories"
+		if collapsedDirs == 1 {
+			noun = "directory"
+		}
 		fmt.Fprintf(
 			w, "    %s\n",
-			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more packages (%s)", collapsedPkgs, model.HumanSize(model.DedupedTotal(collapsedItems)))),
+			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more %s (%s)", collapsedDirs, noun, model.HumanSize(model.DedupedTotal(collapsed)))),
 		)
 	}
 }
 
-func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot string, opts TableOptions) {
+// renderArtifacts lists the artifacts of one directory, each named relative to
+// that directory, which the header above already shows.
+func renderArtifacts(w io.Writer, items []model.ScanResult, indent string, nameWidth int, opts TableOptions) {
 	var collapsed []model.ScanResult
-
 	for i, r := range items {
-		if !opts.Verbose && i > 0 && r.Size < collapseThreshold {
+		if collapses(opts, i, r.Size) {
 			collapsed = append(collapsed, r)
 			continue
 		}
-
-		icon := ui.SafetyIcon(r.Safety)
-		name := ui.ArtifactName(r, projectRoot)
+		name := ui.ArtifactName(r, filepath.Dir(r.Path))
 		cat := ui.DimStyle.Render("(" + string(r.Category) + ")")
-		rec := ui.RecommendationTag(r)
 		fmt.Fprintf(
-			w, "    %s %-30s %10s%s%s\n",
-			icon,
-			name+" "+cat,
+			w, "%s%s %-*s %10s%s%s\n",
+			indent,
+			ui.SafetyIcon(r.Safety),
+			nameWidth, name+" "+cat,
 			ui.InfoStyle.Render(ui.ArtifactSize(r)),
 			ui.LastUsedTag(r),
-			rec,
+			ui.RecommendationTag(r),
 		)
 	}
 
 	if len(collapsed) > 0 {
 		fmt.Fprintf(
-			w, "    %s\n",
+			w, "%s%s\n",
+			indent,
 			ui.DimStyle.Render(fmt.Sprintf("  ... and %d more (%s)", len(collapsed), model.HumanSize(model.DedupedTotal(collapsed)))),
 		)
 	}
