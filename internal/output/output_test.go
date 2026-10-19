@@ -282,7 +282,7 @@ func TestWriteTable_TopNByProject(t *testing.T) {
 	out := buf.String()
 
 	// Top 2 by project size: A (500MB) and B (400MB). C should be excluded.
-	if strings.Contains(out, "/c\n") {
+	if strings.Contains(out, "\n  /c ") {
 		t.Errorf("project C should not appear in top 2:\n%s", out)
 	}
 	// Should show 2 projects, not 3
@@ -460,15 +460,19 @@ func TestWriteTableEcosystemTotalDedupsHardLinks(t *testing.T) {
 
 // TestWriteTableCollapsedSummariesDedupHardLinks pins that the "... and N more"
 // lines count hard-linked blocks shared between the collapsed entries once,
-// like the headers above them.
+// like the headers above them. A larger entry comes first because the largest
+// entry is never collapsed.
 func TestWriteTableCollapsedSummariesDedupHardLinks(t *testing.T) {
 	shared := map[model.InodeKey]int64{{Dev: 1, Ino: 7}: 400}
 	item := func(path, root string) model.ScanResult {
 		return model.ScanResult{Path: path, Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: root, Size: 500, Links: shared, Safety: model.SafetySafe, Activity: model.StatusDormant}
 	}
+	largest := func(path, root string) model.ScanResult {
+		return model.ScanResult{Path: path, Ecosystem: model.EcoNode, Category: model.CatDeps, ProjectRoot: root, Size: 2_000_000, Safety: model.SafetySafe, Activity: model.StatusDormant}
+	}
 
 	t.Run("packages", func(t *testing.T) {
-		results := []model.ScanResult{item("/m/a/node_modules", "/m"), item("/m/b/node_modules", "/m"), item("/m/c/node_modules", "/m")}
+		results := []model.ScanResult{largest("/m/big/node_modules", "/m"), item("/m/a/node_modules", "/m"), item("/m/b/node_modules", "/m"), item("/m/c/node_modules", "/m")}
 		var buf bytes.Buffer
 		output.WriteTable(&buf, results)
 		if out := buf.String(); !strings.Contains(out, "and 3 more packages (700 B)") {
@@ -477,7 +481,7 @@ func TestWriteTableCollapsedSummariesDedupHardLinks(t *testing.T) {
 	})
 
 	t.Run("artifacts", func(t *testing.T) {
-		results := []model.ScanResult{item("/p/node_modules", "/p"), item("/p/.cache", "/p")}
+		results := []model.ScanResult{largest("/p/dist", "/p"), item("/p/node_modules", "/p"), item("/p/.cache", "/p")}
 		var buf bytes.Buffer
 		output.WriteTable(&buf, results)
 		if out := buf.String(); !strings.Contains(out, "and 2 more (600 B)") {
@@ -526,7 +530,7 @@ func TestWriteTableTieBreaksByName(t *testing.T) {
 	})
 	t.Run("top N cut", func(t *testing.T) {
 		// TopN keeps the first 10 of 12 equal projects by path: rust/p and rust/q drop.
-		if strings.Contains(out, "/rust/p\n") || !strings.Contains(out, "/rust/o\n") {
+		if strings.Contains(out, "\n  /rust/p ") || !strings.Contains(out, "\n  /rust/o ") {
 			t.Errorf("TopN should drop the last projects by path; got:\n%s", out)
 		}
 	})
@@ -548,7 +552,7 @@ func TestWriteTableOrdersProjectsBySortKey(t *testing.T) {
 	var buf bytes.Buffer
 	output.WriteTableWithOptions(&buf, sortKeyResults(), output.TableOptions{SortBy: model.SortByTime})
 	out := buf.String()
-	if i, j, k := strings.Index(out, "/new\n"), strings.Index(out, "/mid\n"), strings.Index(out, "/big\n"); i < 0 || j < 0 || k < 0 || i > j || j > k {
+	if i, j, k := strings.Index(out, "\n  /new "), strings.Index(out, "\n  /mid "), strings.Index(out, "\n  /big "); i < 0 || j < 0 || k < 0 || i > j || j > k {
 		t.Errorf("--sort time should list /new, /mid, /big; got:\n%s", out)
 	}
 }
@@ -559,7 +563,7 @@ func TestWriteTableTopNFollowsSortKey(t *testing.T) {
 	var buf bytes.Buffer
 	output.WriteTableWithOptions(&buf, sortKeyResults(), output.TableOptions{TopN: 2, SortBy: model.SortByTime})
 	out := buf.String()
-	if strings.Contains(out, "/big\n") || !strings.Contains(out, "/new\n") || !strings.Contains(out, "/mid\n") {
+	if strings.Contains(out, "\n  /big ") || !strings.Contains(out, "\n  /new ") || !strings.Contains(out, "\n  /mid ") {
 		t.Errorf("-n 2 --sort time should keep /new and /mid and drop the oldest project /big; got:\n%s", out)
 	}
 }
@@ -577,7 +581,49 @@ func TestWriteTableTopNCountsProjectPaths(t *testing.T) {
 	output.WriteTableWithOptions(&buf, results, output.TableOptions{TopN: 2})
 	out := buf.String()
 	// /a totals 6 MB across node and python, so -n 2 keeps /a and /b, not /c.
-	if !strings.Contains(out, "/a\n") || !strings.Contains(out, "/b\n") || strings.Contains(out, "/c\n") {
+	if !strings.Contains(out, "\n  /a ") || !strings.Contains(out, "\n  /b ") || strings.Contains(out, "\n  /c ") {
 		t.Errorf("-n 2 should keep projects /a (6 MB) and /b; got:\n%s", out)
 	}
+}
+
+// TestWriteTableProjectHeaderIsPath pins that a group header is the path of
+// the directory holding its artifacts, not that directory's base name, which
+// says nothing for fixed-path caches (~/Library/Caches → "Caches").
+func TestWriteTableProjectHeaderIsPath(t *testing.T) {
+	results := []model.ScanResult{
+		{Path: "/opt/Library/Caches/ms-playwright", Ecosystem: model.EcoGlobal, Category: model.CatCache, ProjectRoot: "/opt/Library/Caches", Label: "Playwright browser binaries", Size: 2_000_000, Safety: model.SafetySafe},
+	}
+	var buf bytes.Buffer
+	output.WriteTable(&buf, results)
+	out := buf.String()
+	if !strings.Contains(out, "\n  /opt/Library/Caches ") || strings.Contains(out, "\n  Caches ") {
+		t.Errorf("want the header to be the path; got:\n%s", out)
+	}
+}
+
+// TestWriteTableKeepsLargestEntryVisible pins that a project whose entries are
+// all below the collapse threshold still shows its largest entry instead of
+// only a "... and N more" line.
+func TestWriteTableKeepsLargestEntryVisible(t *testing.T) {
+	small := func(path, root string, size int64) model.ScanResult {
+		return model.ScanResult{Path: path, Ecosystem: model.EcoPython, Category: model.CatBuild, ProjectRoot: root, Size: size, Safety: model.SafetySafe}
+	}
+	t.Run("packages", func(t *testing.T) {
+		results := []model.ScanResult{
+			small("/r/a/__pycache__", "/r", 300), small("/r/b/__pycache__", "/r", 200), small("/r/c/__pycache__", "/r", 100),
+		}
+		var buf bytes.Buffer
+		output.WriteTable(&buf, results)
+		if out := buf.String(); !strings.Contains(out, "    a (300 B)") || !strings.Contains(out, "and 2 more packages") {
+			t.Errorf("want sub-package a shown and the other two collapsed; got:\n%s", out)
+		}
+	})
+	t.Run("artifacts", func(t *testing.T) {
+		results := []model.ScanResult{small("/f/.ruff_cache", "/f", 300), small("/f/.pytest_cache", "/f", 200)}
+		var buf bytes.Buffer
+		output.WriteTable(&buf, results)
+		if out := buf.String(); !strings.Contains(out, ".ruff_cache") || !strings.Contains(out, "and 1 more") {
+			t.Errorf("want .ruff_cache shown and the other collapsed; got:\n%s", out)
+		}
+	})
 }

@@ -28,7 +28,6 @@ const (
 type TreeItem struct {
 	Type      ItemType
 	Label     string
-	Path      string
 	Size      int64
 	LastMod   time.Time
 	Activity  model.ActivityStatus
@@ -91,8 +90,7 @@ func BuildTreeItems(results []model.ScanResult) []TreeItem {
 			projectIdx := len(items)
 			projectItem := TreeItem{
 				Type:      ItemProject,
-				Label:     p.Name,
-				Path:      pathutil.ShortenHome(p.Path),
+				Label:     pathutil.ShortenHome(p.Path),
 				Size:      p.TotalSize,
 				LastMod:   p.LastMod,
 				Activity:  p.Activity,
@@ -238,7 +236,7 @@ func (m treeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // layoutItems renders every item to its display lines and records, per item,
 // the line index each one starts at and how many lines it occupies (eco
-// headers and projects span 2 lines, artifacts span 1).
+// headers span 2 lines, projects and artifacts span 1).
 func (m treeModel) layoutItems() (lines []string, starts, counts []int) {
 	starts = make([]int, len(m.items))
 	counts = make([]int, len(m.items))
@@ -469,10 +467,7 @@ func (m treeModel) renderItem(idx int, item TreeItem, isCursor bool) string {
 		}
 		name := ProjectStyle.Render(item.Label)
 		info := InfoStyle.Render(fmt.Sprintf("%s · %s", model.HumanSize(item.Size), RelativeTime(item.LastMod)))
-		path := DimStyle.Render(item.Path)
-		return fmt.Sprintf("%s%s %s%s %s %s\n%s    %s",
-			cursor, checkbox, name, protectedBadge, badge, info,
-			"    ", path)
+		return fmt.Sprintf("%s%s %s%s %s %s", cursor, checkbox, name, protectedBadge, badge, info)
 
 	case ItemArtifact:
 		checkbox := "[ ]"

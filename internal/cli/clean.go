@@ -142,15 +142,9 @@ func newCleanCmd() *cobra.Command {
 				dc := cleaner.New(cleaner.Options{DryRun: true})
 				groups := model.GroupByProject(toClean)
 				for _, p := range groups {
-					fmt.Printf("  %s (%s) %s\n", p.Name, model.HumanSize(p.TotalSize), ui.DimStyle.Render(pathutil.ShortenHome(p.Path)))
+					fmt.Printf("  %s (%s)\n", pathutil.ShortenHome(p.Path), model.HumanSize(p.TotalSize))
 					for _, r := range p.Items {
-						relPath := filepath.Base(r.Path)
-						if p.Path != "" {
-							if rel, err := filepath.Rel(p.Path, r.Path); err == nil {
-								relPath = rel
-							}
-						}
-						fmt.Printf("    %s %s (%s)\n", ui.DimStyle.Render("•"), relPath, ui.DimStyle.Render(model.HumanSize(r.Size)))
+						fmt.Printf("    %s %s (%s)\n", ui.DimStyle.Render("•"), ui.ArtifactName(r, p.Path), ui.DimStyle.Render(model.HumanSize(r.Size)))
 						if r.Delete != nil {
 							fmt.Printf("      %s\n", ui.DimStyle.Render("runs: "+r.Delete.Display))
 						}
@@ -226,14 +220,9 @@ func newCleanCmd() *cobra.Command {
 
 			groups := model.GroupByProject(toClean)
 			for _, p := range groups {
-				fmt.Printf("\n  %s %s\n", ui.ProjectStyle.Render(p.Name), ui.DimStyle.Render(pathutil.ShortenHome(p.Path)))
+				fmt.Printf("\n  %s\n", ui.ProjectStyle.Render(pathutil.ShortenHome(p.Path)))
 				for _, r := range p.Items {
-					relPath := r.Path
-					if p.Path != "" {
-						if rel, err := filepath.Rel(p.Path, r.Path); err == nil {
-							relPath = rel
-						}
-					}
+					relPath := ui.ArtifactName(r, p.Path)
 					err := c.Clean(cmd.Context(), r)
 					if err != nil {
 						failed++

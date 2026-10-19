@@ -59,7 +59,7 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 		)
 
 		for _, p := range projects {
-			// Project header: name + status badge + size + relative time
+			// Project header: path + status badge + size + relative time
 			badge := ui.StatusBadge(p.Activity)
 			protectedBadge := ""
 			if p.Protected {
@@ -68,14 +68,11 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 
 			fmt.Fprintf(
 				w, "  %s%s %s %s\n",
-				ui.ProjectStyle.Render(p.Name),
+				ui.ProjectStyle.Render(pathutil.ShortenHome(p.Path)),
 				protectedBadge,
 				badge,
 				ui.InfoStyle.Render(fmt.Sprintf("%s · %s", model.HumanSize(p.TotalSize), ui.RelativeTime(p.LastMod))),
 			)
-
-			// Project path
-			fmt.Fprintf(w, "  %s\n", ui.DimStyle.Render(pathutil.ShortenHome(p.Path)))
 
 			// Group artifacts by sub-package
 			subPkgs := groupBySubPackage(p.Items, p.Path)
@@ -198,9 +195,10 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 	var collapsedPkgs int
 	var collapsedItems []model.ScanResult
 
-	for _, sp := range subPkgs {
-		// Collapse small sub-packages in default mode
-		if !opts.Verbose && sp.totalSize < collapseThreshold && len(subPkgs) > 2 {
+	for i, sp := range subPkgs {
+		// Collapse small sub-packages in default mode, keeping the largest so
+		// the project never shows only a collapsed line.
+		if !opts.Verbose && i > 0 && sp.totalSize < collapseThreshold && len(subPkgs) > 2 {
 			collapsedPkgs++
 			collapsedItems = append(collapsedItems, sp.items...)
 			continue
@@ -247,8 +245,8 @@ func renderSubPackages(w io.Writer, subPkgs []subPackage, opts TableOptions) {
 func renderArtifactsFlat(w io.Writer, items []model.ScanResult, projectRoot string, opts TableOptions) {
 	var collapsed []model.ScanResult
 
-	for _, r := range items {
-		if !opts.Verbose && r.Size < collapseThreshold && len(items) > 1 {
+	for i, r := range items {
+		if !opts.Verbose && i > 0 && r.Size < collapseThreshold {
 			collapsed = append(collapsed, r)
 			continue
 		}

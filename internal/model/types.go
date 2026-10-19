@@ -288,7 +288,6 @@ func FilterResults(results []ScanResult, pred func(ScanResult) bool) []ScanResul
 
 // ProjectGroup groups scan results that belong to the same project.
 type ProjectGroup struct {
-	Name      string
 	Path      string
 	TotalSize int64
 	LastMod   time.Time
@@ -309,10 +308,7 @@ func GroupByProject(results []ScanResult) []ProjectGroup {
 		key := r.ProjectKey()
 		p, ok := m[key]
 		if !ok {
-			p = &ProjectGroup{
-				Name: filepath.Base(key),
-				Path: key,
-			}
+			p = &ProjectGroup{Path: key}
 			m[key] = p
 		}
 		p.Items = append(p.Items, r)

@@ -276,11 +276,11 @@ Table output groups results by: **ecosystem → project → sub-package → arti
 - `--sort` accepts `size`, `time` or `name`; any other value is an error
 - `-n N` keeps the first N project roots in that order, in the table and in `--json`; a project whose artifacts span several ecosystems counts once, ranked by their combined size (hard-linked blocks counted once), and shows under each of its ecosystems
 - Equal keys are ordered ascending by ecosystem name, project path, sub-package directory and artifact path, so repeated runs print the same order
-- Each project shows: name, status badge, protected badge, total size, relative time
+- Each project shows: path of the directory holding its artifacts (`~/work/web`, `~/.cache`, `~`; the same in every view), status badge, protected badge, total size, relative time
 - **Monorepo support**: artifacts grouped by git root. Sub-packages (apps/web, packages/ui) shown with headers and sizes
-- Default mode collapses small sub-packages (< 1MB) with "... and N more packages"
+- Default mode collapses small sub-packages and artifacts (< 1MB) with "... and N more packages" / "... and N more", except each project's largest, which is always shown
 - `-v` flag shows all sub-packages and artifacts
-- Every view that lists artifacts (scan table, clean selector) renders one artifact the same way: name (`Label`, else path relative to the project), size, last-used and recommendation tags
+- Every view that lists artifacts (scan table, clean selector, clean dry-run preview and results) names an artifact the same way: name (`Label`, else path relative to the project), size, last-used and recommendation tags
 
 ### Display Units
 

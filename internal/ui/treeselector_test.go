@@ -512,9 +512,9 @@ func TestBuildTreeItemsHeadersDedupHardLinks(t *testing.T) {
 				t.Errorf("eco header Size = %d, want 700", it.Size)
 			}
 		case ItemProject:
-			want := map[string]int64{"/a": 600, "/b": 500}[it.Path]
+			want := map[string]int64{"/a": 600, "/b": 500}[it.Label]
 			if it.Size != want {
-				t.Errorf("project %s Size = %d, want %d", it.Path, it.Size, want)
+				t.Errorf("project %s Size = %d, want %d", it.Label, it.Size, want)
 			}
 		}
 	}

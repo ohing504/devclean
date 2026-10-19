@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -209,4 +210,52 @@ func paths(rs []model.ScanResult) []string {
 
 func contains(ss []string, s string) bool {
 	return slices.Contains(ss, s)
+}
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns what
+// it printed.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r := redirectStd(t, &os.Stdout, true)
+	var out bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&out, r)
+		close(done)
+	}()
+	fn()
+	os.Stdout.Close()
+	<-done
+	return out.String()
+}
+
+// TestCleanShowsLabelLikeScan pins that clean names an artifact that has a
+// Label (a DerivedData folder → its source workspace) by that Label in the
+// dry-run preview and in the results, as scan does, not by its folder name.
+func TestCleanShowsLabelLikeScan(t *testing.T) {
+	for _, mode := range []string{"--dry-run", "--force"} {
+		t.Run(mode, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			ws := filepath.Join(home, "workspace", "app", "ios", "Runner.xcworkspace")
+			dd := filepath.Join(home, "Library", "Developer", "Xcode", "DerivedData", "Runner-abc")
+			writeFiles(t, home, "workspace/app/ios/Runner.xcworkspace/", "Library/Developer/Xcode/DerivedData/Runner-abc/Build/x")
+			plist := `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict><key>WorkspacePath</key><string>` + ws + `</string></dict></plist>`
+			if err := os.WriteFile(filepath.Join(dd, "info.plist"), []byte(plist), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			var err error
+			out := captureStdout(t, func() {
+				err = runClean(t, "--eco", "xcode", "--item", dd, "--yes", mode)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out, "workspace/app/ios/Runner.xcworkspace") || strings.Contains(out, "Runner-abc") {
+				t.Errorf("want the item named by its source workspace, not its folder; got:\n%s", out)
+			}
+		})
+	}
 }
