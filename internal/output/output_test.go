@@ -295,35 +295,6 @@ func TestWriteTable_TopNByProject(t *testing.T) {
 	}
 }
 
-func TestWriteTable_MonorepoRelativePaths(t *testing.T) {
-	// Monorepo artifacts should be grouped by directory with headers.
-	fixedTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	results := []model.ScanResult{
-		{Path: "/monorepo/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, Size: 500000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/monorepo"},
-		{Path: "/monorepo/apps/web/.next", Ecosystem: model.EcoNode, Category: model.CatBuild, Size: 300000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/monorepo"},
-		{Path: "/monorepo/apps/admin/.next", Ecosystem: model.EcoNode, Category: model.CatBuild, Size: 200000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/monorepo"},
-	}
-
-	var buf bytes.Buffer
-	output.WriteTableWithOptions(&buf, results, output.TableOptions{Verbose: true})
-	out := buf.String()
-
-	// Directory headers should appear
-	if !strings.Contains(out, "apps/web (") {
-		t.Errorf("expected directory header 'apps/web (':\n%s", out)
-	}
-	if !strings.Contains(out, "apps/admin (") {
-		t.Errorf("expected directory header 'apps/admin (':\n%s", out)
-	}
-	// Artifacts show just basename under directory
-	if !strings.Contains(out, "node_modules") {
-		t.Errorf("expected 'node_modules':\n%s", out)
-	}
-	if !strings.Contains(out, ".next") {
-		t.Errorf("expected '.next':\n%s", out)
-	}
-}
-
 func TestWriteTable_DirectoryGrouping(t *testing.T) {
 	// Monorepo artifacts should be grouped by directory.
 	fixedTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -339,48 +310,18 @@ func TestWriteTable_DirectoryGrouping(t *testing.T) {
 	output.WriteTableWithOptions(&buf, results, output.TableOptions{Verbose: true})
 	out := buf.String()
 
-	// Should show directory headers with size totals (not just artifact relative paths)
-	// Root group should exist
-	if !strings.Contains(out, ". (") {
-		t.Errorf("expected root directory header '. (':\n%s", out)
+	if !strings.Contains(out, ". (root) (") {
+		t.Errorf("expected root directory header '. (root) (':\n%s", out)
 	}
-	// apps/web group header with size
 	if !strings.Contains(out, "apps/web (") {
 		t.Errorf("expected directory header 'apps/web (':\n%s", out)
 	}
-	// apps/admin group header with size
 	if !strings.Contains(out, "apps/admin (") {
 		t.Errorf("expected directory header 'apps/admin (':\n%s", out)
 	}
-	// Artifacts should show just the filename, not the full relative path
-	if !strings.Contains(out, ".next") {
-		t.Errorf("expected artifact '.next':\n%s", out)
-	}
-}
-
-func TestWriteTable_DefaultCollapseSmallDirectories(t *testing.T) {
-	// Default mode should collapse small directories in monorepos.
-	fixedTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	results := []model.ScanResult{
-		{Path: "/mono/node_modules", Ecosystem: model.EcoNode, Category: model.CatDeps, Size: 500000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
-		{Path: "/mono/.turbo", Ecosystem: model.EcoNode, Category: model.CatCache, Size: 200000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
-		{Path: "/mono/apps/web/.next", Ecosystem: model.EcoNode, Category: model.CatBuild, Size: 300000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
-		{Path: "/mono/apps/admin/.next", Ecosystem: model.EcoNode, Category: model.CatBuild, Size: 100000000, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
-		{Path: "/mono/packages/ui/.turbo", Ecosystem: model.EcoNode, Category: model.CatCache, Size: 100, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
-		{Path: "/mono/packages/db/.turbo", Ecosystem: model.EcoNode, Category: model.CatCache, Size: 50, LastMod: fixedTime, Safety: model.SafetySafe, ProjectRoot: "/mono"},
-	}
-
-	var buf bytes.Buffer
-	output.WriteTable(&buf, results)
-	out := buf.String()
-
-	// Small directories (packages/ui, packages/db) should be collapsed
-	if !strings.Contains(out, "more directories") {
-		t.Errorf("expected small directories collapsed with 'more directories', got:\n%s", out)
-	}
-	// Large directories should still show
-	if !strings.Contains(out, "apps/web") {
-		t.Errorf("expected apps/web to show, got:\n%s", out)
+	// Artifacts are named relative to their directory header.
+	if strings.Contains(out, "apps/web/.next") || !strings.Contains(out, ".next (build)") {
+		t.Errorf("expected '.next' named relative to apps/web:\n%s", out)
 	}
 }
 

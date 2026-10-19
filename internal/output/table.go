@@ -58,7 +58,6 @@ func WriteTableWithOptions(w io.Writer, results []model.ScanResult, opts TableOp
 		)
 
 		for _, p := range projects {
-			// Project header: path + status badge + size + relative time
 			badge := ui.StatusBadge(p.Activity)
 			protectedBadge := ""
 			if p.Protected {
@@ -146,7 +145,6 @@ func sortGroupsBySize(groups []ecoGroup) {
 
 // --- Directory grouping ---
 
-// artifactDir holds a project's artifacts that sit in one directory.
 type artifactDir struct {
 	name      string // relative to the project path ("." for the project path itself)
 	totalSize int64  // hard-linked blocks counted once (DedupedTotal)

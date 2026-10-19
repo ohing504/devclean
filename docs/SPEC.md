@@ -36,7 +36,7 @@ devclean scan --eco node --json
 
 #### Output
 
-Colored table grouped by ecosystem → project → directory → artifacts:
+Colored table, grouped as in [Output Grouping](#output-grouping):
 
 ```text
 ● node 3 projects · 5.2 GB
@@ -276,9 +276,8 @@ Table output groups results by: **ecosystem → project → directory → artifa
 - `-n N` keeps the first N project roots in that order, in the table and in `--json`; a project whose artifacts span several ecosystems counts once, ranked by their combined size (hard-linked blocks counted once), and shows under each of its ecosystems
 - Equal keys are ordered ascending by ecosystem name, project path, directory and artifact path, so repeated runs print the same order
 - Each project shows: path of the directory holding its artifacts (`~/work/web`, `~/.cache`, `~`; the same in every view), status badge, protected badge, total size, relative time
-- **Monorepo support**: artifacts grouped by git root. Under a project, each directory holding artifacts (`apps/web`, `packages/ui`, `.` for the project path itself) is shown with a header and its size; a project whose artifacts all sit in the project path itself shows no directory header
-- Default mode collapses directories and artifacts below 1 MB with "... and N more directories" / "... and N more", except the largest of each list, which is always shown
-- `-v` flag shows all directories and artifacts
+- **Monorepo support**: artifacts grouped by git root. Each directory holding artifacts (`apps/web`, `. (root)`) gets a header with its size, except when all sit in the project path itself
+- Default mode collapses directories and artifacts below 1 MB into "... and N more directories" / "... and N more", except the largest of each list; `-v` shows all
 - Every view that lists artifacts (scan table, clean selector, clean dry-run preview and results) names an artifact the same way: name (`Label`, else path relative to the project), size, last-used and recommendation tags
 
 ### Display Units
@@ -328,8 +327,6 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 **pnpm-installed `node_modules`**: pnpm clones (macOS) or hard-links (Linux) pnpm store files into `node_modules` by default, so deleting it alone frees little; running `pnpm store prune` afterwards removes packages no project references. The result carries this note when `node_modules/.modules.yaml` (written by pnpm on install, JSON since pnpm 12; `pnpm-lock.yaml` alone does not prove pnpm populated the folder) names a `storeDir` that exists on the same volume. On macOS its `size` leaves out blocks shared with the store or other projects. A store on another volume forces pnpm to copy, so no note is given. `packageImportMethod: copy` is not recorded in `.modules.yaml`, so such installs still get the note.
 
 **Installed-package trees are excluded**: nothing inside a `node_modules` that is not a project's own, Python `site-packages`/`dist-packages`, the Go module cache, a pnpm store or a macOS `.app` bundle is reported — see [decision](decisions/prune-non-project-trees.md).
-
-**Monorepo support**: artifacts in directories below the project path (apps/, packages/) are grouped under the git root project. Each directory is displayed with a header showing its path and total size.
 
 **React Native / Expo**: when a Node project also has `ios/Podfile` or `metro.config.{js,ts,cjs,mjs}`, the scanner additionally collects RN-specific artifacts at multi-segment paths under the project root.
 
