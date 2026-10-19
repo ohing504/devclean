@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -233,6 +234,9 @@ func captureStdout(t *testing.T, fn func()) string {
 // Label (a DerivedData folder → its source workspace) by that Label in the
 // dry-run preview and in the results, as scan does, not by its folder name.
 func TestCleanShowsLabelLikeScan(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Xcode DerivedData is scanned only on macOS")
+	}
 	for _, mode := range []string{"--dry-run", "--force"} {
 		t.Run(mode, func(t *testing.T) {
 			home := t.TempDir()
