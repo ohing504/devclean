@@ -295,3 +295,27 @@ func TestRegistry_ResolvesRelativeRoot(t *testing.T) {
 		t.Errorf("expected only %s, got %+v", ollama, results)
 	}
 }
+
+type failingScanner struct{ err error }
+
+func (f *failingScanner) Name() string               { return "failing" }
+func (f *failingScanner) Ecosystem() model.Ecosystem { return model.EcoGlobal }
+
+func (f *failingScanner) Scan(_ context.Context, _ string) ([]model.ScanResult, error) {
+	return nil, f.err
+}
+
+// TestRegistryScanWith_StatScannerError checks a failing stat scanner's own
+// error is returned, not the cancellation it causes in the walk lane.
+func TestRegistryScanWith_StatScannerError(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "app"))
+	mustWriteFile(t, filepath.Join(root, "app", "package.json"), nil)
+	want := errors.New("boom")
+
+	reg := scanner.DefaultRegistry()
+	scanners := append(reg.ForEcosystems([]model.Ecosystem{model.EcoNode}), &failingScanner{err: want})
+	if _, err := reg.ScanWith(context.Background(), root, scanners); !errors.Is(err, want) {
+		t.Errorf("ScanWith error = %v, want %v", err, want)
+	}
+}

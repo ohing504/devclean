@@ -260,3 +260,44 @@ func TestDedupedTotalNoLinks(t *testing.T) {
 		t.Errorf("DedupedTotal = %d, want 350", got)
 	}
 }
+
+// TestMeasureSplitMatchesSerial sizes a tree whose files are hard-linked
+// across many subdirectories twice: with every sub-walk slot taken (one
+// goroutine walks it all) and with the slots free (subdirectories are walked
+// in parallel). The totals must match, a shared inode counted once.
+func TestMeasureSplitMatchesSerial(t *testing.T) {
+	dir := t.TempDir()
+	orig := filepath.Join(dir, "orig")
+	if err := os.WriteFile(orig, make([]byte, 300_000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 32 {
+		sub := filepath.Join(dir, "d", string(rune('a'+i%26))+string(rune('0'+i/26)), "x")
+		if err := os.MkdirAll(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Link(orig, filepath.Join(sub, "link")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sub, "own"), make([]byte, 5000*(i+1)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for range cap(subWalkTokens) {
+		subWalkTokens <- struct{}{}
+	}
+	serial := Measure(dir)
+	for range cap(subWalkTokens) {
+		<-subWalkTokens
+	}
+	split := Measure(dir)
+
+	if serial.Apparent != split.Apparent || serial.Disk != split.Disk || len(serial.Links) != len(split.Links) {
+		t.Errorf("split = {%d %d %d links}, serial = {%d %d %d links}",
+			split.Apparent, split.Disk, len(split.Links), serial.Apparent, serial.Disk, len(serial.Links))
+	}
+	if len(split.Links) != 1 {
+		t.Errorf("Links = %v, want exactly 1 shared inode", split.Links)
+	}
+}

@@ -2,8 +2,10 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -104,47 +106,78 @@ func (r *Registry) ScanWith(ctx context.Context, root string, scanners []Scanner
 }
 
 // ScanWithProgress runs scanners with an optional progress callback.
-// Walk-based scanners are partitioned out and executed first as a single
-// batched filesystem pass; the remaining scanners run sequentially.
+// Walk-based scanners are partitioned out and executed as a single batched
+// filesystem pass; the remaining scanners run sequentially alongside it. The
+// two lanes share no state, so the scan takes as long as the slower lane.
+// Results keep the order walk first, then the remaining scanners in order, and
+// onProgress is never called concurrently.
 func (r *Registry) ScanWithProgress(ctx context.Context, root string, scanners []Scanner, onProgress ProgressFunc) ([]model.ScanResult, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
 	}
-	var all []model.ScanResult
-
-	// Attach a real-time progress reporter via context
-	scanCtx := ctx
-	if onProgress != nil {
-		scanCtx = WithProgress(ctx, func(found int) {
-			onProgress("", len(all)+found)
-		})
-	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	walkTables, rest := partitionScanners(scanners)
 
-	if len(walkTables) > 0 {
-		if onProgress != nil {
-			onProgress("projects", len(all))
+	// found[0] counts the walk lane, found[1] the other scanners.
+	var mu sync.Mutex
+	var found [2]int
+	progress := func(lane int, eco string, n int) {
+		if onProgress == nil {
+			return
 		}
-		results, err := runWalk(scanCtx, root, walkTables)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, results...)
+		mu.Lock()
+		defer mu.Unlock()
+		found[lane] = n
+		onProgress(eco, found[0]+found[1])
+	}
+	laneCtx := func(lane int, done func() int) context.Context {
+		return WithProgress(ctx, func(n int) { progress(lane, "", done()+n) })
 	}
 
-	for _, s := range rest {
-		if onProgress != nil {
-			onProgress(s.Name(), len(all))
-		}
-		results, err := s.Scan(scanCtx, root)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, results...)
+	var walkResults, restResults []model.ScanResult
+	var walkErr, restErr error
+	var wg sync.WaitGroup
+	if len(walkTables) > 0 {
+		wg.Go(func() {
+			progress(0, "projects", 0)
+			walkResults, walkErr = runWalk(laneCtx(0, func() int { return 0 }), root, walkTables)
+			if walkErr != nil {
+				cancel()
+			}
+		})
 	}
-	return all, nil
+	wg.Go(func() {
+		var all []model.ScanResult
+		for _, s := range rest {
+			progress(1, s.Name(), len(all))
+			results, err := s.Scan(laneCtx(1, func() int { return len(all) }), root)
+			if err != nil {
+				restErr = err
+				cancel()
+				return
+			}
+			all = append(all, results...)
+		}
+		restResults = all
+	})
+	wg.Wait()
+	// A lane cancelled by the other lane's failure reports context.Canceled;
+	// return the error that caused it.
+	for _, e := range []error{walkErr, restErr} {
+		if e != nil && !errors.Is(e, context.Canceled) {
+			return nil, e
+		}
+	}
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	if restErr != nil {
+		return nil, restErr
+	}
+	return append(walkResults, restResults...), nil
 }
 
 // partitionScanners splits scanners into walk-engine tables (batched into a
@@ -188,10 +221,18 @@ func Measure(path string) SizeStat {
 	return measure(context.Background(), path, nil, "")
 }
 
+// subWalkTokens bounds the extra goroutines measure starts to walk
+// subdirectories of one artifact in parallel. Every measure in the process
+// shares them, so once the other artifacts are sized a lone large one (a pnpm
+// store) gets them all instead of being walked by one goroutine.
+var subWalkTokens = make(chan struct{}, sizeWorkerCap)
+
 // measure is Measure that stops once ctx is done. A non-nil clones makes it
 // clone-aware (see clone.go), netting out blocks shared with the files under
-// source, if given.
+// source, if given. A subdirectory is walked in its own goroutine whenever a
+// subWalkTokens slot is free; the totals do not depend on how the tree is split.
 func measure(ctx context.Context, path string, clones *cloneSources, source string) SizeStat {
+	var mu sync.Mutex // guards everything below, shared by the sub-walks
 	var st SizeStat
 	seen := make(map[model.InodeKey]struct{})
 	var extents []extent
@@ -202,18 +243,37 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 		sys, ok := info.Sys().(*syscall.Stat_t)
 		if !ok {
 			if !info.IsDir() && info.Mode()&fs.ModeSymlink == 0 {
+				mu.Lock()
 				st.Apparent += info.Size() // non-unix fallback: apparent only
+				mu.Unlock()
 			}
 			return
 		}
 		blocks := int64(sys.Blocks) * 512
 		if info.IsDir() {
+			mu.Lock()
 			st.Disk += blocks
+			mu.Unlock()
 			return
 		}
 		if info.Mode()&fs.ModeSymlink != 0 {
 			return
 		}
+		// Read clone attributes and extents before taking the lock: they are
+		// syscalls, and the lock would serialize them across sub-walks.
+		var full string
+		var ci cloneInfo
+		var ciOK, xsOK bool
+		var xs []extent
+		if sys.Nlink <= 1 && clones != nil && blocks > 0 {
+			full = filepath.Join(dir, name)
+			ci, ciOK = fileCloneInfo(full)
+			if !ciOK || (ci.refcnt <= 1 && ci.mayShare) {
+				xs, xsOK = fileExtents(full, info.Size())
+			}
+		}
+		mu.Lock()
+		defer mu.Unlock()
 		if sys.Nlink > 1 {
 			// Count a multiply-linked inode once per artifact for both apparent
 			// and disk (matches `du`/`du -A` within-call dedup), and record it
@@ -227,11 +287,9 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 				st.Links = make(map[model.InodeKey]int64)
 			}
 			st.Links[key] = blocks
-		} else if clones != nil && blocks > 0 {
-			full := filepath.Join(dir, name)
-			ci, ok := fileCloneInfo(full)
+		} else if full != "" {
 			switch {
-			case ok && ci.refcnt > 1:
+			case ciOK && ci.refcnt > 1:
 				g := groups[ci.id]
 				if g == nil {
 					if groups == nil {
@@ -242,37 +300,52 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 				}
 				g.Seen++
 				groupBlocks += blocks
-			case !ok || ci.mayShare:
-				if xs, ok := fileExtents(full, info.Size()); ok {
-					extents = append(extents, xs...)
-					extentBlocks += blocks
-				}
+			case xsOK:
+				extents = append(extents, xs...)
+				extentBlocks += blocks
 			}
 		}
 		st.Apparent += info.Size()
 		st.Disk += blocks
 	}
-	w := fstree.Walker{
-		Enter: func(dir string, info fs.FileInfo) bool {
-			if sys, ok := info.Sys().(*syscall.Stat_t); ok && dir == path {
-				rootDev = uint64(sys.Dev) //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
-			}
-			add(dir, "", info)
-			return true
-		},
-		Entries: func(dir string, entries []fs.DirEntry) bool {
-			for _, e := range entries {
-				if e.IsDir() {
-					continue // counted on Enter, if on this filesystem
+	var wg sync.WaitGroup
+	var walk func(root string)
+	walk = func(root string) {
+		w := fstree.Walker{
+			Enter: func(dir string, info fs.FileInfo) bool {
+				if dir != root && info.IsDir() {
+					select {
+					case subWalkTokens <- struct{}{}:
+						wg.Go(func() {
+							defer func() { <-subWalkTokens }()
+							walk(dir)
+						})
+						return false // the sub-walk counts dir itself
+					default:
+					}
 				}
-				if info, err := e.Info(); err == nil {
-					add(dir, e.Name(), info)
+				if sys, ok := info.Sys().(*syscall.Stat_t); ok && dir == path {
+					rootDev = uint64(sys.Dev) //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
 				}
-			}
-			return true
-		},
+				add(dir, "", info)
+				return true
+			},
+			Entries: func(dir string, entries []fs.DirEntry) bool {
+				for _, e := range entries {
+					if e.IsDir() {
+						continue // counted on Enter, if on this filesystem
+					}
+					if info, err := e.Info(); err == nil {
+						add(dir, e.Name(), info)
+					}
+				}
+				return true
+			},
+		}
+		_, _ = w.Walk(ctx, root)
 	}
-	_, _ = w.Walk(ctx, path)
+	walk(path)
+	wg.Wait()
 	st.Reclaim = st.Disk
 	if clones == nil {
 		return st

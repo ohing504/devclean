@@ -10,7 +10,7 @@ Scan → Classify → Filter/Sort → Output/Clean
 
 devclean is a monolithic Go CLI binary: every ecosystem scanner is built in, with no external scanner plugins.
 
-1. **Scan**: Registry batches all project (walk-based) scanners into a single filesystem pass, then runs stat scanners (fixed paths) sequentially. Real-time progress via spinner.
+1. **Scan**: Registry batches all project (walk-based) scanners into a single filesystem pass and runs stat scanners (fixed paths) sequentially alongside it. Results list the walk's first, then the stat scanners' in registry order. Real-time progress via spinner.
 2. **Classify**: activity status + gitignore-aware protection ([SPEC](SPEC.md#classification))
 3. **Filter/Sort**: CLI flags filter by ecosystem, category, status; sort by size/time/name; top N projects
 4. **Output**: colored table or JSON (`--json`)
@@ -40,7 +40,7 @@ Three invariants keep the figures honest:
 - **Hugging Face shared blobs** referenced by several models go to `BlobShares` so `DedupedTotal` counts them once.
 - **Shared traversal**: sizing walks with `fstree`, so it counts what finding reports and deletion removes.
 
-Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through one shared bounded worker pool (`sizePending`, `min(NumCPU, 8)`) so the tree-walk I/O overlaps.
+Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through a bounded worker pool (`sizePending`, `min(NumCPU, 8)`) so the tree-walk I/O overlaps. Inside one artifact, `measure` hands a subdirectory to its own goroutine while one of 8 process-wide slots is free, so a lone large artifact (a pnpm store) is not walked by one goroutine; the sub-walks share one hard-link and clone tally, so the totals do not depend on the split.
 
 ### Shared traversal (`fstree`)
 
