@@ -284,12 +284,12 @@ func TestMeasureSplitMatchesSerial(t *testing.T) {
 		}
 	}
 
-	for range cap(subWalkTokens) {
-		subWalkTokens <- struct{}{}
+	for range cap(sizeTokens) {
+		sizeTokens <- struct{}{}
 	}
 	serial := Measure(dir)
-	for range cap(subWalkTokens) {
-		<-subWalkTokens
+	for range cap(sizeTokens) {
+		<-sizeTokens
 	}
 	split := Measure(dir)
 

@@ -311,7 +311,8 @@ func isPnpmStoreVersionDir(name string) bool {
 }
 
 // sizeWorkerCap bounds concurrent sizing walks so a large scan does not
-// traverse every artifact tree at once.
+// traverse every artifact tree at once. sizeTokens enforces it across the
+// pools of all scanners and the sub-walks inside one artifact.
 const sizeWorkerCap = 8
 
 // sizePending fills in the size fields of every result by running
@@ -348,7 +349,13 @@ func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers
 				if r.CloneAware && cloneSizingSupported {
 					clones = sources
 				}
+				select {
+				case sizeTokens <- struct{}{}:
+				case <-ctx.Done():
+					continue
+				}
 				st := measure(ctx, r.Path, clones, r.CloneSource)
+				<-sizeTokens
 				r.Size = st.Reclaim
 				r.ApparentSize = st.Apparent
 				r.Links = st.Links

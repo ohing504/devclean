@@ -40,7 +40,7 @@ Three invariants keep the figures honest:
 - **Hugging Face shared blobs** referenced by several models go to `BlobShares` so `DedupedTotal` counts them once.
 - **Shared traversal**: sizing walks with `fstree`, so it counts what finding reports and deletion removes.
 
-Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through a bounded worker pool (`sizePending`, `min(NumCPU, 8)`) so the tree-walk I/O overlaps. Inside one artifact, `measure` hands a subdirectory to its own goroutine while one of 8 process-wide slots is free, so a lone large artifact (a pnpm store) is not walked by one goroutine; the sub-walks share one hard-link and clone tally, so the totals do not depend on the split.
+Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through a worker pool (`sizePending`) so the tree-walk I/O overlaps. At most 8 sizing walks run at once process-wide, across the pools of both lanes: a worker waits for a slot before measuring an artifact, and inside one artifact `measure` hands a subdirectory to its own goroutine whenever a slot is free, so a lone large artifact (a pnpm store) is not walked by one goroutine. The sub-walks share one hard-link and clone tally, so the totals do not depend on the split.
 
 ### Shared traversal (`fstree`)
 
