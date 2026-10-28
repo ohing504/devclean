@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -222,10 +222,15 @@ func TestScanWithProgress_MixedPartition(t *testing.T) {
 		t.Errorf("batch results misattributed: got %s, %s", results[0].Ecosystem, results[1].Ecosystem)
 	}
 
-	// One "projects" label for the whole batch and the stub by name. The two
-	// lanes run concurrently, so the labels may arrive in either order.
-	slices.Sort(labels)
-	if want := []string{"projects", "stub"}; !slices.Equal(labels, want) {
-		t.Errorf("labels = %v, want %v in any order", labels, want)
+	// Labels name the running lanes: "projects" for the whole batch and the
+	// stub by name, alone or together since the lanes run concurrently.
+	named := map[string]bool{}
+	for _, l := range labels {
+		for name := range strings.SplitSeq(l, ", ") {
+			named[name] = true
+		}
+	}
+	if len(named) != 2 || !named["projects"] || !named["stub"] {
+		t.Errorf("labels = %v, want only projects and stub, each at least once", labels)
 	}
 }

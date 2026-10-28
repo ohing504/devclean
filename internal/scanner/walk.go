@@ -326,7 +326,8 @@ func sizePending(ctx context.Context, results []model.ScanResult) error {
 }
 
 // sizePendingWorkers is sizePending with an explicit pool size, split out so
-// the worker count can be swept in benchmarks.
+// the worker count can be swept in benchmarks. Above sizeWorkerCap the extra
+// workers only wait: sizeTokens still allows that many measures at once.
 func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers int) error {
 	if len(results) == 0 {
 		return nil

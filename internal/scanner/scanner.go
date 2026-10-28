@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -120,29 +121,39 @@ func (r *Registry) ScanWithProgress(ctx context.Context, root string, scanners [
 
 	walkTables, rest := partitionScanners(scanners)
 
+	// Progress names the scanners still running in each lane, so the label
+	// does not stay on a finished stat scanner while the walk goes on.
 	var mu sync.Mutex
 	var walkFound, restFound int
-	report := func(eco string) {
-		if onProgress != nil {
-			onProgress(eco, walkFound+restFound)
+	var walkName, restName string
+	report := func(label bool) {
+		if onProgress == nil {
+			return
 		}
+		eco := ""
+		if label {
+			eco = strings.Trim(walkName+", "+restName, ", ")
+		}
+		onProgress(eco, walkFound+restFound)
+	}
+	setName := func(name *string, to string) {
+		mu.Lock()
+		defer mu.Unlock()
+		*name = to
+		report(walkName != "" || restName != "")
 	}
 	walkCtx := WithProgress(ctx, func(n int) {
 		mu.Lock()
 		defer mu.Unlock()
 		walkFound = n
-		report("")
+		report(false)
 	})
-	restCtx := func(eco string, base int) context.Context {
-		mu.Lock()
-		restFound = base
-		report(eco)
-		mu.Unlock()
+	restCtx := func(base int) context.Context {
 		return WithProgress(ctx, func(n int) {
 			mu.Lock()
 			defer mu.Unlock()
 			restFound = base + n
-			report("")
+			report(false)
 		})
 	}
 
@@ -161,9 +172,8 @@ func (r *Registry) ScanWithProgress(ctx context.Context, root string, scanners [
 	var wg sync.WaitGroup
 	if len(walkTables) > 0 {
 		wg.Go(func() {
-			mu.Lock()
-			report("projects")
-			mu.Unlock()
+			setName(&walkName, "projects")
+			defer setName(&walkName, "")
 			results, err := runWalk(walkCtx, root, walkTables)
 			if err != nil {
 				fail(err)
@@ -173,8 +183,10 @@ func (r *Registry) ScanWithProgress(ctx context.Context, root string, scanners [
 		})
 	}
 	wg.Go(func() {
+		defer setName(&restName, "")
 		for _, s := range rest {
-			results, err := s.Scan(restCtx(s.Name(), len(restResults)), root)
+			setName(&restName, s.Name())
+			results, err := s.Scan(restCtx(len(restResults)), root)
 			if err != nil {
 				fail(err)
 				return
