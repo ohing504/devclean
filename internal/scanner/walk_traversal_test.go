@@ -163,3 +163,46 @@ func TestWalkScan_HiddenNamedRootIsScanned(t *testing.T) {
 		t.Errorf("expected only %s, got %+v", cache, results)
 	}
 }
+
+// TestWalkScan_SplitMatchesSerial scans a tree of nested projects twice: with
+// every walk slot taken (one goroutine walks it all) and with the slots free
+// (subtrees are walked in parallel, each with a copy of its ancestors'
+// project contexts). Both must report the same artifacts, attributed to the
+// same project roots.
+func TestWalkScan_SplitMatchesSerial(t *testing.T) {
+	root := t.TempDir()
+	for _, p := range []string{
+		"mono/package.json", "mono/node_modules/x",
+		"mono/packages/a/package.json", "mono/packages/a/node_modules/x", "mono/packages/a/dist/x",
+		"mono/packages/b/src/__pycache__/x", "mono/packages/b/pyproject.toml",
+		"mono/packages/b/.venv/pyvenv.cfg", "mono/packages/b/sub/lib/__pycache__/x",
+		"rs/Cargo.toml", "rs/target/x", "rs/crates/c/Cargo.toml", "rs/crates/c/target/x",
+		"plain/deep/er/__pycache__/x", ".hidden/package.json", ".hidden/node_modules/x",
+	} {
+		touch(t, filepath.Join(root, filepath.FromSlash(p)))
+	}
+	scan := func() []string {
+		results, err := runWalk(context.Background(), root, walkEcosystemTable)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, r := range results {
+			out = append(out, r.Path+" "+string(r.Ecosystem)+" "+r.ProjectRoot)
+		}
+		return out
+	}
+
+	for range cap(walkTokens) {
+		walkTokens <- struct{}{}
+	}
+	serial := scan()
+	for range cap(walkTokens) {
+		<-walkTokens
+	}
+	split := scan()
+
+	if len(serial) == 0 || !slices.Equal(serial, split) {
+		t.Errorf("split:\n%v\nserial:\n%v", split, serial)
+	}
+}
