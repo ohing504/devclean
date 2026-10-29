@@ -227,7 +227,7 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 				st.Links = make(map[model.InodeKey]int64)
 			}
 			st.Links[key] = blocks
-		} else if clones != nil && blocks > 0 {
+		} else if clones != nil && blocks > 0 && !fstree.Dataless(info) { // opening a dataless file downloads it
 			full := filepath.Join(dir, name)
 			ci, ok := fileCloneInfo(full)
 			switch {

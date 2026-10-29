@@ -304,6 +304,8 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 
 **Fixed-path ecosystems** (xcode, docker, global, llm) check known paths instead of walking project trees. Missing paths are skipped, and a path is reported only when it is the same as, or a descendant of, the scan root (default `~`), so narrowing the root (e.g. `--path ~/workspace`) excludes it.
 
+**Cloud placeholders**: scanning never downloads cloud content. A directory whose content is not on disk (an iCloud Drive, Dropbox or other File Provider placeholder) is not read, and a file whose content is not on disk is not opened. `clean` refuses an artifact that contains such a directory, as it refuses one that spans another filesystem. See [decision](decisions/skip-dataless.md).
+
 ### Node.js
 
 **Detection**: `package.json` in parent directory

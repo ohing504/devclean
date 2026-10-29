@@ -49,6 +49,7 @@ Finding, sizing and the pre-delete check walk through one package, so they cover
 - **Read each directory once.**
 - **Never follow symlinks.** Only the root is read through, and only for `--path` — [decision](decisions/symlink-no-follow.md)
 - **Stay on the root's filesystem** (like `du -x`); a directory on another device, of unknown device, or unreadable is returned as skipped — [decision](decisions/one-filesystem.md)
+- **Never read a dataless directory** (File Provider placeholder: reading it downloads its content and blocks until the download ends); it is returned as skipped. Sizing does not open a dataless file either — [decision](decisions/skip-dataless.md)
 
 ### Walk engine
 
@@ -89,7 +90,7 @@ Use this pattern when a single ecosystem produces directories whose names alone 
 
 Reclaiming is not always `os.RemoveAll` on a path — Docker images or simulator devices are reclaimed through vendor commands or API calls. Each `ScanResult` carries an optional `Delete *model.DeleteMethod` (kind path/command/api + display + `Run`); nil means path removal.
 
-The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached, otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal. Path removal (including dry-run) is refused when `fstree` skips any directory in the item: a recursive delete does not stop at mounts. Example: the global scanner's Homebrew item (`brew cleanup`).
+The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached, otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal. Path removal (including dry-run) is refused when `fstree` skips any directory in the item: a recursive delete does not stop at mounts and would download dataless content. Example: the global scanner's Homebrew item (`brew cleanup`).
 
 After path removal the cleaner runs the item's `Release`, if any, with the same trash/permanent removal; dry-run skips it.
 
