@@ -284,13 +284,8 @@ func TestMeasureSplitMatchesSerial(t *testing.T) {
 		}
 	}
 
-	for range cap(sizeTokens) {
-		sizeTokens <- struct{}{}
-	}
-	serial := Measure(dir)
-	for range cap(sizeTokens) {
-		<-sizeTokens
-	}
+	var serial SizeStat
+	withSlotsTaken(t, sizeTokens, func() { serial = Measure(dir) })
 	split := Measure(dir)
 
 	if serial.Apparent != split.Apparent || serial.Disk != split.Disk || len(serial.Links) != len(split.Links) {
@@ -300,4 +295,19 @@ func TestMeasureSplitMatchesSerial(t *testing.T) {
 	if len(split.Links) != 1 {
 		t.Errorf("Links = %v, want exactly 1 shared inode", split.Links)
 	}
+}
+
+// withSlotsTaken runs f with every slot in slots taken, so no work is handed
+// to another goroutine, and frees them even if f fails the test.
+func withSlotsTaken(t *testing.T, slots chan struct{}, f func()) {
+	t.Helper()
+	for range cap(slots) {
+		slots <- struct{}{}
+	}
+	defer func() {
+		for range cap(slots) {
+			<-slots
+		}
+	}()
+	f()
 }

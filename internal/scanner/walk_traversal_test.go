@@ -193,13 +193,8 @@ func TestWalkScan_SplitMatchesSerial(t *testing.T) {
 		return out
 	}
 
-	for range cap(walkTokens) {
-		walkTokens <- struct{}{}
-	}
-	serial := scan()
-	for range cap(walkTokens) {
-		<-walkTokens
-	}
+	var serial []string
+	withSlotsTaken(t, walkTokens, func() { serial = scan() })
 	split := scan()
 
 	if len(serial) == 0 || !slices.Equal(serial, split) {

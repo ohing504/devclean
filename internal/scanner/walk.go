@@ -172,6 +172,9 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 			// ancestor contexts (dir's own context is pushed only if we descend).
 			// Size is filled in afterwards by sizePending.
 			Enter: func(dir string, info fs.FileInfo) bool {
+				if dir == top && top != root {
+					return true // matched and checked by the walk that handed it over
+				}
 				name := filepath.Base(dir)
 				if rule, tableIdx, projRoot, ok := matchArtifact(stack, dir, name, numTables); ok {
 					result := model.ScanResult{
@@ -195,29 +198,19 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 					mu.Unlock()
 					return false // matched artifact: do not descend
 				}
-				if dir == top {
-					return true // checked by the walk that handed it over, or the scan root
+				if dir == root {
+					return true // the hidden-dir rule applies below the root
 				}
 				// After artifact matching, so a project's own node_modules is
 				// still reported.
 				if installedPackageDirNames[name] {
 					return false
 				}
-				// The hidden-dir rule applies below the root.
 				if strings.HasPrefix(name, ".") && !hiddenDescend[name] {
 					return false
 				}
-				select {
-				case walkTokens <- struct{}{}:
-					sub := slices.Clone(stack)
-					wg.Go(func() {
-						defer func() { <-walkTokens }()
-						walk(dir, sub)
-					})
-					return false // the handed-over walk enters dir itself
-				default:
-					return true
-				}
+				sub := slices.Clone(stack)
+				return !tryGo(walkTokens, &wg, func() { walk(dir, sub) }) // a handed-over walk enters dir itself
 			},
 			Entries: func(dir string, entries []fs.DirEntry) bool {
 				names := make(map[string]bool, len(entries))
@@ -302,6 +295,21 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 // the stat scanners size their caches alongside it.
 var walkTokens = make(chan struct{}, sizeWorkerCap)
 
+// tryGo runs f in its own goroutine on wg if a slot in slots is free, and
+// frees the slot when f returns. It never waits for a slot.
+func tryGo(slots chan struct{}, wg *sync.WaitGroup, f func()) bool {
+	select {
+	case slots <- struct{}{}:
+		wg.Go(func() {
+			defer func() { <-slots }()
+			f()
+		})
+		return true
+	default:
+		return false
+	}
+}
+
 // installedPackageDirNames hold only installed packages when the walk reaches
 // them without matching an artifact rule (a global lib/node_modules, a tool's
 // bundled dependencies, a Python environment's site-packages). Enter prunes
@@ -350,28 +358,15 @@ func isPnpmStoreVersionDir(name string) bool {
 const sizeWorkerCap = 8
 
 // sizePending fills in the size fields of every result by running
-// Measure concurrently across a bounded worker pool. The walk finds artifacts
-// serially but defers their sizing (one in-process tree walk each) to here so
-// the traversals and their I/O overlap. Returns ctx.Err() if the scan is
+// Measure concurrently across a bounded worker pool. The walk defers sizing
+// (one in-process tree walk each) to here so the traversals and their I/O
+// overlap. Returns ctx.Err() if the scan is
 // cancelled mid-sizing.
 func sizePending(ctx context.Context, results []model.ScanResult) error {
-	workers := min(runtime.NumCPU(), sizeWorkerCap)
-	return sizePendingWorkers(ctx, results, workers)
-}
-
-// sizePendingWorkers is sizePending with an explicit pool size, split out so
-// the worker count can be swept in benchmarks. Above sizeWorkerCap the extra
-// workers only wait: sizeTokens still allows that many measures at once.
-func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers int) error {
 	if len(results) == 0 {
 		return nil
 	}
-	if workers > len(results) {
-		workers = len(results)
-	}
-	if workers < 1 {
-		workers = 1
-	}
+	workers := max(1, min(runtime.NumCPU(), sizeWorkerCap, len(results)))
 
 	sources := newCloneSources()
 	idx := make(chan int)

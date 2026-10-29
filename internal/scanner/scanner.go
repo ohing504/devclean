@@ -126,34 +126,29 @@ func (r *Registry) ScanWithProgress(ctx context.Context, root string, scanners [
 	var mu sync.Mutex
 	var walkFound, restFound int
 	var walkName, restName string
-	report := func(label bool) {
-		if onProgress == nil {
-			return
+	report := func(eco string) {
+		if onProgress != nil {
+			onProgress(eco, walkFound+restFound)
 		}
-		eco := ""
-		if label {
-			eco = strings.Trim(walkName+", "+restName, ", ")
-		}
-		onProgress(eco, walkFound+restFound)
 	}
 	setName := func(name *string, to string) {
 		mu.Lock()
 		defer mu.Unlock()
 		*name = to
-		report(walkName != "" || restName != "")
+		report(strings.Trim(walkName+", "+restName, ", "))
 	}
 	walkCtx := WithProgress(ctx, func(n int) {
 		mu.Lock()
 		defer mu.Unlock()
 		walkFound = n
-		report(false)
+		report("")
 	})
 	restCtx := func(base int) context.Context {
 		return WithProgress(ctx, func(n int) {
 			mu.Lock()
 			defer mu.Unlock()
 			restFound = base + n
-			report(false)
+			report("")
 		})
 	}
 
@@ -283,6 +278,12 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 			return
 		}
 		blocks := int64(sys.Blocks) * 512
+		if info.IsDir() {
+			mu.Lock()
+			st.Disk += blocks // dirs add their own blocks to Disk, not Apparent
+			mu.Unlock()
+			return
+		}
 		// Classify before taking the lock: clone attributes and extents are
 		// syscalls, and the lock would serialize them across sub-walks.
 		kind := plainFile
@@ -290,7 +291,6 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 		var ci cloneInfo
 		var xs []extent
 		switch {
-		case info.IsDir():
 		case sys.Nlink > 1:
 			kind = linkedFile
 		case clones != nil && blocks > 0:
@@ -308,10 +308,6 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 
 		mu.Lock()
 		defer mu.Unlock()
-		if info.IsDir() {
-			st.Disk += blocks // dirs add their own blocks to Disk, not Apparent
-			return
-		}
 		switch kind {
 		case linkedFile:
 			// Count a multiply-linked inode once per artifact for both apparent
@@ -350,14 +346,8 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 		w := fstree.Walker{
 			Enter: func(dir string, info fs.FileInfo) bool {
 				if dir != root {
-					select {
-					case sizeTokens <- struct{}{}:
-						wg.Go(func() {
-							defer func() { <-sizeTokens }()
-							walk(dir)
-						})
+					if tryGo(sizeTokens, &wg, func() { walk(dir) }) {
 						return false // the sub-walk counts dir itself
-					default:
 					}
 				} else if sys, ok := info.Sys().(*syscall.Stat_t); ok && root == path {
 					rootDev = uint64(sys.Dev) //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
