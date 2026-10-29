@@ -39,13 +39,14 @@ Three invariants keep the figures honest:
 - **APFS clones** in a `CloneAware` artifact count once; clone groups split across artifacts go to `CloneShares` so `DedupedTotal` counts them once.
 - **Hugging Face shared blobs** referenced by several models go to `BlobShares` so `DedupedTotal` counts them once.
 
-Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through a worker pool (`sizePending`) so the tree-walk I/O overlaps. At most 8 sizing walks run at once process-wide, across the pools of both lanes: a worker waits for a slot before measuring an artifact, and inside one artifact `measure` hands a subdirectory to its own goroutine whenever a slot is free, so a lone large artifact (a pnpm store) is not walked by one goroutine. The sub-walks share one hard-link and clone tally, so the totals do not depend on the split.
+Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through a worker pool (`sizePending`) so the tree-walk I/O overlaps. At most 8 sizing walks run at once process-wide, across the pools of both lanes: a worker waits for a slot before measuring an artifact, and `measure` passes the same slots to `fstree`, so a lone large artifact (a pnpm store) is not walked by one goroutine. Its goroutines share one hard-link and clone tally, so the totals do not depend on the split.
 
 ### Shared traversal (`fstree`)
 
 Finding, sizing and the pre-delete check walk through one package, so they cover the same files:
 
 - **Read each directory once.**
+- **Hand state down, not across**: a directory passes what its subdirectories need (the project walk's context stack) to them, so with `Slots` set subdirectories can be walked in other goroutines; hooks then run concurrently.
 - **Never follow symlinks.** Only the root is read through, and only for `--path` — [decision](decisions/symlink-no-follow.md)
 - **Stay on the root's filesystem** (like `du -x`); a directory on another device, of unknown device, or unreadable is returned as skipped — [decision](decisions/one-filesystem.md)
 - **Never read a dataless directory** (cloud placeholder whose content is not on disk); it is returned as skipped — [decision](decisions/skip-dataless.md)
@@ -60,7 +61,7 @@ A `walkEcosystem` table declares how one ecosystem participates in the shared wa
 | any-depth name | `__pycache__`, `.venv` | matches the directory name anywhere under the nearest project root |
 | any-depth suffix | `*.egg-info` | matches a directory-name suffix anywhere under the nearest project root |
 
-Per directory, the engine matches artifact rules against the **nearest** enclosing project root of each active ecosystem (table order, first match wins), emits the artifact and skips its subtree on a match, and otherwise reads the directory once to detect new project roots (pushed onto a recursion-scoped context stack) before descending into its child directories. A child directory it would descend into is handed to its own goroutine, with a copy of the context stack, while one of 8 walk slots is free (separate from the sizing slots, so the walk is not starved while the stat scanners size); results are sorted by (table order, path) at the end, so they do not depend on the split. Artifact matching runs **before** the hidden-directory check so compound rules ending in a hidden segment (`android/.gradle`) still match; unmatched hidden directories below the scan root are descended into only when an active ecosystem lists the name as an artifact.
+Per directory, the engine matches artifact rules against the **nearest** enclosing project root of each active ecosystem (table order, first match wins), emits the artifact and skips its subtree on a match, and otherwise reads the directory once to detect new project roots (added to the context stack it hands its subdirectories) before descending into its child directories. The walk runs on 8 walk slots of its own (separate from the sizing slots, so the walk is not starved while the stat scanners size); results are sorted by (table order, path) at the end, so they do not depend on the split. Artifact matching runs **before** the hidden-directory check so compound rules ending in a hidden segment (`android/.gradle`) still match; unmatched hidden directories below the scan root are descended into only when an active ecosystem lists the name as an artifact.
 
 Tables can also:
 

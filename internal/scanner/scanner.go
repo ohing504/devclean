@@ -259,7 +259,7 @@ const (
 // source, if given. A subdirectory is walked in its own goroutine whenever a
 // sizeTokens slot is free; the totals do not depend on how the tree is split.
 func measure(ctx context.Context, path string, clones *cloneSources, source string) SizeStat {
-	var mu sync.Mutex // guards everything below, shared by the sub-walks
+	var mu sync.Mutex // guards everything below, shared by the walk's goroutines
 	var st SizeStat
 	seen := make(map[model.InodeKey]struct{})
 	var extents []extent
@@ -340,37 +340,28 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 		st.Apparent += info.Size()
 		st.Disk += blocks
 	}
-	var wg sync.WaitGroup
-	var walk func(root string)
-	walk = func(root string) {
-		w := fstree.Walker{
-			Enter: func(dir string, info fs.FileInfo) bool {
-				if dir != root {
-					if tryGo(sizeTokens, &wg, func() { walk(dir) }) {
-						return false // the sub-walk counts dir itself
-					}
-				} else if sys, ok := info.Sys().(*syscall.Stat_t); ok && root == path {
-					rootDev = uint64(sys.Dev) //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
+	w := fstree.Walker[struct{}]{
+		Slots: sizeTokens,
+		Enter: func(dir string, info fs.FileInfo, _ struct{}) bool {
+			if sys, ok := info.Sys().(*syscall.Stat_t); ok && dir == path {
+				rootDev = uint64(sys.Dev) //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
+			}
+			add(dir, "", info)
+			return true
+		},
+		Entries: func(dir string, entries []fs.DirEntry, _ struct{}) (struct{}, bool) {
+			for _, e := range entries {
+				if e.IsDir() {
+					continue // counted on Enter, if on this filesystem
 				}
-				add(dir, "", info)
-				return true
-			},
-			Entries: func(dir string, entries []fs.DirEntry) bool {
-				for _, e := range entries {
-					if e.IsDir() {
-						continue // counted on Enter, if on this filesystem
-					}
-					if info, err := e.Info(); err == nil {
-						add(dir, e.Name(), info)
-					}
+				if info, err := e.Info(); err == nil {
+					add(dir, e.Name(), info)
 				}
-				return true
-			},
-		}
-		_, _ = w.Walk(ctx, root)
+			}
+			return struct{}{}, true
+		},
 	}
-	walk(path)
-	wg.Wait()
+	_, _ = w.Walk(ctx, path)
 	st.Reclaim = st.Disk
 	if clones == nil {
 		return st

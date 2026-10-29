@@ -157,117 +157,100 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 	var mu sync.Mutex // guards results
 	var results []model.ScanResult
 	numTables := len(tables)
-	var wg sync.WaitGroup
 
-	// walk walks the tree under top with stack as the ancestors' project
-	// contexts. A directory it would descend into is handed to its own walk,
-	// with a copy of the stack, whenever a walkTokens slot is free; results
-	// are sorted below, so the order does not depend on the split.
-	var walk func(top string, stack []projectContext)
-	walk = func(top string, stack []projectContext) {
-		// fstree does the traversal; the engine only decides what a directory is.
-		walker := fstree.Walker{
-			FollowRoot: top == root,
-			// Artifact match first, before the hidden-dir check, against the
-			// ancestor contexts (dir's own context is pushed only if we descend).
-			// Size is filled in afterwards by sizePending.
-			Enter: func(dir string, info fs.FileInfo) bool {
-				if dir == top && top != root {
-					return true // matched and checked by the walk that handed it over
+	// fstree does the traversal, in parallel while walkTokens has a free slot;
+	// the engine only decides what a directory is. Each directory hands its
+	// subdirectories the ancestors' project contexts plus its own. Results are
+	// sorted below, so their order does not depend on the split.
+	walker := fstree.Walker[[]projectContext]{
+		FollowRoot: true,
+		Slots:      walkTokens,
+		// Artifact match first, before the hidden-dir check, against the
+		// ancestor contexts (dir's own context is added only if we descend).
+		// Size is filled in afterwards by sizePending.
+		Enter: func(dir string, info fs.FileInfo, stack []projectContext) bool {
+			name := filepath.Base(dir)
+			if rule, tableIdx, projRoot, ok := matchArtifact(stack, dir, name, numTables); ok {
+				result := model.ScanResult{
+					Path:      dir,
+					Ecosystem: tables[tableIdx].Eco,
+					Category:  rule.Category,
+					LastMod:   info.ModTime(),
+					Safety:    rule.Safety,
 				}
-				name := filepath.Base(dir)
-				if rule, tableIdx, projRoot, ok := matchArtifact(stack, dir, name, numTables); ok {
-					result := model.ScanResult{
-						Path:      dir,
-						Ecosystem: tables[tableIdx].Eco,
-						Category:  rule.Category,
-						LastMod:   info.ModTime(),
-						Safety:    rule.Safety,
+				if tables[tableIdx].SetProjectRoot {
+					result.ProjectRoot = projRoot
+				}
+				if rule.Describe != nil {
+					n := rule.Describe(dir)
+					result.Recommendation = n.Recommendation
+					result.CloneAware, result.CloneSource = n.CloneAware, n.CloneSource
+				}
+				mu.Lock()
+				results = append(results, result)
+				ReportProgress(ctx, len(results))
+				mu.Unlock()
+				return false // matched artifact: do not descend
+			}
+			if dir == root {
+				return true // the hidden-dir rule applies below the root
+			}
+			// After artifact matching, so a project's own node_modules is
+			// still reported.
+			if installedPackageDirNames[name] {
+				return false
+			}
+			return !strings.HasPrefix(name, ".") || hiddenDescend[name]
+		},
+		Entries: func(dir string, entries []fs.DirEntry, stack []projectContext) ([]projectContext, bool) {
+			names := make(map[string]bool, len(entries))
+			for _, e := range entries {
+				names[e.Name()] = true
+			}
+
+			// Prune before establishing any context or descending, so nothing
+			// inside is ever a deletion target.
+			if isInstalledPackageTree(dir, names) {
+				return nil, false
+			}
+			for i := range tables {
+				if p := tables[i].PruneRoot; p != nil && p(dir, names) {
+					return nil, false
+				}
+			}
+			// Clip so siblings walked in other goroutines never append
+			// into one shared array.
+			stack = slices.Clip(stack)
+
+			// Marker check: establish the project contexts rooted at this directory.
+			for i := range tables {
+				t := &tables[i]
+				rooted := false
+				for _, m := range t.Markers {
+					if names[m] {
+						rooted = true
+						break
 					}
-					if tables[tableIdx].SetProjectRoot {
-						result.ProjectRoot = projRoot
-					}
-					if rule.Describe != nil {
-						n := rule.Describe(dir)
-						result.Recommendation = n.Recommendation
-						result.CloneAware, result.CloneSource = n.CloneAware, n.CloneSource
-					}
-					mu.Lock()
-					results = append(results, result)
-					ReportProgress(ctx, len(results))
-					mu.Unlock()
-					return false // matched artifact: do not descend
 				}
-				if dir == root {
-					return true // the hidden-dir rule applies below the root
-				}
-				// After artifact matching, so a project's own node_modules is
-				// still reported.
-				if installedPackageDirNames[name] {
-					return false
-				}
-				if strings.HasPrefix(name, ".") && !hiddenDescend[name] {
-					return false
-				}
-				sub := slices.Clone(stack)
-				return !tryGo(walkTokens, &wg, func() { walk(dir, sub) }) // a handed-over walk enters dir itself
-			},
-			Entries: func(dir string, entries []fs.DirEntry) bool {
-				names := make(map[string]bool, len(entries))
-				for _, e := range entries {
-					names[e.Name()] = true
+				if !rooted {
+					continue
 				}
 
-				// Prune before establishing any context or descending, so nothing
-				// inside is ever a deletion target.
-				if isInstalledPackageTree(dir, names) {
-					return false
-				}
-				for i := range tables {
-					if p := tables[i].PruneRoot; p != nil && p(dir, names) {
-						return false
+				rules := t.Rules
+				if t.ExtraRules != nil {
+					if extra := t.ExtraRules(dir, names); len(extra) > 0 {
+						combined := make([]artifactRule, 0, len(t.Rules)+len(extra))
+						combined = append(combined, t.Rules...)
+						combined = append(combined, extra...)
+						rules = combined
 					}
 				}
-
-				// Marker check: establish the project contexts rooted at this directory.
-				for i := range tables {
-					t := &tables[i]
-					rooted := false
-					for _, m := range t.Markers {
-						if names[m] {
-							rooted = true
-							break
-						}
-					}
-					if !rooted {
-						continue
-					}
-
-					rules := t.Rules
-					if t.ExtraRules != nil {
-						if extra := t.ExtraRules(dir, names); len(extra) > 0 {
-							combined := make([]artifactRule, 0, len(t.Rules)+len(extra))
-							combined = append(combined, t.Rules...)
-							combined = append(combined, extra...)
-							rules = combined
-						}
-					}
-					stack = append(stack, projectContext{root: dir, tableIdx: i, rules: rules})
-				}
-				return true
-			},
-			// The contexts dir pushed are the ones on top rooted at dir.
-			Leave: func(dir string) {
-				for len(stack) > 0 && stack[len(stack)-1].root == dir {
-					stack = stack[:len(stack)-1]
-				}
-			},
-		}
-		_, _ = walker.Walk(ctx, top)
+				stack = append(stack, projectContext{root: dir, tableIdx: i, rules: rules})
+			}
+			return stack, true
+		},
 	}
-	walk(root, nil)
-	wg.Wait()
-	if err := ctx.Err(); err != nil {
+	if _, err := walker.Walk(ctx, root); err != nil {
 		return nil, err
 	}
 
@@ -294,21 +277,6 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 // parallel. It is separate from sizeTokens so the walk is not starved while
 // the stat scanners size their caches alongside it.
 var walkTokens = make(chan struct{}, sizeWorkerCap)
-
-// tryGo runs f in its own goroutine on wg if a slot in slots is free, and
-// frees the slot when f returns. It never waits for a slot.
-func tryGo(slots chan struct{}, wg *sync.WaitGroup, f func()) bool {
-	select {
-	case slots <- struct{}{}:
-		wg.Go(func() {
-			defer func() { <-slots }()
-			f()
-		})
-		return true
-	default:
-		return false
-	}
-}
 
 // installedPackageDirNames hold only installed packages when the walk reaches
 // them without matching an artifact rule (a global lib/node_modules, a tool's

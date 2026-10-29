@@ -121,9 +121,9 @@ func (c *cloneSources) get(ctx context.Context, path string) (extents []extent, 
 			return
 		}
 		var xs []extent
-		w := fstree.Walker{
+		w := fstree.Walker[struct{}]{
 			FollowRoot: true,
-			Entries: func(dir string, entries []fs.DirEntry) bool {
+			Entries: func(dir string, entries []fs.DirEntry, _ struct{}) (struct{}, bool) {
 				for _, e := range entries {
 					if !e.Type().IsRegular() {
 						continue
@@ -134,7 +134,7 @@ func (c *cloneSources) get(ctx context.Context, path string) (extents []extent, 
 						}
 					}
 				}
-				return true
+				return struct{}{}, true
 			},
 		}
 		if _, err := w.Walk(ctx, path); err != nil {
