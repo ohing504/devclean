@@ -218,6 +218,15 @@ List supported ecosystems, categories, activity statuses, and safety levels.
 devclean list
 ```
 
+## Traversal
+
+Finding, sizing and the pre-delete check of `clean` read the same directories:
+
+- Symlinks are never followed; only the `--path` root is read through ([decision](decisions/symlink-no-follow.md)).
+- A mount under the scan root is not entered; pass it as `--path` to scan it ([decision](decisions/one-filesystem.md)).
+- A cloud placeholder directory (iCloud Drive, Dropbox or another File Provider folder whose content is not on disk) is not read, so a scan never downloads cloud content; a placeholder file counts as 0 bytes ([decision](decisions/skip-dataless.md)).
+- `clean`, including `--dry-run`, refuses an artifact containing a directory it did not read (a mount, a cloud placeholder, or an unreadable directory); a dry run marks it "would fail".
+
 ## Classification
 
 ### Categories
@@ -303,8 +312,6 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 **Dedup attribution**: project ecosystems (node, rust, ruby, python, go, flutter, android) share a single-pass scan — a directory matching artifact rules of several active ecosystems is reported once, attributed to the first in scanner order (node → rust → ruby → python → go → flutter → android), so `--eco` subsets can shift attribution (a shared `coverage/` goes to node in a full scan, to ruby under `--eco ruby`).
 
 **Fixed-path ecosystems** (xcode, docker, global, llm) check known paths instead of walking project trees. Missing paths are skipped, and a path is reported only when it is the same as, or a descendant of, the scan root (default `~`), so narrowing the root (e.g. `--path ~/workspace`) excludes it.
-
-**Cloud placeholders**: scanning never downloads cloud content. A directory whose content is not on disk (an iCloud Drive, Dropbox or other File Provider placeholder) is not read, and a file whose content is not on disk is not opened. `clean` refuses an artifact that contains such a directory, as it refuses one that spans another filesystem. See [decision](decisions/skip-dataless.md).
 
 ### Node.js
 

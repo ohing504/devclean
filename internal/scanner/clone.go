@@ -30,9 +30,9 @@ type cloneInfo struct {
 }
 
 type cloneGroup struct {
-	model.CloneShare        // Blocks: st_blocks of one member
-	path             string // one member, for reading its extents
-	size             int64
+	model.CloneShare             // Blocks: st_blocks of one member
+	path             string      // one member, for reading its extents
+	info             fs.FileInfo // of path
 }
 
 // extent is a physical byte range [start, end) on a device.
@@ -129,7 +129,7 @@ func (c *cloneSources) get(ctx context.Context, path string) (extents []extent, 
 						continue
 					}
 					if info, err := e.Info(); err == nil {
-						if fx, ok := fileExtents(filepath.Join(dir, e.Name()), info.Size()); ok {
+						if fx, ok := fileExtents(filepath.Join(dir, e.Name()), info); ok {
 							xs = append(xs, fx...)
 						}
 					}

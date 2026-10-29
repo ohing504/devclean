@@ -30,13 +30,8 @@ var deviceOf = func(_ string, info fs.FileInfo) (uint64, bool) {
 }
 
 // dataless is indirected so a test can mark a directory dataless without a
-// File Provider.
+// cloud provider.
 var dataless = isDataless
-
-// Dataless reports whether info is a File Provider placeholder (iCloud Drive,
-// Dropbox, ...) whose content is not on this disk. Opening or reading it makes
-// macOS download the content first, blocking until the download finishes.
-func Dataless(info fs.FileInfo) bool { return dataless(info) }
 
 // Walker walks a tree depth-first, reading each directory once. Every hook is
 // optional.
@@ -57,7 +52,8 @@ type Walker struct {
 
 // Walk walks the tree under root and returns the directories it could not
 // check: on another filesystem, of unknown filesystem, dataless, or
-// unreadable. A root that does not exist is an empty tree. The only error is ctx's.
+// unreadable. A root that does not exist is an empty tree. The only error is
+// ctx's.
 func (w Walker) Walk(ctx context.Context, root string) ([]string, error) {
 	statRoot := os.Lstat
 	if w.FollowRoot {
@@ -140,7 +136,7 @@ func (e *UncheckedError) Error() string {
 
 // CheckOneFilesystem returns an *UncheckedError when the tree at path has
 // directories Walk could not check. A recursive delete does not stop at
-// mounts, so it would remove files that were never sized or shown.
+// them, so it would remove files that were never sized or shown.
 func CheckOneFilesystem(ctx context.Context, path string) error {
 	skipped, err := Walker{}.Walk(ctx, path)
 	if err != nil {

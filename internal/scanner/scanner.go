@@ -227,7 +227,7 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 				st.Links = make(map[model.InodeKey]int64)
 			}
 			st.Links[key] = blocks
-		} else if clones != nil && blocks > 0 && !fstree.Dataless(info) { // opening a dataless file downloads it
+		} else if clones != nil && blocks > 0 {
 			full := filepath.Join(dir, name)
 			ci, ok := fileCloneInfo(full)
 			switch {
@@ -237,13 +237,13 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 					if groups == nil {
 						groups = make(map[uint64]*cloneGroup)
 					}
-					g = &cloneGroup{CloneShare: model.CloneShare{Refcnt: ci.refcnt, Blocks: blocks}, path: full, size: info.Size()}
+					g = &cloneGroup{CloneShare: model.CloneShare{Refcnt: ci.refcnt, Blocks: blocks}, path: full, info: info}
 					groups[ci.id] = g
 				}
 				g.Seen++
 				groupBlocks += blocks
 			case !ok || ci.mayShare:
-				if xs, ok := fileExtents(full, info.Size()); ok {
+				if xs, ok := fileExtents(full, info); ok {
 					extents = append(extents, xs...)
 					extentBlocks += blocks
 				}
@@ -288,7 +288,7 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 		}
 		// A partly rewritten copy may overlap the group: count by extent.
 		if len(extents) > 0 {
-			if xs, ok := fileExtents(g.path, g.size); ok {
+			if xs, ok := fileExtents(g.path, g.info); ok {
 				extents = append(extents, xs...)
 				continue
 			}

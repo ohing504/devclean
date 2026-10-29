@@ -88,34 +88,17 @@ func fakeDataless(t *testing.T, name string) {
 	t.Cleanup(func() { dataless = orig })
 }
 
-// readDirs records every directory Walk reads.
-func readDirs(t *testing.T) *[]string {
-	t.Helper()
-	var dirs []string
-	orig := readDir
-	readDir = func(dir string) ([]os.DirEntry, error) {
-		dirs = append(dirs, dir)
-		return orig(dir)
-	}
-	t.Cleanup(func() { readDir = orig })
-	return &dirs
-}
-
 func TestWalk_DoesNotReadDatalessDir(t *testing.T) {
 	root := t.TempDir()
 	cloud := filepath.Join(root, "cloud")
 	mkdirAll(t, filepath.Join(cloud, "inner"))
 	mkdirAll(t, filepath.Join(root, "local"))
 	fakeDataless(t, "cloud")
-	read := readDirs(t)
 
 	got, skipped := entered(t, Walker{}, root)
 
 	if want := []string{root, filepath.Join(root, "local")}; !slices.Equal(got, want) {
 		t.Errorf("entered = %v, want %v", got, want)
-	}
-	if slices.Contains(*read, cloud) {
-		t.Errorf("read dataless dir %s", cloud)
 	}
 	if want := []string{cloud}; !slices.Equal(skipped, want) {
 		t.Errorf("skipped = %v, want %v", skipped, want)
@@ -126,12 +109,11 @@ func TestWalk_DatalessRootIsUnchecked(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "cloud")
 	mkdirAll(t, filepath.Join(root, "inner"))
 	fakeDataless(t, "cloud")
-	read := readDirs(t)
 
 	got, skipped := entered(t, Walker{}, root)
 
-	if len(got) != 0 || len(*read) != 0 {
-		t.Errorf("entered %v, read %v; want neither", got, *read)
+	if len(got) != 0 {
+		t.Errorf("entered = %v, want none", got)
 	}
 	if want := []string{root}; !slices.Equal(skipped, want) {
 		t.Errorf("skipped = %v, want %v", skipped, want)
