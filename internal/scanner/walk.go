@@ -191,15 +191,14 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 				mu.Unlock()
 				return false // matched artifact: do not descend
 			}
-			if dir == root {
-				return true // the hidden-dir rule applies below the root
-			}
 			// After artifact matching, so a project's own node_modules is
-			// still reported.
+			// still reported. Also for the root: a scan of an installed tree
+			// reports nothing inside it.
 			if installedPackageDirNames[name] {
 				return false
 			}
-			return !strings.HasPrefix(name, ".") || hiddenDescend[name]
+			// The root is always entered: the hidden-dir rule applies below it.
+			return dir == root || !strings.HasPrefix(name, ".") || hiddenDescend[name]
 		},
 		Entries: func(dir string, entries []fs.DirEntry, stack []projectContext) ([]projectContext, bool) {
 			names := make(map[string]bool, len(entries))

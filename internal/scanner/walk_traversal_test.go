@@ -165,6 +165,23 @@ func TestWalkScan_HiddenNamedRootIsScanned(t *testing.T) {
 	}
 }
 
+// TestWalkScan_InstalledPackageRootIsPruned pins that a scan root named like
+// an installed-package tree is not read: a package's own node_modules inside
+// it is not a deletion target.
+func TestWalkScan_InstalledPackageRootIsPruned(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "node_modules")
+	touch(t, filepath.Join(root, "foo", "package.json"))
+	touch(t, filepath.Join(root, "foo", "node_modules", "bar", "index.js"))
+
+	results, err := WalkScan(context.Background(), root, model.EcoNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Errorf("got %v, want no results", paths(results))
+	}
+}
+
 // TestWalkScan_SplitMatchesSerial scans a tree of nested projects twice: with
 // every walk slot taken (one goroutine walks it all) and with the slots free
 // (subtrees are walked in parallel, each with its ancestors' project

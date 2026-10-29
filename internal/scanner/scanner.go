@@ -77,12 +77,14 @@ func (r *Registry) ForEcosystems(ecos []model.Ecosystem) []Scanner {
 	return filtered
 }
 
-// ScanAll runs all registered scanners sequentially and collects results.
+// ScanAll runs all registered scanners (see ScanWithProgress) and collects results.
 func (r *Registry) ScanAll(ctx context.Context, root string) ([]model.ScanResult, error) {
 	return r.ScanWith(ctx, root, r.scanners)
 }
 
-// ProgressFunc is called during scanning with the current ecosystem name and total items found so far.
+// ProgressFunc is called during scanning with the names of the scanners
+// running, joined with ", " ("" keeps the previous label), and the total items
+// found so far.
 type ProgressFunc func(ecosystem string, totalFound int)
 
 type progressKey struct{}
