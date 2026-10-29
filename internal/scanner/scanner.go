@@ -300,7 +300,7 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 			if ciOK && ci.refcnt > 1 {
 				kind = clonedFile
 			} else if !ciOK || ci.mayShare {
-				if x, ok := fileExtents(full, info.Size()); ok {
+				if x, ok := fileExtents(full, info); ok {
 					kind, xs = extentFile, x
 				}
 			}
@@ -332,7 +332,7 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 				if groups == nil {
 					groups = make(map[uint64]*cloneGroup)
 				}
-				g = &cloneGroup{CloneShare: model.CloneShare{Refcnt: ci.refcnt, Blocks: blocks}, path: full, size: info.Size()}
+				g = &cloneGroup{CloneShare: model.CloneShare{Refcnt: ci.refcnt, Blocks: blocks}, path: full, info: info}
 				groups[ci.id] = g
 			}
 			g.Seen++
@@ -396,7 +396,7 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 		}
 		// A partly rewritten copy may overlap the group: count by extent.
 		if len(extents) > 0 {
-			if xs, ok := fileExtents(g.path, g.size); ok {
+			if xs, ok := fileExtents(g.path, g.info); ok {
 				extents = append(extents, xs...)
 				continue
 			}

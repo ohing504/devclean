@@ -2,6 +2,8 @@ package scanner
 
 import (
 	"encoding/binary"
+	"io/fs"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -13,9 +15,12 @@ const (
 )
 
 // fileExtents returns a file's physical extents via fcntl(F_LOG2PHYS_EXT). ok
-// is false when a lookup fails (e.g. a compressed file).
-func fileExtents(path string, size int64) (xs []extent, ok bool) {
-	if size == 0 {
+// is false when a lookup fails (e.g. a compressed file). A file with no
+// allocated blocks has none and is not opened: opening a cloud placeholder
+// would download it.
+func fileExtents(path string, info fs.FileInfo) (xs []extent, ok bool) {
+	size := info.Size()
+	if sys, isStat := info.Sys().(*syscall.Stat_t); size == 0 || (isStat && sys.Blocks == 0) {
 		return nil, true
 	}
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC, 0)

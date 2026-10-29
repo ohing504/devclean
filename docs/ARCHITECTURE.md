@@ -38,7 +38,6 @@ Three invariants keep the figures honest:
 - **Hard links** (`Nlink>1`) are counted once per artifact, keyed by `(dev, ino)`, so shared blocks net out across artifacts.
 - **APFS clones** in a `CloneAware` artifact count once; clone groups split across artifacts go to `CloneShares` so `DedupedTotal` counts them once.
 - **Hugging Face shared blobs** referenced by several models go to `BlobShares` so `DedupedTotal` counts them once.
-- **Shared traversal**: sizing walks with `fstree`, so it counts what finding reports and deletion removes.
 
 Neither scanner family sizes inline. Each collects its artifacts first — the walk during its single pass, stat scanners via `stat` — then sizes them through a worker pool (`sizePending`) so the tree-walk I/O overlaps. At most 8 sizing walks run at once process-wide, across the pools of both lanes: a worker waits for a slot before measuring an artifact, and inside one artifact `measure` hands a subdirectory to its own goroutine whenever a slot is free, so a lone large artifact (a pnpm store) is not walked by one goroutine. The sub-walks share one hard-link and clone tally, so the totals do not depend on the split.
 
@@ -49,6 +48,7 @@ Finding, sizing and the pre-delete check walk through one package, so they cover
 - **Read each directory once.**
 - **Never follow symlinks.** Only the root is read through, and only for `--path` — [decision](decisions/symlink-no-follow.md)
 - **Stay on the root's filesystem** (like `du -x`); a directory on another device, of unknown device, or unreadable is returned as skipped — [decision](decisions/one-filesystem.md)
+- **Never read a dataless directory** (cloud placeholder whose content is not on disk); it is returned as skipped — [decision](decisions/skip-dataless.md)
 
 ### Walk engine
 
@@ -89,7 +89,7 @@ Use this pattern when a single ecosystem produces directories whose names alone 
 
 Reclaiming is not always `os.RemoveAll` on a path — Docker images or simulator devices are reclaimed through vendor commands or API calls. Each `ScanResult` carries an optional `Delete *model.DeleteMethod` (kind path/command/api + display + `Run`); nil means path removal.
 
-The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached, otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal. Path removal (including dry-run) is refused when `fstree` skips any directory in the item: a recursive delete does not stop at mounts. Example: the global scanner's Homebrew item (`brew cleanup`).
+The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached (example: the global scanner's Homebrew item, `brew cleanup`), otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal. Path removal (including dry-run) is refused when `fstree` skipped any directory in the item: a mount ([decision](decisions/one-filesystem.md)), a cloud placeholder ([decision](decisions/skip-dataless.md)) or an unreadable directory.
 
 After path removal the cleaner runs the item's `Release`, if any, with the same trash/permanent removal; dry-run skips it.
 
