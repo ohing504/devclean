@@ -218,6 +218,15 @@ List supported ecosystems, categories, activity statuses, and safety levels.
 devclean list
 ```
 
+## Traversal
+
+Finding, sizing and the pre-delete check of `clean` read the same directories:
+
+- Symlinks are never followed; only the `--path` root is read through ([decision](decisions/symlink-no-follow.md)).
+- A mount under the scan root is not entered; pass it as `--path` to scan it ([decision](decisions/one-filesystem.md)).
+- A cloud placeholder directory (iCloud Drive, Dropbox or another File Provider folder whose content is not on disk) is not read, so a scan never downloads cloud content; a placeholder file adds nothing to `size`, only its logical size to `apparent_size` ([decision](decisions/skip-dataless.md)).
+- `clean`, including `--dry-run`, refuses an artifact containing a directory it did not read (a mount, a cloud placeholder, or an unreadable directory); a dry run marks it "would fail".
+
 ## Classification
 
 ### Categories

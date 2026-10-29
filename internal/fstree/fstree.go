@@ -1,7 +1,8 @@
 // Package fstree is the one tree traversal shared by finding artifacts,
 // sizing them and checking them before deletion, so all three cover the same
 // files. It never follows symlinks (only the root, when asked) and stays on
-// the root's filesystem, like du -x.
+// the root's filesystem, like du -x. It never reads a dataless directory, whose
+// content is in a cloud provider and would be downloaded by the read.
 package fstree
 
 import (
@@ -28,6 +29,10 @@ var deviceOf = func(_ string, info fs.FileInfo) (uint64, bool) {
 	return uint64(sys.Dev), true //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
 }
 
+// dataless is indirected so a test can mark a directory dataless without a
+// cloud provider.
+var dataless = isDataless
+
 // Walker walks a tree depth-first, reading each directory once. Every hook is
 // optional.
 type Walker struct {
@@ -46,8 +51,9 @@ type Walker struct {
 }
 
 // Walk walks the tree under root and returns the directories it could not
-// check: on another filesystem, of unknown filesystem, or unreadable. A root
-// that does not exist is an empty tree. The only error is ctx's.
+// check: on another filesystem, of unknown filesystem, dataless, or
+// unreadable. A root that does not exist is an empty tree. The only error is
+// ctx's.
 func (w Walker) Walk(ctx context.Context, root string) ([]string, error) {
 	statRoot := os.Lstat
 	if w.FollowRoot {
@@ -57,7 +63,7 @@ func (w Walker) Walk(ctx context.Context, root string) ([]string, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
-	if err != nil {
+	if err != nil || (info.IsDir() && dataless(info)) {
 		return []string{root}, nil
 	}
 	rootDev, rootDevOK := deviceOf(root, info)
@@ -95,6 +101,10 @@ func (w Walker) Walk(ctx context.Context, root string) ([]string, error) {
 				skipped = append(skipped, child)
 				continue
 			}
+			if dataless(childInfo) {
+				skipped = append(skipped, child)
+				continue
+			}
 			if rootDevOK {
 				if dev, ok := deviceOf(child, childInfo); !ok || dev != rootDev {
 					skipped = append(skipped, child)
@@ -120,13 +130,13 @@ type UncheckedError struct {
 }
 
 func (e *UncheckedError) Error() string {
-	return fmt.Sprintf("refusing to delete %s: contains directories on another filesystem or unreadable (%s)",
+	return fmt.Sprintf("refusing to delete %s: contains directories on another filesystem, not downloaded from a cloud provider, or unreadable (%s)",
 		e.Path, strings.Join(e.Dirs, ", "))
 }
 
 // CheckOneFilesystem returns an *UncheckedError when the tree at path has
 // directories Walk could not check. A recursive delete does not stop at
-// mounts, so it would remove files that were never sized or shown.
+// them, so it would remove files that were never sized or shown.
 func CheckOneFilesystem(ctx context.Context, path string) error {
 	skipped, err := Walker{}.Walk(ctx, path)
 	if err != nil {

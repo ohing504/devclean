@@ -80,6 +80,46 @@ func TestWalk_DoesNotEnterDirWithoutDevice(t *testing.T) {
 	}
 }
 
+// fakeDataless marks directories with the given base name dataless.
+func fakeDataless(t *testing.T, name string) {
+	t.Helper()
+	orig := dataless
+	dataless = func(info fs.FileInfo) bool { return info.Name() == name }
+	t.Cleanup(func() { dataless = orig })
+}
+
+func TestWalk_DoesNotReadDatalessDir(t *testing.T) {
+	root := t.TempDir()
+	cloud := filepath.Join(root, "cloud")
+	mkdirAll(t, filepath.Join(cloud, "inner"))
+	mkdirAll(t, filepath.Join(root, "local"))
+	fakeDataless(t, "cloud")
+
+	got, skipped := entered(t, Walker{}, root)
+
+	if want := []string{root, filepath.Join(root, "local")}; !slices.Equal(got, want) {
+		t.Errorf("entered = %v, want %v", got, want)
+	}
+	if want := []string{cloud}; !slices.Equal(skipped, want) {
+		t.Errorf("skipped = %v, want %v", skipped, want)
+	}
+}
+
+func TestWalk_DatalessRootIsUnchecked(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "cloud")
+	mkdirAll(t, filepath.Join(root, "inner"))
+	fakeDataless(t, "cloud")
+
+	got, skipped := entered(t, Walker{}, root)
+
+	if len(got) != 0 {
+		t.Errorf("entered = %v, want none", got)
+	}
+	if want := []string{root}; !slices.Equal(skipped, want) {
+		t.Errorf("skipped = %v, want %v", skipped, want)
+	}
+}
+
 func TestWalk_ReadsEachDirOnce(t *testing.T) {
 	root := t.TempDir()
 	mkdirAll(t, filepath.Join(root, "a", "b"))
