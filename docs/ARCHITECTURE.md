@@ -89,7 +89,7 @@ Use this pattern when a single ecosystem produces directories whose names alone 
 
 Reclaiming is not always `os.RemoveAll` on a path — Docker images or simulator devices are reclaimed through vendor commands or API calls. Each `ScanResult` carries an optional `Delete *model.DeleteMethod` (kind path/command/api + display + `Run`); nil means path removal.
 
-The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached (example: the global scanner's Homebrew item, `brew cleanup`), otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal. Path removal (including dry-run) is refused when `fstree` skipped any directory in the item ([decision](decisions/one-filesystem.md)).
+The cleaner applies its policy gates (protected refusal, dry-run) uniformly, then executes: `Delete.Run(ctx)` when a method is attached (example: the global scanner's Homebrew item, `brew cleanup`), otherwise path removal (trash or permanent). A method with a nil `Run` is refused rather than falling back to path removal — a misconfigured item must never delete a path its method didn't intend. Trash/permanent choice only applies to path removal. Path removal (including dry-run) is refused when `fstree` skipped any directory in the item: a mount ([decision](decisions/one-filesystem.md)), a cloud placeholder ([decision](decisions/skip-dataless.md)) or an unreadable directory.
 
 After path removal the cleaner runs the item's `Release`, if any, with the same trash/permanent removal; dry-run skips it.
 
