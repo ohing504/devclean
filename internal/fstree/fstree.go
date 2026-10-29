@@ -12,7 +12,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"syscall"
 )
 
@@ -33,28 +35,32 @@ var deviceOf = func(_ string, info fs.FileInfo) (uint64, bool) {
 // cloud provider.
 var dataless = isDataless
 
-// Walker walks a tree depth-first, reading each directory once. Every hook is
-// optional.
-type Walker struct {
+// Walker walks a tree depth-first, reading each directory once. S is what a
+// directory hands its subdirectories (struct{} for nothing); the root gets the
+// zero S. Every hook is optional.
+type Walker[S any] struct {
 	// FollowRoot reads through a symlinked root, for a user-given location
 	// such as --path. Leave it off when the root is the item to delete:
 	// deleting a symlink removes only the link.
 	FollowRoot bool
+	// Slots, when set, bounds extra goroutines: a subdirectory is walked in
+	// its own goroutine while a slot is free. Hooks then run concurrently.
+	Slots chan struct{}
 	// Enter is called before a directory is read (and for a non-directory
-	// root, which is not read). Returning false skips it.
-	Enter func(dir string, info fs.FileInfo) bool
-	// Entries is called once a directory is read. Returning false skips its
-	// subdirectories and Leave.
-	Entries func(dir string, entries []fs.DirEntry) bool
-	// Leave is called after a read directory's subtree is walked.
-	Leave func(dir string)
+	// root, which is not read), with its parent's S. Returning false skips it.
+	Enter func(dir string, info fs.FileInfo, parent S) bool
+	// Entries is called once a directory is read, with its parent's S, and
+	// returns the S for its subdirectories. Returning false skips them. With
+	// Slots the subdirectories run concurrently on the same S, so neither hook
+	// may modify a parent S in place.
+	Entries func(dir string, entries []fs.DirEntry, parent S) (S, bool)
 }
 
 // Walk walks the tree under root and returns the directories it could not
-// check: on another filesystem, of unknown filesystem, dataless, or
+// check, sorted: on another filesystem, of unknown filesystem, dataless, or
 // unreadable. A root that does not exist is an empty tree. The only error is
 // ctx's.
-func (w Walker) Walk(ctx context.Context, root string) ([]string, error) {
+func (w Walker[S]) Walk(ctx context.Context, root string) ([]string, error) {
 	statRoot := os.Lstat
 	if w.FollowRoot {
 		statRoot = os.Stat
@@ -68,25 +74,36 @@ func (w Walker) Walk(ctx context.Context, root string) ([]string, error) {
 	}
 	rootDev, rootDevOK := deviceOf(root, info)
 
+	var mu sync.Mutex // guards skipped
 	var skipped []string
-	var visit func(dir string, info fs.FileInfo) error
-	visit = func(dir string, info fs.FileInfo) error {
-		if err := ctx.Err(); err != nil {
-			return err
+	skip := func(dir string) {
+		mu.Lock()
+		skipped = append(skipped, dir)
+		mu.Unlock()
+	}
+	var wg sync.WaitGroup
+	var visit func(dir string, info fs.FileInfo, parent S)
+	visit = func(dir string, info fs.FileInfo, parent S) {
+		if ctx.Err() != nil {
+			return
 		}
-		if w.Enter != nil && !w.Enter(dir, info) {
-			return nil
+		if w.Enter != nil && !w.Enter(dir, info, parent) {
+			return
 		}
 		if !info.IsDir() {
-			return nil
+			return
 		}
 		entries, err := readDir(dir)
 		if err != nil {
-			skipped = append(skipped, dir)
-			return nil
+			skip(dir)
+			return
 		}
-		if w.Entries != nil && !w.Entries(dir, entries) {
-			return nil
+		state := parent
+		if w.Entries != nil {
+			var ok bool
+			if state, ok = w.Entries(dir, entries, parent); !ok {
+				return
+			}
 		}
 		for _, e := range entries {
 			if !e.IsDir() { // false for symlinks: ReadDir does not follow them
@@ -97,30 +114,32 @@ func (w Walker) Walk(ctx context.Context, root string) ([]string, error) {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
-			if err != nil {
-				skipped = append(skipped, child)
-				continue
-			}
-			if dataless(childInfo) {
-				skipped = append(skipped, child)
+			if err != nil || dataless(childInfo) {
+				skip(child)
 				continue
 			}
 			if rootDevOK {
 				if dev, ok := deviceOf(child, childInfo); !ok || dev != rootDev {
-					skipped = append(skipped, child)
+					skip(child)
 					continue
 				}
 			}
-			if err := visit(child, childInfo); err != nil {
-				return err
+			select {
+			case w.Slots <- struct{}{}: // never ready when Slots is nil
+				wg.Go(func() {
+					defer func() { <-w.Slots }()
+					visit(child, childInfo, state)
+				})
+			default:
+				visit(child, childInfo, state)
 			}
 		}
-		if w.Leave != nil {
-			w.Leave(dir)
-		}
-		return nil
 	}
-	return skipped, visit(root, info)
+	var zero S
+	visit(root, info, zero)
+	wg.Wait()
+	slices.Sort(skipped)
+	return skipped, ctx.Err()
 }
 
 // UncheckedError reports a tree with directories Walk could not check.
@@ -138,7 +157,7 @@ func (e *UncheckedError) Error() string {
 // directories Walk could not check. A recursive delete does not stop at
 // them, so it would remove files that were never sized or shown.
 func CheckOneFilesystem(ctx context.Context, path string) error {
-	skipped, err := Walker{}.Walk(ctx, path)
+	skipped, err := Walker[struct{}]{}.Walk(ctx, path)
 	if err != nil {
 		return err
 	}

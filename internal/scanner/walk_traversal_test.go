@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -161,5 +162,67 @@ func TestWalkScan_HiddenNamedRootIsScanned(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].Path != cache {
 		t.Errorf("expected only %s, got %+v", cache, results)
+	}
+}
+
+// TestWalkScan_InstalledPackageRootIsPruned pins that a scan root named like
+// an installed-package tree is not read: a package's own node_modules inside
+// it is not a deletion target.
+func TestWalkScan_InstalledPackageRootIsPruned(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "node_modules")
+	touch(t, filepath.Join(root, "foo", "package.json"))
+	touch(t, filepath.Join(root, "foo", "node_modules", "bar", "index.js"))
+
+	results, err := WalkScan(context.Background(), root, model.EcoNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Errorf("got %v, want no results", paths(results))
+	}
+}
+
+// TestWalkScan_SplitMatchesSerial scans a tree of nested projects twice: with
+// every walk slot taken (one goroutine walks it all) and with the slots free
+// (subtrees are walked in parallel, each with its ancestors' project
+// contexts). Both must report the same artifacts, attributed to the same
+// project roots. Sibling projects under a three-deep stack add their contexts
+// at the same depth, so they must not share the stack's spare capacity.
+func TestWalkScan_SplitMatchesSerial(t *testing.T) {
+	root := t.TempDir()
+	for _, p := range []string{
+		"mono/package.json", "mono/node_modules/x",
+		"mono/packages/a/package.json", "mono/packages/a/node_modules/x", "mono/packages/a/dist/x",
+		"mono/packages/b/src/__pycache__/x", "mono/packages/b/pyproject.toml",
+		"mono/packages/b/.venv/pyvenv.cfg", "mono/packages/b/sub/lib/__pycache__/x",
+		"rs/Cargo.toml", "rs/target/x", "rs/crates/c/Cargo.toml", "rs/crates/c/target/x",
+		"plain/deep/er/__pycache__/x", ".hidden/package.json", ".hidden/node_modules/x",
+		"n1/package.json", "n1/n2/package.json", "n1/n2/n3/package.json",
+	} {
+		touch(t, filepath.Join(root, filepath.FromSlash(p)))
+	}
+	for i := range 8 {
+		sib := filepath.Join(root, "n1", "n2", "n3", "s"+strconv.Itoa(i))
+		touch(t, filepath.Join(sib, "package.json"))
+		touch(t, filepath.Join(sib, "node_modules", "x"))
+	}
+	scan := func() []string {
+		results, err := runWalk(context.Background(), root, walkEcosystemTable)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, r := range results {
+			out = append(out, r.Path+" "+string(r.Ecosystem)+" "+r.ProjectRoot)
+		}
+		return out
+	}
+
+	var serial []string
+	withSlotsTaken(t, walkTokens, func() { serial = scan() })
+	split := scan()
+
+	if len(serial) == 0 || !slices.Equal(serial, split) {
+		t.Errorf("split:\n%v\nserial:\n%v", split, serial)
 	}
 }

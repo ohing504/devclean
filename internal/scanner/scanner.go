@@ -4,6 +4,8 @@ import (
 	"context"
 	"io/fs"
 	"path/filepath"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -75,12 +77,14 @@ func (r *Registry) ForEcosystems(ecos []model.Ecosystem) []Scanner {
 	return filtered
 }
 
-// ScanAll runs all registered scanners sequentially and collects results.
+// ScanAll runs all registered scanners (see ScanWithProgress) and collects results.
 func (r *Registry) ScanAll(ctx context.Context, root string) ([]model.ScanResult, error) {
 	return r.ScanWith(ctx, root, r.scanners)
 }
 
-// ProgressFunc is called during scanning with the current ecosystem name and total items found so far.
+// ProgressFunc is called during scanning with the names of the scanners
+// running, joined with ", " ("" keeps the previous label), and the total items
+// found so far.
 type ProgressFunc func(ecosystem string, totalFound int)
 
 type progressKey struct{}
@@ -104,47 +108,79 @@ func (r *Registry) ScanWith(ctx context.Context, root string, scanners []Scanner
 }
 
 // ScanWithProgress runs scanners with an optional progress callback.
-// Walk-based scanners are partitioned out and executed first as a single
-// batched filesystem pass; the remaining scanners run sequentially.
+// Walk-based scanners are partitioned out and executed as a single batched
+// filesystem pass; the remaining scanners run sequentially alongside it. The
+// two lanes share no state, so the scan takes as long as the slower lane.
+// Results keep the order walk first, then the remaining scanners in order, and
+// onProgress is never called concurrently.
 func (r *Registry) ScanWithProgress(ctx context.Context, root string, scanners []Scanner, onProgress ProgressFunc) ([]model.ScanResult, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
 	}
-	var all []model.ScanResult
-
-	// Attach a real-time progress reporter via context
-	scanCtx := ctx
-	if onProgress != nil {
-		scanCtx = WithProgress(ctx, func(found int) {
-			onProgress("", len(all)+found)
-		})
-	}
+	// The first lane to fail cancels the other with its error as the cause,
+	// which the other's context.Canceled would otherwise hide.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 
 	walkTables, rest := partitionScanners(scanners)
 
-	if len(walkTables) > 0 {
+	// Progress names the scanners still running in each lane, so the label
+	// does not stay on a finished stat scanner while the walk goes on.
+	var mu sync.Mutex
+	var walkFound, restFound int
+	var walkName, restName string
+	report := func(eco string) {
 		if onProgress != nil {
-			onProgress("projects", len(all))
+			onProgress(eco, walkFound+restFound)
 		}
-		results, err := runWalk(scanCtx, root, walkTables)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, results...)
+	}
+	setName := func(name *string, to string) {
+		mu.Lock()
+		defer mu.Unlock()
+		*name = to
+		report(strings.Trim(walkName+", "+restName, ", "))
+	}
+	progress := func(found *int, base int) context.Context {
+		return WithProgress(ctx, func(n int) {
+			mu.Lock()
+			defer mu.Unlock()
+			*found = base + n
+			report("")
+		})
 	}
 
-	for _, s := range rest {
-		if onProgress != nil {
-			onProgress(s.Name(), len(all))
-		}
-		results, err := s.Scan(scanCtx, root)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, results...)
+	var walkResults, restResults []model.ScanResult
+	var walkErr, restErr error
+	var wg sync.WaitGroup
+	if len(walkTables) > 0 {
+		wg.Go(func() {
+			setName(&walkName, "projects")
+			defer setName(&walkName, "")
+			walkResults, walkErr = runWalk(progress(&walkFound, 0), root, walkTables)
+			if walkErr != nil {
+				cancel(walkErr)
+			}
+		})
 	}
-	return all, nil
+	wg.Go(func() {
+		defer setName(&restName, "")
+		for _, s := range rest {
+			setName(&restName, s.Name())
+			var results []model.ScanResult
+			results, restErr = s.Scan(progress(&restFound, len(restResults)), root)
+			if restErr != nil {
+				cancel(restErr)
+				return
+			}
+			restResults = append(restResults, results...)
+		}
+	})
+	wg.Wait()
+	if walkErr != nil || restErr != nil {
+		return nil, context.Cause(ctx)
+	}
+	return append(walkResults, restResults...), nil
 }
 
 // partitionScanners splits scanners into walk-engine tables (batched into a
@@ -188,10 +224,29 @@ func Measure(path string) SizeStat {
 	return measure(context.Background(), path, nil, "")
 }
 
+// sizeTokens bounds the tree walks sizing runs at once, process-wide: a
+// sizePending worker waits for one before measuring an artifact, and measure
+// takes a free one, without waiting, to walk a subdirectory in its own
+// goroutine. Once the other artifacts are sized, a lone large one (a pnpm
+// store) gets every slot instead of being walked by one goroutine.
+var sizeTokens = make(chan struct{}, sizeWorkerCap)
+
+// fileKind is how measure counts a regular file's blocks.
+type fileKind int
+
+const (
+	plainFile  fileKind = iota // st_blocks as is
+	linkedFile                 // hard-linked: once per inode
+	clonedFile                 // pure APFS clone: once per clone group
+	extentFile                 // may share blocks: by physical extent
+)
+
 // measure is Measure that stops once ctx is done. A non-nil clones makes it
 // clone-aware (see clone.go), netting out blocks shared with the files under
-// source, if given.
+// source, if given. A subdirectory is walked in its own goroutine whenever a
+// sizeTokens slot is free; the totals do not depend on how the tree is split.
 func measure(ctx context.Context, path string, clones *cloneSources, source string) SizeStat {
+	var mu sync.Mutex // guards everything below, shared by the walk's goroutines
 	var st SizeStat
 	seen := make(map[model.InodeKey]struct{})
 	var extents []extent
@@ -200,21 +255,48 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 	var rootDev uint64
 	add := func(dir, name string, info fs.FileInfo) {
 		sys, ok := info.Sys().(*syscall.Stat_t)
+		if info.Mode()&fs.ModeSymlink != 0 || (!ok && info.IsDir()) {
+			return
+		}
 		if !ok {
-			if !info.IsDir() && info.Mode()&fs.ModeSymlink == 0 {
-				st.Apparent += info.Size() // non-unix fallback: apparent only
-			}
+			mu.Lock()
+			st.Apparent += info.Size() // non-unix fallback: apparent only
+			mu.Unlock()
 			return
 		}
 		blocks := int64(sys.Blocks) * 512
 		if info.IsDir() {
-			st.Disk += blocks
+			mu.Lock()
+			st.Disk += blocks // dirs add their own blocks to Disk, not Apparent
+			mu.Unlock()
 			return
 		}
-		if info.Mode()&fs.ModeSymlink != 0 {
-			return
+		// Classify before taking the lock: clone attributes and extents are
+		// syscalls, and the lock would serialize them across sub-walks.
+		kind := plainFile
+		var full string
+		var ci cloneInfo
+		var xs []extent
+		switch {
+		case sys.Nlink > 1:
+			kind = linkedFile
+		case clones != nil && blocks > 0:
+			full = filepath.Join(dir, name)
+			var ciOK bool
+			ci, ciOK = fileCloneInfo(full)
+			if ciOK && ci.refcnt > 1 {
+				kind = clonedFile
+			} else if !ciOK || ci.mayShare {
+				if x, ok := fileExtents(full, info); ok {
+					kind, xs = extentFile, x
+				}
+			}
 		}
-		if sys.Nlink > 1 {
+
+		mu.Lock()
+		defer mu.Unlock()
+		switch kind {
+		case linkedFile:
 			// Count a multiply-linked inode once per artifact for both apparent
 			// and disk (matches `du`/`du -A` within-call dedup), and record it
 			// so DedupedTotal can net it out across artifacts.
@@ -227,40 +309,34 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 				st.Links = make(map[model.InodeKey]int64)
 			}
 			st.Links[key] = blocks
-		} else if clones != nil && blocks > 0 {
-			full := filepath.Join(dir, name)
-			ci, ok := fileCloneInfo(full)
-			switch {
-			case ok && ci.refcnt > 1:
-				g := groups[ci.id]
-				if g == nil {
-					if groups == nil {
-						groups = make(map[uint64]*cloneGroup)
-					}
-					g = &cloneGroup{CloneShare: model.CloneShare{Refcnt: ci.refcnt, Blocks: blocks}, path: full, info: info}
-					groups[ci.id] = g
+		case clonedFile:
+			g := groups[ci.id]
+			if g == nil {
+				if groups == nil {
+					groups = make(map[uint64]*cloneGroup)
 				}
-				g.Seen++
-				groupBlocks += blocks
-			case !ok || ci.mayShare:
-				if xs, ok := fileExtents(full, info); ok {
-					extents = append(extents, xs...)
-					extentBlocks += blocks
-				}
+				g = &cloneGroup{CloneShare: model.CloneShare{Refcnt: ci.refcnt, Blocks: blocks}, path: full, info: info}
+				groups[ci.id] = g
 			}
+			g.Seen++
+			groupBlocks += blocks
+		case extentFile:
+			extents = append(extents, xs...)
+			extentBlocks += blocks
 		}
 		st.Apparent += info.Size()
 		st.Disk += blocks
 	}
-	w := fstree.Walker{
-		Enter: func(dir string, info fs.FileInfo) bool {
+	w := fstree.Walker[struct{}]{
+		Slots: sizeTokens,
+		Enter: func(dir string, info fs.FileInfo, _ struct{}) bool {
 			if sys, ok := info.Sys().(*syscall.Stat_t); ok && dir == path {
 				rootDev = uint64(sys.Dev) //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
 			}
 			add(dir, "", info)
 			return true
 		},
-		Entries: func(dir string, entries []fs.DirEntry) bool {
+		Entries: func(dir string, entries []fs.DirEntry, _ struct{}) (struct{}, bool) {
 			for _, e := range entries {
 				if e.IsDir() {
 					continue // counted on Enter, if on this filesystem
@@ -269,7 +345,7 @@ func measure(ctx context.Context, path string, clones *cloneSources, source stri
 					add(dir, e.Name(), info)
 				}
 			}
-			return true
+			return struct{}{}, true
 		},
 	}
 	_, _ = w.Walk(ctx, path)

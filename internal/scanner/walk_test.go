@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -194,7 +195,7 @@ func TestScanWithProgress_MixedPartition(t *testing.T) {
 
 	var labels []string
 	reg := NewRegistry()
-	// The stub is listed first, but the walk batch must still run first.
+	// The stub is listed first, but the walk batch's results still come first.
 	results, err := reg.ScanWithProgress(context.Background(), root, []Scanner{stub, alpha, beta},
 		func(eco string, _ int) {
 			if eco != "" {
@@ -221,14 +222,15 @@ func TestScanWithProgress_MixedPartition(t *testing.T) {
 		t.Errorf("batch results misattributed: got %s, %s", results[0].Ecosystem, results[1].Ecosystem)
 	}
 
-	// One "projects" label for the whole batch, then the stub by name.
-	wantLabels := []string{"projects", "stub"}
-	if len(labels) != len(wantLabels) {
-		t.Fatalf("expected labels %v, got %v", wantLabels, labels)
-	}
-	for i, want := range wantLabels {
-		if labels[i] != want {
-			t.Errorf("label[%d]: got %s, want %s", i, labels[i], want)
+	// Labels name the running lanes: "projects" for the whole batch and the
+	// stub by name, alone or together since the lanes run concurrently.
+	named := map[string]bool{}
+	for _, l := range labels {
+		for name := range strings.SplitSeq(l, ", ") {
+			named[name] = true
 		}
+	}
+	if len(named) != 2 || !named["projects"] || !named["stub"] {
+		t.Errorf("labels = %v, want only projects and stub, each at least once", labels)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"io/fs"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -154,17 +153,21 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		}
 	}
 
+	var mu sync.Mutex // guards results
 	var results []model.ScanResult
-	var stack []projectContext
 	numTables := len(tables)
 
-	// fstree does the traversal; the engine only decides what a directory is.
-	walker := fstree.Walker{
+	// fstree does the traversal, in parallel while walkTokens has a free slot;
+	// the engine only decides what a directory is. Each directory hands its
+	// subdirectories the ancestors' project contexts plus its own. Results are
+	// sorted below, so their order does not depend on the split.
+	walker := fstree.Walker[[]projectContext]{
 		FollowRoot: true,
+		Slots:      walkTokens,
 		// Artifact match first, before the hidden-dir check, against the
-		// ancestor contexts (dir's own context is pushed only if we descend).
+		// ancestor contexts (dir's own context is added only if we descend).
 		// Size is filled in afterwards by sizePending.
-		Enter: func(dir string, info fs.FileInfo) bool {
+		Enter: func(dir string, info fs.FileInfo, stack []projectContext) bool {
 			name := filepath.Base(dir)
 			if rule, tableIdx, projRoot, ok := matchArtifact(stack, dir, name, numTables); ok {
 				result := model.ScanResult{
@@ -182,19 +185,22 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 					result.Recommendation = n.Recommendation
 					result.CloneAware, result.CloneSource = n.CloneAware, n.CloneSource
 				}
+				mu.Lock()
 				results = append(results, result)
 				ReportProgress(ctx, len(results))
+				mu.Unlock()
 				return false // matched artifact: do not descend
 			}
 			// After artifact matching, so a project's own node_modules is
-			// still reported.
+			// still reported. Also for the root: a scan of an installed tree
+			// reports nothing inside it.
 			if installedPackageDirNames[name] {
 				return false
 			}
 			// The root is always entered: the hidden-dir rule applies below it.
 			return dir == root || !strings.HasPrefix(name, ".") || hiddenDescend[name]
 		},
-		Entries: func(dir string, entries []fs.DirEntry) bool {
+		Entries: func(dir string, entries []fs.DirEntry, stack []projectContext) ([]projectContext, bool) {
 			names := make(map[string]bool, len(entries))
 			for _, e := range entries {
 				names[e.Name()] = true
@@ -203,13 +209,16 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 			// Prune before establishing any context or descending, so nothing
 			// inside is ever a deletion target.
 			if isInstalledPackageTree(dir, names) {
-				return false
+				return nil, false
 			}
 			for i := range tables {
 				if p := tables[i].PruneRoot; p != nil && p(dir, names) {
-					return false
+					return nil, false
 				}
 			}
+			// Clip so siblings walked in other goroutines never append
+			// into one shared array.
+			stack = slices.Clip(stack)
 
 			// Marker check: establish the project contexts rooted at this directory.
 			for i := range tables {
@@ -236,13 +245,7 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 				}
 				stack = append(stack, projectContext{root: dir, tableIdx: i, rules: rules})
 			}
-			return true
-		},
-		// The contexts dir pushed are the ones on top rooted at dir.
-		Leave: func(dir string) {
-			for len(stack) > 0 && stack[len(stack)-1].root == dir {
-				stack = stack[:len(stack)-1]
-			}
+			return stack, true
 		},
 	}
 	if _, err := walker.Walk(ctx, root); err != nil {
@@ -267,6 +270,14 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 	})
 	return results, nil
 }
+
+// walkTokens bounds the extra goroutines runWalk starts to walk subtrees in
+// parallel. It is separate from sizeTokens so the walk is not starved while
+// the stat scanners size their caches alongside it.
+var walkTokens = make(chan struct{}, walkSlots)
+
+// walkSlots is the number of walkTokens.
+const walkSlots = 8
 
 // installedPackageDirNames hold only installed packages when the walk reaches
 // them without matching an artifact rule (a global lib/node_modules, a tool's
@@ -311,31 +322,20 @@ func isPnpmStoreVersionDir(name string) bool {
 }
 
 // sizeWorkerCap bounds concurrent sizing walks so a large scan does not
-// traverse every artifact tree at once.
+// traverse every artifact tree at once. sizeTokens enforces it across the
+// pools of all scanners and the sub-walks inside one artifact.
 const sizeWorkerCap = 8
 
 // sizePending fills in the size fields of every result by running
-// Measure concurrently across a bounded worker pool. The walk finds artifacts
-// serially but defers their sizing (one in-process tree walk each) to here so
-// the traversals and their I/O overlap. Returns ctx.Err() if the scan is
-// cancelled mid-sizing.
+// Measure concurrently across a bounded worker pool. The walk defers sizing
+// (one in-process tree walk each) to here so the traversals and their I/O
+// overlap. Returns ctx.Err() if the scan is cancelled mid-sizing.
 func sizePending(ctx context.Context, results []model.ScanResult) error {
-	workers := min(runtime.NumCPU(), sizeWorkerCap)
-	return sizePendingWorkers(ctx, results, workers)
-}
-
-// sizePendingWorkers is sizePending with an explicit pool size, split out so
-// the worker count can be swept in benchmarks.
-func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers int) error {
 	if len(results) == 0 {
 		return nil
 	}
-	if workers > len(results) {
-		workers = len(results)
-	}
-	if workers < 1 {
-		workers = 1
-	}
+	// sizeTokens bounds the concurrent measures; the workers only hand them out.
+	workers := min(sizeWorkerCap, len(results))
 
 	sources := newCloneSources()
 	idx := make(chan int)
@@ -348,7 +348,13 @@ func sizePendingWorkers(ctx context.Context, results []model.ScanResult, workers
 				if r.CloneAware && cloneSizingSupported {
 					clones = sources
 				}
+				select {
+				case sizeTokens <- struct{}{}:
+				case <-ctx.Done():
+					continue
+				}
 				st := measure(ctx, r.Path, clones, r.CloneSource)
+				<-sizeTokens
 				r.Size = st.Reclaim
 				r.ApparentSize = st.Apparent
 				r.Links = st.Links

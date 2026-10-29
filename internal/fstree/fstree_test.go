@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sync"
 	"testing"
 )
 
@@ -32,12 +34,18 @@ func fakeDevices(t *testing.T, devs map[string]uint64) {
 	t.Cleanup(func() { deviceOf = orig })
 }
 
+// plain is a Walker that hands nothing to subdirectories.
+type plain = Walker[struct{}]
+
 // entered walks root and returns every directory Enter saw, in order.
-func entered(t *testing.T, w Walker, root string) ([]string, []string) {
+func entered(t *testing.T, w plain, root string) ([]string, []string) {
 	t.Helper()
+	var mu sync.Mutex
 	var got []string
-	w.Enter = func(dir string, _ fs.FileInfo) bool {
+	w.Enter = func(dir string, _ fs.FileInfo, _ struct{}) bool {
+		mu.Lock()
 		got = append(got, dir)
+		mu.Unlock()
 		return true
 	}
 	skipped, err := w.Walk(context.Background(), root)
@@ -54,7 +62,7 @@ func TestWalk_DoesNotEnterOtherFilesystem(t *testing.T) {
 	mkdirAll(t, filepath.Join(root, "local"))
 	fakeDevices(t, map[string]uint64{mounted: 2})
 
-	got, skipped := entered(t, Walker{}, root)
+	got, skipped := entered(t, plain{}, root)
 
 	if want := []string{root, filepath.Join(root, "local")}; !slices.Equal(got, want) {
 		t.Errorf("entered = %v, want %v", got, want)
@@ -70,7 +78,7 @@ func TestWalk_DoesNotEnterDirWithoutDevice(t *testing.T) {
 	mkdirAll(t, filepath.Join(unknown, "inner"))
 	fakeDevices(t, map[string]uint64{unknown: 0})
 
-	got, skipped := entered(t, Walker{}, root)
+	got, skipped := entered(t, plain{}, root)
 
 	if want := []string{root}; !slices.Equal(got, want) {
 		t.Errorf("entered = %v, want %v", got, want)
@@ -95,7 +103,7 @@ func TestWalk_DoesNotReadDatalessDir(t *testing.T) {
 	mkdirAll(t, filepath.Join(root, "local"))
 	fakeDataless(t, "cloud")
 
-	got, skipped := entered(t, Walker{}, root)
+	got, skipped := entered(t, plain{}, root)
 
 	if want := []string{root, filepath.Join(root, "local")}; !slices.Equal(got, want) {
 		t.Errorf("entered = %v, want %v", got, want)
@@ -110,7 +118,7 @@ func TestWalk_DatalessRootIsUnchecked(t *testing.T) {
 	mkdirAll(t, filepath.Join(root, "inner"))
 	fakeDataless(t, "cloud")
 
-	got, skipped := entered(t, Walker{}, root)
+	got, skipped := entered(t, plain{}, root)
 
 	if len(got) != 0 {
 		t.Errorf("entered = %v, want none", got)
@@ -133,7 +141,7 @@ func TestWalk_ReadsEachDirOnce(t *testing.T) {
 	}
 	t.Cleanup(func() { readDir = orig })
 
-	entered(t, Walker{Entries: func(string, []fs.DirEntry) bool { return true }}, root)
+	entered(t, plain{Entries: func(string, []fs.DirEntry, struct{}) (struct{}, bool) { return struct{}{}, true }}, root)
 
 	if len(counts) != 4 {
 		t.Errorf("read %d dirs, want 4: %v", len(counts), counts)
@@ -160,7 +168,7 @@ func TestWalk_DoesNotFollowSymlinkedDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, _ := entered(t, Walker{}, root)
+	got, _ := entered(t, plain{}, root)
 
 	if want := []string{root}; !slices.Equal(got, want) {
 		t.Errorf("entered = %v, want %v", got, want)
@@ -179,12 +187,12 @@ func TestWalk_SymlinkedRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, _ := entered(t, Walker{FollowRoot: true}, link)
+	got, _ := entered(t, plain{FollowRoot: true}, link)
 	if want := []string{link, filepath.Join(link, "inner")}; !slices.Equal(got, want) {
 		t.Errorf("FollowRoot: entered = %v, want %v", got, want)
 	}
 
-	got, _ = entered(t, Walker{}, link)
+	got, _ = entered(t, plain{}, link)
 	if want := []string{link}; !slices.Equal(got, want) {
 		t.Errorf("no FollowRoot: entered = %v, want %v", got, want)
 	}
@@ -219,7 +227,7 @@ func TestWalk_SymlinkedRootOnOtherFilesystem(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, skipped := entered(t, Walker{FollowRoot: true}, link)
+	got, skipped := entered(t, plain{FollowRoot: true}, link)
 
 	if want := []string{link, filepath.Join(link, "inner")}; !slices.Equal(got, want) {
 		t.Errorf("entered = %v, want %v (skipped %v)", got, want, skipped)
@@ -232,7 +240,7 @@ func TestWalk_EnterFalseSkipsSubtree(t *testing.T) {
 	mkdirAll(t, filepath.Join(skip, "inner"))
 
 	var got []string
-	w := Walker{Enter: func(dir string, _ fs.FileInfo) bool {
+	w := plain{Enter: func(dir string, _ fs.FileInfo, _ struct{}) bool {
 		got = append(got, dir)
 		return dir != skip
 	}}
@@ -244,29 +252,62 @@ func TestWalk_EnterFalseSkipsSubtree(t *testing.T) {
 	}
 }
 
-func TestWalk_LeaveAfterChildren(t *testing.T) {
+func TestWalk_EntriesStateReachesOnlySubdirs(t *testing.T) {
 	root := t.TempDir()
-	child := filepath.Join(root, "child")
-	mkdirAll(t, child)
+	mkdirAll(t, filepath.Join(root, "a", "inner"))
+	mkdirAll(t, filepath.Join(root, "b"))
 
-	var events []string
-	w := Walker{
-		Enter: func(dir string, _ fs.FileInfo) bool { events = append(events, "enter "+dir); return true },
-		Leave: func(dir string) { events = append(events, "leave "+dir) },
+	got := make(map[string]string)
+	w := Walker[string]{
+		Enter: func(dir string, _ fs.FileInfo, parent string) bool {
+			got[dir] = parent
+			return true
+		},
+		Entries: func(dir string, _ []fs.DirEntry, parent string) (string, bool) {
+			return parent + "/" + filepath.Base(dir), true
+		},
 	}
 	if _, err := w.Walk(context.Background(), root); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"enter " + root, "enter " + child, "leave " + child, "leave " + root}
-	if !slices.Equal(events, want) {
-		t.Errorf("events = %v, want %v", events, want)
+	r := "/" + filepath.Base(root)
+	want := map[string]string{
+		root:                              "",
+		filepath.Join(root, "a"):          r,
+		filepath.Join(root, "a", "inner"): r + "/a",
+		filepath.Join(root, "b"):          r,
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("parent states = %v, want %v", got, want)
+	}
+}
+
+// TestWalk_SlotsMatchSerial: walking subdirectories in other goroutines
+// enters and skips the same directories, each once.
+func TestWalk_SlotsMatchSerial(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"a/b/c", "a/d", "e/f", "g", "mnt/x"} {
+		mkdirAll(t, filepath.Join(root, d))
+	}
+	fakeDevices(t, map[string]uint64{filepath.Join(root, "mnt"): 2})
+
+	serial, serialSkipped := entered(t, plain{}, root)
+	parallel, parallelSkipped := entered(t, plain{Slots: make(chan struct{}, 4)}, root)
+
+	slices.Sort(serial)
+	slices.Sort(parallel)
+	if !slices.Equal(parallel, serial) {
+		t.Errorf("entered = %v, want %v", parallel, serial)
+	}
+	if !slices.Equal(parallelSkipped, serialSkipped) {
+		t.Errorf("skipped = %v, want %v", parallelSkipped, serialSkipped)
 	}
 }
 
 func TestWalk_Cancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := (Walker{}).Walk(ctx, t.TempDir()); !errors.Is(err, context.Canceled) {
+	if _, err := (plain{}).Walk(ctx, t.TempDir()); !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
@@ -305,7 +346,7 @@ func TestWalk_ReportsUncheckableDir(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
 
-	_, skipped := entered(t, Walker{}, root)
+	_, skipped := entered(t, plain{}, root)
 
 	if want := []string{sub}; !slices.Equal(skipped, want) {
 		t.Errorf("skipped = %v, want %v", skipped, want)
@@ -326,7 +367,7 @@ func TestWalk_ReportsUnreadableDir(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
 
-	_, skipped := entered(t, Walker{}, root)
+	_, skipped := entered(t, plain{}, root)
 
 	if want := []string{locked}; !slices.Equal(skipped, want) {
 		t.Errorf("skipped = %v, want %v", skipped, want)

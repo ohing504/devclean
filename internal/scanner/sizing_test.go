@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -259,4 +260,55 @@ func TestDedupedTotalNoLinks(t *testing.T) {
 	if got := model.DedupedTotal(results); got != 350 {
 		t.Errorf("DedupedTotal = %d, want 350", got)
 	}
+}
+
+// TestMeasureSplitMatchesSerial sizes a tree whose files are hard-linked
+// across many subdirectories twice: with every sub-walk slot taken (one
+// goroutine walks it all) and with the slots free (subdirectories are walked
+// in parallel). The totals must match, a shared inode counted once.
+func TestMeasureSplitMatchesSerial(t *testing.T) {
+	dir := t.TempDir()
+	orig := filepath.Join(dir, "orig")
+	if err := os.WriteFile(orig, make([]byte, 300_000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 32 {
+		sub := filepath.Join(dir, "d", "d"+strconv.Itoa(i), "x")
+		if err := os.MkdirAll(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Link(orig, filepath.Join(sub, "link")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sub, "own"), make([]byte, 5000*(i+1)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var serial SizeStat
+	withSlotsTaken(t, sizeTokens, func() { serial = Measure(dir) })
+	split := Measure(dir)
+
+	if serial.Apparent != split.Apparent || serial.Disk != split.Disk || len(serial.Links) != len(split.Links) {
+		t.Errorf("split = {%d %d %d links}, serial = {%d %d %d links}",
+			split.Apparent, split.Disk, len(split.Links), serial.Apparent, serial.Disk, len(serial.Links))
+	}
+	if len(split.Links) != 1 {
+		t.Errorf("Links = %v, want exactly 1 shared inode", split.Links)
+	}
+}
+
+// withSlotsTaken runs f with every slot in slots taken, so no work is handed
+// to another goroutine, and frees them even if f fails the test.
+func withSlotsTaken(t *testing.T, slots chan struct{}, f func()) {
+	t.Helper()
+	for range cap(slots) {
+		slots <- struct{}{}
+	}
+	defer func() {
+		for range cap(slots) {
+			<-slots
+		}
+	}()
+	f()
 }

@@ -35,30 +35,20 @@ func buildArtifacts(b *testing.B, n, dirsPer, filesPer, fileSize int) []model.Sc
 	return results
 }
 
-func benchSize(b *testing.B, workers, n, dirsPer, filesPer, fileSize int) {
+func benchSize(b *testing.B, n, dirsPer, filesPer, fileSize int) {
 	template := buildArtifacts(b, n, dirsPer, filesPer, fileSize)
 	ctx := context.Background()
 	b.ResetTimer()
 	for range b.N {
 		results := make([]model.ScanResult, len(template))
 		copy(results, template)
-		if workers == 0 { // serial baseline
-			for i := range results {
-				results[i].Size = DirSize(results[i].Path)
-			}
-		} else {
-			_ = sizePendingWorkers(ctx, results, workers)
-		}
+		_ = sizePending(ctx, results)
 	}
 }
 
 // 40 medium artifacts (20 dirs x 50 files each) — models a real home scan with
-// many node_modules/target dirs. Serial vs parallel at several pool sizes.
-func BenchmarkSizeSerial(b *testing.B)     { benchSize(b, 0, 40, 20, 50, 512) }
-func BenchmarkSizeParallel1(b *testing.B)  { benchSize(b, 1, 40, 20, 50, 512) }
-func BenchmarkSizeParallel4(b *testing.B)  { benchSize(b, 4, 40, 20, 50, 512) }
-func BenchmarkSizeParallel8(b *testing.B)  { benchSize(b, 8, 40, 20, 50, 512) }
-func BenchmarkSizeParallel16(b *testing.B) { benchSize(b, 16, 40, 20, 50, 512) }
+// many node_modules/target dirs.
+func BenchmarkSize(b *testing.B) { benchSize(b, 40, 20, 50, 512) }
 
 // buildTraversalTree materializes a wide, artifact-free directory tree — the
 // regime that dominates a real scan (thousands of source dirs to walk before
