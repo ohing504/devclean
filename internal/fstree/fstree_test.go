@@ -267,16 +267,15 @@ func TestWalk_EntriesStateReachesOnlySubdirs(t *testing.T) {
 			return parent + "/" + filepath.Base(dir), true
 		},
 	}
-	if _, err := w.Walk(context.Background(), filepath.Join(root, "a")); err != nil {
+	if _, err := w.Walk(context.Background(), root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.Walk(context.Background(), filepath.Join(root, "b")); err != nil {
-		t.Fatal(err)
-	}
+	r := "/" + filepath.Base(root)
 	want := map[string]string{
-		filepath.Join(root, "a"):          "",
-		filepath.Join(root, "a", "inner"): "/a",
-		filepath.Join(root, "b"):          "",
+		root:                              "",
+		filepath.Join(root, "a"):          r,
+		filepath.Join(root, "a", "inner"): r + "/a",
+		filepath.Join(root, "b"):          r,
 	}
 	if !maps.Equal(got, want) {
 		t.Errorf("parent states = %v, want %v", got, want)

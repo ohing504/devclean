@@ -116,8 +116,10 @@ func (r *Registry) ScanWithProgress(ctx context.Context, root string, scanners [
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	// The first lane to fail cancels the other with its error as the cause,
+	// which the other's context.Canceled would otherwise hide.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 
 	walkTables, rest := partitionScanners(scanners)
 
@@ -137,61 +139,44 @@ func (r *Registry) ScanWithProgress(ctx context.Context, root string, scanners [
 		*name = to
 		report(strings.Trim(walkName+", "+restName, ", "))
 	}
-	walkCtx := WithProgress(ctx, func(n int) {
-		mu.Lock()
-		defer mu.Unlock()
-		walkFound = n
-		report("")
-	})
-	restCtx := func(base int) context.Context {
+	progress := func(found *int, base int) context.Context {
 		return WithProgress(ctx, func(n int) {
 			mu.Lock()
 			defer mu.Unlock()
-			restFound = base + n
+			*found = base + n
 			report("")
 		})
 	}
 
-	// The first lane to fail cancels the other, whose context.Canceled would
-	// otherwise hide the cause.
-	var firstErr error
-	var once sync.Once
-	fail := func(err error) {
-		once.Do(func() {
-			firstErr = err
-			cancel()
-		})
-	}
-
 	var walkResults, restResults []model.ScanResult
+	var walkErr, restErr error
 	var wg sync.WaitGroup
 	if len(walkTables) > 0 {
 		wg.Go(func() {
 			setName(&walkName, "projects")
 			defer setName(&walkName, "")
-			results, err := runWalk(walkCtx, root, walkTables)
-			if err != nil {
-				fail(err)
-				return
+			walkResults, walkErr = runWalk(progress(&walkFound, 0), root, walkTables)
+			if walkErr != nil {
+				cancel(walkErr)
 			}
-			walkResults = results
 		})
 	}
 	wg.Go(func() {
 		defer setName(&restName, "")
 		for _, s := range rest {
 			setName(&restName, s.Name())
-			results, err := s.Scan(restCtx(len(restResults)), root)
-			if err != nil {
-				fail(err)
+			var results []model.ScanResult
+			results, restErr = s.Scan(progress(&restFound, len(restResults)), root)
+			if restErr != nil {
+				cancel(restErr)
 				return
 			}
 			restResults = append(restResults, results...)
 		}
 	})
 	wg.Wait()
-	if firstErr != nil {
-		return nil, firstErr
+	if walkErr != nil || restErr != nil {
+		return nil, context.Cause(ctx)
 	}
 	return append(walkResults, restResults...), nil
 }

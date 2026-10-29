@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
@@ -272,7 +273,7 @@ func TestMeasureSplitMatchesSerial(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := range 32 {
-		sub := filepath.Join(dir, "d", string(rune('a'+i%26))+string(rune('0'+i/26)), "x")
+		sub := filepath.Join(dir, "d", "d"+strconv.Itoa(i), "x")
 		if err := os.MkdirAll(sub, 0o755); err != nil {
 			t.Fatal(err)
 		}

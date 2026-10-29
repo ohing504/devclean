@@ -50,7 +50,9 @@ type Walker[S any] struct {
 	// root, which is not read), with its parent's S. Returning false skips it.
 	Enter func(dir string, info fs.FileInfo, parent S) bool
 	// Entries is called once a directory is read, with its parent's S, and
-	// returns the S for its subdirectories. Returning false skips them.
+	// returns the S for its subdirectories. Returning false skips them. With
+	// Slots the subdirectories run concurrently on the same S, so neither hook
+	// may modify a parent S in place.
 	Entries func(dir string, entries []fs.DirEntry, parent S) (S, bool)
 }
 

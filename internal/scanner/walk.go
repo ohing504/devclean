@@ -4,7 +4,6 @@ import (
 	"context"
 	"io/fs"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -276,7 +275,10 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 // walkTokens bounds the extra goroutines runWalk starts to walk subtrees in
 // parallel. It is separate from sizeTokens so the walk is not starved while
 // the stat scanners size their caches alongside it.
-var walkTokens = make(chan struct{}, sizeWorkerCap)
+var walkTokens = make(chan struct{}, walkSlots)
+
+// walkSlots is the number of walkTokens.
+const walkSlots = 8
 
 // installedPackageDirNames hold only installed packages when the walk reaches
 // them without matching an artifact rule (a global lib/node_modules, a tool's
@@ -328,13 +330,13 @@ const sizeWorkerCap = 8
 // sizePending fills in the size fields of every result by running
 // Measure concurrently across a bounded worker pool. The walk defers sizing
 // (one in-process tree walk each) to here so the traversals and their I/O
-// overlap. Returns ctx.Err() if the scan is
-// cancelled mid-sizing.
+// overlap. Returns ctx.Err() if the scan is cancelled mid-sizing.
 func sizePending(ctx context.Context, results []model.ScanResult) error {
 	if len(results) == 0 {
 		return nil
 	}
-	workers := max(1, min(runtime.NumCPU(), sizeWorkerCap, len(results)))
+	// sizeTokens bounds the concurrent measures; the workers only hand them out.
+	workers := min(sizeWorkerCap, len(results))
 
 	sources := newCloneSources()
 	idx := make(chan int)
