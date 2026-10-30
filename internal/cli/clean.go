@@ -13,6 +13,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/ohing504/devclean/internal/cleaner"
 	"github.com/ohing504/devclean/internal/model"
+	"github.com/ohing504/devclean/internal/output"
 	"github.com/ohing504/devclean/internal/pathutil"
 	"github.com/ohing504/devclean/internal/scanner"
 	"github.com/ohing504/devclean/internal/ui"
@@ -32,6 +33,7 @@ func newCleanCmd() *cobra.Command {
 		includeCaution bool
 		vendorCleanup  bool
 		items          []string
+		jsonOutput     bool
 	)
 
 	cmd := &cobra.Command{
@@ -42,11 +44,30 @@ func newCleanCmd() *cobra.Command {
   devclean clean --eco node --safe --dry-run
   devclean clean --eco node --force
   devclean clean --eco global --item ~/.npm --yes --include-caution  # only this artifact
-  devclean clean --eco xcode --vendor-cleanup --yes  # also runs 'xcrun simctl delete unavailable'`,
+  devclean clean --eco xcode --vendor-cleanup --yes  # also runs 'xcrun simctl delete unavailable'
+  devclean clean --item ~/workspace/app/node_modules --yes --json  # results as JSON`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			minSize, err := parseMinSize(minSizeStr)
 			if err != nil {
 				return err
+			}
+			// JSON output has no prompts to answer.
+			if jsonOutput && !yes {
+				cmd.SilenceUsage = true
+				return errors.New("--json needs --yes: pass --yes to clean without prompts, or --dry-run --yes to preview")
+			}
+			// say prints the text output, which --json replaces.
+			say := func(format string, a ...any) {
+				if !jsonOutput {
+					fmt.Printf(format, a...)
+				}
+			}
+			out := output.CleanOutput{DryRun: dryRun}
+			writeJSON := func() error {
+				if !jsonOutput {
+					return nil
+				}
+				return output.WriteCleanJSON(cmd.OutOrStdout(), out)
 			}
 			// Without a terminal on stdin the selector and confirmation cannot
 			// prompt; fail so a script or agent sees why nothing was cleaned.
@@ -54,12 +75,18 @@ func newCleanCmd() *cobra.Command {
 				cmd.SilenceUsage = true
 				return errors.New("stdin is not a terminal: pass --yes to clean without prompts, or --dry-run --yes to preview")
 			}
+			var resolved []string
+			for _, it := range items {
+				resolved = append(resolved, resolveItem(it))
+			}
 			results, err := runScanPipeline(ScanPipelineOptions{
+				Items:    resolved,
 				Path:     scanPath,
 				Ecos:     ecos,
 				Status:   status,
 				SafeOnly: safeOnly,
 				MinSize:  minSize,
+				Quiet:    jsonOutput,
 			})
 			if err != nil {
 				return err
@@ -74,11 +101,11 @@ func newCleanCmd() *cobra.Command {
 			}
 
 			if len(results) == 0 {
-				fmt.Println("No items to clean.")
+				say("No items to clean.\n")
 				if vendorCleanup {
-					runVendorCleanups(vendorEcos(ecos, nil), dryRun)
+					out.VendorCleanups = runVendorCleanups(vendorEcos(ecos, nil), dryRun, say)
 				}
-				return nil
+				return writeJSON()
 			}
 
 			var toClean []model.ScanResult
@@ -93,7 +120,7 @@ func newCleanCmd() *cobra.Command {
 					}
 				}
 				if skippedCaution > 0 {
-					fmt.Printf(
+					say(
 						"%s\n",
 						ui.DimStyle.Render(fmt.Sprintf(
 							"Skipped %d caution item(s) — pass --include-caution to remove them with --yes.",
@@ -111,6 +138,9 @@ func newCleanCmd() *cobra.Command {
 					cmd.SilenceUsage = true
 					return fmt.Errorf("--item artifacts not cleaned with --yes: %s", strings.Join(named, ", "))
 				}
+				for _, sk := range skipped {
+					out.Skipped = append(out.Skipped, output.SkippedItem{Path: sk.Result.Path, Reason: skipCode[sk.Reason]})
+				}
 			} else {
 				// Interactive tree selection
 				result := ui.RunTreeSelector(results)
@@ -122,18 +152,18 @@ func newCleanCmd() *cobra.Command {
 			}
 
 			if len(toClean) == 0 {
-				fmt.Println("No items selected.")
+				say("No items selected.\n")
 				if vendorCleanup {
-					runVendorCleanups(vendorEcos(ecos, toClean), dryRun)
+					out.VendorCleanups = runVendorCleanups(vendorEcos(ecos, toClean), dryRun, say)
 				}
-				return nil
+				return writeJSON()
 			}
 
 			// Show summary
 			totalSize := model.DedupedTotal(toClean)
 
 			if dryRun {
-				fmt.Printf(
+				say(
 					"\n%s %d items (%s)\n\n",
 					ui.ProjectStyle.Render("Would clean:"),
 					len(toClean), model.HumanSize(totalSize),
@@ -142,21 +172,23 @@ func newCleanCmd() *cobra.Command {
 				dc := cleaner.New(cleaner.Options{DryRun: true})
 				groups := model.GroupByProject(toClean)
 				for _, p := range groups {
-					fmt.Printf("  %s (%s)\n", ui.ProjectName(p), model.HumanSize(p.TotalSize))
+					say("  %s (%s)\n", ui.ProjectName(p), model.HumanSize(p.TotalSize))
 					for _, r := range p.Items {
-						fmt.Printf("    %s %s (%s)\n", ui.DimStyle.Render("•"), ui.ArtifactName(r, p.Path), ui.DimStyle.Render(model.HumanSize(r.Size)))
+						say("    %s %s (%s)\n", ui.DimStyle.Render("•"), ui.ArtifactName(r, p.Path), ui.DimStyle.Render(model.HumanSize(r.Size)))
 						if r.Delete != nil {
-							fmt.Printf("      %s\n", ui.DimStyle.Render("runs: "+r.Delete.Display))
+							say("      %s\n", ui.DimStyle.Render("runs: "+r.Delete.Display))
 						}
-						if err := dc.Clean(cmd.Context(), r); err != nil {
-							fmt.Printf("      %s\n", ui.ErrStyle.Render("would fail: "+err.Error()))
+						err := dc.Clean(cmd.Context(), r)
+						if err != nil {
+							say("      %s\n", ui.ErrStyle.Render("would fail: "+err.Error()))
 						}
+						out.Results = append(out.Results, cleanItem(r, output.CleanWouldClean, output.CleanWouldFail, err))
 					}
 				}
 				if vendorCleanup {
-					runVendorCleanups(vendorEcos(ecos, toClean), dryRun)
+					out.VendorCleanups = runVendorCleanups(vendorEcos(ecos, toClean), dryRun, say)
 				}
-				return nil
+				return writeJSON()
 			}
 
 			// Choose delete method if not --yes. Items with a DeleteMethod run
@@ -220,23 +252,28 @@ func newCleanCmd() *cobra.Command {
 
 			groups := model.GroupByProject(toClean)
 			for _, p := range groups {
-				fmt.Printf("\n  %s\n", ui.ProjectStyle.Render(ui.ProjectName(p)))
+				say("\n  %s\n", ui.ProjectStyle.Render(ui.ProjectName(p)))
 				for _, r := range p.Items {
 					name := ui.ArtifactName(r, p.Path)
 					err := c.Clean(cmd.Context(), r)
+					done := output.CleanFreed
 					if err != nil {
 						failed++
-						fmt.Printf("    %s %s — %v\n", ui.ErrStyle.Render("✗"), name, err)
+						say("    %s %s — %v\n", ui.ErrStyle.Render("✗"), name, err)
 					} else {
 						if r.Delete == nil && !force {
 							trashed = append(trashed, r)
+							done = output.CleanTrashed
 						} else {
 							freed = append(freed, r)
 						}
-						fmt.Printf("    %s %s (%s)\n", ui.SafeStyle.Render("✔"), name, model.HumanSize(r.Size))
+						say("    %s %s (%s)\n", ui.SafeStyle.Render("✔"), name, model.HumanSize(r.Size))
 					}
+					out.Results = append(out.Results, cleanItem(r, done, output.CleanFailed, err))
 				}
 			}
+			out.TrashedSize = model.DedupedTotal(trashed)
+			out.FreedSize = model.DedupedTotal(freed)
 
 			var reclaimed []string
 			if len(freed) > 0 {
@@ -249,19 +286,19 @@ func newCleanCmd() *cobra.Command {
 			if len(reclaimed) > 0 {
 				summary += " (" + strings.Join(reclaimed, ", ") + ")"
 			}
-			fmt.Printf("\n%s\n", ui.SafeStyle.Render(summary))
+			say("\n%s\n", ui.SafeStyle.Render(summary))
 			if hint := hiddenInTrashHint(trashed); hint != "" {
-				fmt.Println(ui.DimStyle.Render(hint))
+				say("%s\n", ui.DimStyle.Render(hint))
 			}
 			if failed > 0 {
-				fmt.Printf("%s\n", ui.ErrStyle.Render(fmt.Sprintf("%d items failed", failed)))
+				say("%s\n", ui.ErrStyle.Render(fmt.Sprintf("%d items failed", failed)))
 			}
 
 			if vendorCleanup {
-				runVendorCleanups(vendorEcos(ecos, toClean), dryRun)
+				out.VendorCleanups = runVendorCleanups(vendorEcos(ecos, toClean), dryRun, say)
 			}
 
-			return nil
+			return writeJSON()
 		},
 	}
 
@@ -275,6 +312,7 @@ func newCleanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&yes, "yes", false, "skip confirmation and interactive selection (deletes only safe items unless --include-caution)")
 	cmd.Flags().BoolVar(&includeCaution, "include-caution", false, "with --yes, also delete caution items (shared impact or hard to regenerate); protected is still never deleted")
 	cmd.Flags().StringArrayVar(&items, "item", nil, "clean only the artifact at this path (the \"path\" field of 'devclean scan --json'); repeat for more")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "JSON output for scripting and AI agents (needs --yes)")
 	cmd.Flags().BoolVar(&vendorCleanup, "vendor-cleanup", false, "also run ecosystem-native cleanup commands (e.g. 'xcrun simctl delete unavailable' for xcode)")
 
 	return cmd
@@ -290,6 +328,18 @@ const (
 	reasonCaution   = "caution, pass --include-caution"
 	reasonProtected = "protected, never deleted"
 )
+
+// skipCode is the --json reason of each skippedItem.Reason.
+var skipCode = map[string]string{reasonCaution: "caution", reasonProtected: "protected"}
+
+// cleanItem is the --json result of cleaning r: done, or failed with err.
+func cleanItem(r model.ScanResult, done, failed string, err error) output.CleanItem {
+	it := output.CleanItem{Path: r.Path, Ecosystem: r.Ecosystem, Size: r.Size, Label: r.Label, Result: done}
+	if err != nil {
+		it.Result, it.Error = failed, err.Error()
+	}
+	return it
+}
 
 // selectForYes chooses which results a non-interactive (--yes) clean deletes.
 // It deletes only `safe` (auto-regenerated) items by default; `caution` items
@@ -375,11 +425,11 @@ func vendorEcos(ecos []string, toClean []model.ScanResult) []model.Ecosystem {
 }
 
 // runVendorCleanups executes vendor-native cleanup actions for the given
-// ecosystems (none = nothing to run). In dry-run mode it prints what would
-// run without executing.
-func runVendorCleanups(ecosystems []model.Ecosystem, dryRun bool) {
+// ecosystems (none = nothing to run), printing each with say, and returns
+// their results. In dry-run mode it reports what would run without executing.
+func runVendorCleanups(ecosystems []model.Ecosystem, dryRun bool, say func(string, ...any)) []output.VendorResult {
 	if len(ecosystems) == 0 {
-		return
+		return nil
 	}
 	scanners := scanner.DefaultRegistry().ForEcosystems(ecosystems)
 
@@ -399,23 +449,28 @@ func runVendorCleanups(ecosystems []model.Ecosystem, dryRun bool) {
 	}
 
 	if len(actions) == 0 {
-		return
+		return nil
 	}
 
-	fmt.Printf("\n%s\n", ui.ProjectStyle.Render("Vendor cleanup:"))
+	say("\n%s\n", ui.ProjectStyle.Render("Vendor cleanup:"))
+	var results []output.VendorResult
 	for _, p := range actions {
+		res := output.VendorResult{Ecosystem: p.eco, Description: p.action.Description, Command: p.action.Display}
 		header := fmt.Sprintf("  [%s] %s", p.eco, p.action.Description)
-		fmt.Println(ui.DimStyle.Render("    " + p.action.Display))
+		say("%s\n", ui.DimStyle.Render("    "+p.action.Display))
 		if dryRun {
-			fmt.Printf("%s %s\n", header, ui.DimStyle.Render("(dry-run)"))
-			continue
+			res.Result = "would_run"
+			say("%s %s\n", header, ui.DimStyle.Render("(dry-run)"))
+		} else if err := p.action.Run(context.Background()); err != nil {
+			res.Result, res.Error = "failed", err.Error()
+			say("%s — %s\n", header, ui.ErrStyle.Render(err.Error()))
+		} else {
+			res.Result = "ran"
+			say("%s %s\n", header, ui.SafeStyle.Render("✔"))
 		}
-		if err := p.action.Run(context.Background()); err != nil {
-			fmt.Printf("%s — %s\n", header, ui.ErrStyle.Render(err.Error()))
-			continue
-		}
-		fmt.Printf("%s %s\n", header, ui.SafeStyle.Render("✔"))
+		results = append(results, res)
 	}
+	return results
 }
 
 // hiddenInTrashHint tells how to see trashed items whose name starts with a

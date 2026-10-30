@@ -102,6 +102,27 @@ func ReportProgress(ctx context.Context, count int) {
 	}
 }
 
+type itemsKey struct{}
+
+// WithItems limits a scan to the artifacts at paths (absolute and clean): the
+// walk enters only the directories on the way to them and only they are
+// sized. Every artifact at those paths is found with the same fields as by an
+// unlimited scan; other results may be returned unsized, for the caller to
+// drop.
+func WithItems(ctx context.Context, paths []string) context.Context {
+	set := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		set[p] = true
+	}
+	return context.WithValue(ctx, itemsKey{}, set)
+}
+
+// scanItems returns the paths set by WithItems, or nil for an unlimited scan.
+func scanItems(ctx context.Context) map[string]bool {
+	set, _ := ctx.Value(itemsKey{}).(map[string]bool)
+	return set
+}
+
 // ScanWith runs a subset of scanners and collects results.
 func (r *Registry) ScanWith(ctx context.Context, root string, scanners []Scanner) ([]model.ScanResult, error) {
 	return r.ScanWithProgress(ctx, root, scanners, nil)

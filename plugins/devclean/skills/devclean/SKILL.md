@@ -52,14 +52,14 @@ Safety levels:
 Name every approved artifact with `--item` (its `path` field), and preview first:
 
 ```bash
-devclean clean --item <path> [--item <path> ...] --dry-run --yes
-devclean clean --item <path> [--item <path> ...] --yes
+devclean clean --item <path> [--item <path> ...] --dry-run --yes --json
+devclean clean --item <path> [--item <path> ...] --yes --json
 ```
 
 Scope:
 
 - Always pass `--item`. `clean --yes` without it deletes every `safe` artifact in the scanned scope.
-- Pass the same `--path` and `--eco` as the scan. `clean` scans again before deleting; without them it rescans `~` (slow), and an `--item` outside the scope matches nothing.
+- Pass the same `--path` and `--eco` as the scan. `clean` checks the named paths again before deleting, and an `--item` outside the scope matches nothing.
 - Always pass `--yes`. When the user wants to pick interactively, give them the `devclean clean` command to run in their terminal.
 
 Flags that need the user's approval:
@@ -70,11 +70,12 @@ Flags that need the user's approval:
 
 Failures:
 
-- Exit status 1 before deletion lists each `--item` that matched nothing or would be skipped, with the reason. Report it; do not retry with broader flags.
+- Exit status 1 before deletion lists each `--item` that matched nothing or would be skipped, with the reason, on stderr as text. Report it; do not retry with broader flags.
+- A `result` of `failed` (`would_fail` in the preview) carries the `error`; the exit status stays 0.
 
 ## 5. Report
 
-- Freed size, and whether the artifacts went to Trash or were deleted permanently, from the `clean` output.
+- Freed size, and whether the artifacts went to Trash or were deleted permanently: `trashed_size` and `freed_size` of the `clean --json` output.
 - Artifacts that failed, with their errors.
 - Every `recommendation` on the cleaned artifacts (for example, run `pnpm store prune` after deleting pnpm `node_modules`).
 - For Trash moves: the space is freed when the Trash is emptied.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 
 	"github.com/mattn/go-isatty"
@@ -41,6 +42,9 @@ type ScanPipelineOptions struct {
 	SafeOnly bool
 	MinSize  int64 // drop artifacts smaller than this many bytes (0 = no filter)
 	Quiet    bool  // skip spinner (for JSON output)
+	// Items, when set, limits the scan to the artifacts at these absolute,
+	// clean paths (see scanner.WithItems); other artifacts are not returned.
+	Items []string
 }
 
 // runScanPipeline scans, classifies, and filters results according to opts.
@@ -61,6 +65,9 @@ func runScanPipeline(opts ScanPipelineOptions) ([]model.ScanResult, error) {
 	// actually abort the walk instead of being dead code.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if opts.Items != nil {
+		ctx = scanner.WithItems(ctx, opts.Items)
+	}
 
 	// Spinner frames are terminal control codes; keep them out of piped output.
 	showSpinner := !opts.Quiet && isatty.IsTerminal(os.Stdout.Fd())
@@ -83,6 +90,11 @@ func runScanPipeline(opts ScanPipelineOptions) ([]model.ScanResult, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	if opts.Items != nil {
+		results = model.FilterResults(results, func(r model.ScanResult) bool {
+			return slices.Contains(opts.Items, r.Path)
+		})
 	}
 
 	if showSpinner {

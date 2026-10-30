@@ -111,6 +111,9 @@ devclean clean --eco node --min-size 50MB
 # Clean only the named artifact(s)
 devclean clean --eco global --item ~/.npm --yes --include-caution
 
+# Results as JSON for scripting / AI agents
+devclean clean --item ~/workspace/app/node_modules --yes --json
+
 # Also run ecosystem-native cleanup commands (e.g. xcrun simctl delete unavailable)
 devclean clean --eco xcode --vendor-cleanup --yes
 ```
@@ -133,6 +136,11 @@ Repeat the flag for more; a comma is part of the path. Paths are the `path`
 field of `scan --json`; a leading `~/` is expanded and relative paths resolve
 against the working directory. Other filters and the
 [`--yes` safety gate](#non-interactive-safety---yes----include-caution) still apply.
+
+With `--item`, `clean` checks again only the named paths instead of the whole
+scan scope: the project walk enters only the directories on the way to them
+and only they are sized, so each is found and classified as a full scan would.
+Homebrew's dry-run runs only when an item is the Homebrew item.
 
 `clean` exits with status 1 before deleting anything when any `--item` matches
 no scanned artifact, or when `--yes` would leave a named artifact uncleaned
@@ -163,6 +171,38 @@ terminal it exits with status 1 before scanning:
 ```text
 Error: stdin is not a terminal: pass --yes to clean without prompts, or --dry-run --yes to preview
 ```
+
+#### JSON (`--json`)
+
+`clean --json` prints one JSON object instead of the text output, and needs
+`--yes` (it has no prompts to answer). Errors before deleting are not JSON:
+they go to stderr as text with exit status 1, as in text mode.
+
+```json
+{
+  "dry_run": false,
+  "trashed_size": 691171328,
+  "freed_size": 0,
+  "results": [
+    {
+      "path": "/Users/you/workspace/my-app/node_modules",
+      "ecosystem": "node",
+      "size": 691171328,
+      "result": "trashed"
+    }
+  ],
+  "skipped": [
+    { "path": "/Users/you/workspace/my-app/.venv", "reason": "caution" }
+  ]
+}
+```
+
+- `results` — every artifact cleaned (or, with `--dry-run`, previewed): `path`, `ecosystem`, `size`, `label` when known, `result` and, for a failure, `error`.
+- `result` — `trashed` (moved to the Trash), `freed` (deleted permanently, or reclaimed by the item's own command), `failed`; with `--dry-run`, `would_clean` or `would_fail`.
+- `trashed_size`, `freed_size` — total `size` of the `trashed` and the `freed` results, hard-linked blocks counted once; `0` with `--dry-run`.
+- `skipped` — artifacts the `--yes` safety gate kept, with `reason` `caution` or `protected`; omitted when none.
+- `vendor_cleanups` — with `--vendor-cleanup`, each command's `ecosystem`, `description`, `command` and `result` (`ran`, `failed` with `error`, or `would_run` with `--dry-run`); omitted when none ran.
+- Exit status is 0 when items fail during deletion, as in text mode; check each `result`.
 
 #### Vendor Cleanups
 
@@ -200,7 +240,7 @@ The clean command uses a tree selector matching scan's output style:
 
 #### Flow
 
-1. Scan and classify (with progress spinner)
+1. Scan and classify (with progress spinner; with `--item`, only the named paths)
 2. Tree selector: select projects/artifacts interactively
 3. Choose: Move to Trash / Permanently delete / Cancel
 4. Execute with per-artifact results — items with an attached `DeleteMethod` run it instead of path removal (see [Deletion Strategy](ARCHITECTURE.md#deletion-strategy))
