@@ -27,6 +27,8 @@ Two scanner families share the `Scanner` interface:
 
 Scanners report progress via context-attached callbacks: the walk batch reports under a single "projects" label, stat scanners under their own names.
 
+**Limited scan**: `scanner.WithItems` attaches a set of paths to the context (`clean --item`). The walk enters only the directories that are an item or an ancestor of one, still running every check on them with all their entries read, so an item is matched in the same project context as in a full scan. `sizePending` measures only the items, and the Homebrew dry-run runs only when an item is the Homebrew item. Other results may come back unsized; the pipeline drops them before classifying. `internal/scanner/items_test.go` checks the limited result against the full one for every directory of a fixture.
+
 **Sizing** collects these figures per artifact through an in-process walk (`scanner.Measure`):
 
 - **disk** — allocated blocks (`st_blocks×512`), sparse-accurate and matching `du`. Directories contribute their own blocks (real on ext4, ~0 on APFS).

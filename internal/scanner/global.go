@@ -305,7 +305,7 @@ func (s *GlobalScanner) Scan(ctx context.Context, root string) ([]model.ScanResu
 	// needs a scan root covering home.
 	var homebrew <-chan homebrewScan
 	if isUnderRoot(home, root) {
-		if brew, err := s.lookPath("brew"); err == nil {
+		if brew, err := s.lookPath("brew"); err == nil && s.homebrewWanted(ctx, brew, home) {
 			homebrew = s.startHomebrewScan(ctx, brew)
 		}
 	}

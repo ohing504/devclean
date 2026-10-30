@@ -51,6 +51,21 @@ type homebrewScan struct {
 	err  error
 }
 
+// homebrewWanted reports whether the scan needs the Homebrew item. A limited
+// scan (WithItems) skips brew's slow dry-run unless an item is the path the
+// item takes or the catalog entry it replaces or notes an error on; if brew
+// cannot tell its cache, the dry-run runs and reports the error.
+func (s *GlobalScanner) homebrewWanted(ctx context.Context, brew, home string) bool {
+	items := scanItems(ctx)
+	if items == nil || items[filepath.Join(home, homebrewCacheRelPath)] {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, homebrewTimeout)
+	defer cancel()
+	out, err := s.runCommand(ctx, homebrewEnv, brew, "--cache")
+	return err != nil || items[strings.TrimSpace(string(out))]
+}
+
 // startHomebrewScan runs scanHomebrew concurrently with catalog sizing.
 func (s *GlobalScanner) startHomebrewScan(ctx context.Context, brew string) <-chan homebrewScan {
 	ch := make(chan homebrewScan, 1)

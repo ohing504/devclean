@@ -156,6 +156,7 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 	var mu sync.Mutex // guards results
 	var results []model.ScanResult
 	numTables := len(tables)
+	items := scanItems(ctx)
 
 	// fstree does the traversal, in parallel while walkTokens has a free slot;
 	// the engine only decides what a directory is. Each directory hands its
@@ -168,6 +169,12 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 		// ancestor contexts (dir's own context is added only if we descend).
 		// Size is filled in afterwards by sizePending.
 		Enter: func(dir string, info fs.FileInfo, stack []projectContext) bool {
+			// A limited scan skips every directory that is neither an item nor
+			// on the way to one. The rest go through the same checks, with
+			// every entry read, as in an unlimited scan.
+			if items != nil && !leadsToItem(dir, items) {
+				return false
+			}
 			name := filepath.Base(dir)
 			if rule, tableIdx, projRoot, ok := matchArtifact(stack, dir, name, numTables); ok {
 				result := model.ScanResult{
@@ -321,6 +328,16 @@ func isPnpmStoreVersionDir(name string) bool {
 	return true
 }
 
+// leadsToItem reports whether dir is one of items or an ancestor of one.
+func leadsToItem(dir string, items map[string]bool) bool {
+	for it := range items {
+		if isUnderRoot(it, dir) {
+			return true
+		}
+	}
+	return false
+}
+
 // sizeWorkerCap bounds concurrent sizing walks so a large scan does not
 // traverse every artifact tree at once. sizeTokens enforces it across the
 // pools of all scanners and the sub-walks inside one artifact.
@@ -337,6 +354,8 @@ func sizePending(ctx context.Context, results []model.ScanResult) error {
 	// sizeTokens bounds the concurrent measures; the workers only hand them out.
 	workers := min(sizeWorkerCap, len(results))
 
+	// A limited scan (WithItems) sizes only the items.
+	items := scanItems(ctx)
 	sources := newCloneSources()
 	idx := make(chan int)
 	var wg sync.WaitGroup
@@ -344,6 +363,9 @@ func sizePending(ctx context.Context, results []model.ScanResult) error {
 		wg.Go(func() {
 			for i := range idx {
 				r := &results[i]
+				if items != nil && !items[r.Path] {
+					continue
+				}
 				var clones *cloneSources
 				if r.CloneAware && cloneSizingSupported {
 					clones = sources

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/ohing504/devclean/internal/model"
+	"github.com/ohing504/devclean/internal/output"
 	"github.com/ohing504/devclean/internal/pathutil"
 )
 
@@ -244,4 +246,78 @@ func TestCleanShowsLabelLikeScan(t *testing.T) {
 			}
 		})
 	}
+}
+
+// runCleanJSON runs clean with --json and returns the decoded output and any
+// text printed besides it.
+func runCleanJSON(t *testing.T, args ...string) (output.CleanOutput, string, error) {
+	t.Helper()
+	cmd := newCleanCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs(append(args, "--json"))
+	var err error
+	text := captureStdout(t, func() { err = cmd.Execute() })
+	var out output.CleanOutput
+	if err == nil {
+		if derr := json.Unmarshal(buf.Bytes(), &out); derr != nil {
+			t.Fatalf("output is not JSON: %v\n%s", derr, buf.String())
+		}
+	}
+	return out, text, err
+}
+
+// TestCleanJSONReportsEachItem verifies --json reports each cleaned item with
+// its result and the freed and trashed totals, and prints nothing else.
+func TestCleanJSONReportsEachItem(t *testing.T) {
+	root, proj := nodeProject(t, "app")
+	dist := filepath.Join(proj, "dist")
+
+	out, text, err := runCleanJSON(t, "--eco", "node", "--path", root, "--item", dist, "--yes", "--force")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "" {
+		t.Errorf("--json printed text besides the JSON:\n%s", text)
+	}
+	if len(out.Results) != 1 || out.Results[0].Path != dist || out.Results[0].Result != output.CleanFreed {
+		t.Errorf("results = %+v, want %s freed", out.Results, dist)
+	}
+	if out.FreedSize != out.Results[0].Size || out.TrashedSize != 0 || out.DryRun {
+		t.Errorf("freed_size %d, trashed_size %d, dry_run %v; want %d, 0, false", out.FreedSize, out.TrashedSize, out.DryRun, out.Results[0].Size)
+	}
+	assertGone(t, dist)
+}
+
+// TestCleanJSONDryRunDeletesNothing verifies a --dry-run --json reports what
+// would be cleaned and what --yes skips, and deletes nothing.
+func TestCleanJSONDryRunDeletesNothing(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, "app/pyproject.toml", "app/.venv/lib/", "app/pkg/__pycache__/m.pyc")
+	cache := filepath.Join(root, "app", "pkg", "__pycache__")
+	venv := filepath.Join(root, "app", ".venv")
+
+	out, _, err := runCleanJSON(t, "--eco", "python", "--path", root, "--dry-run", "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.DryRun || len(out.Results) != 1 || out.Results[0].Path != cache || out.Results[0].Result != output.CleanWouldClean {
+		t.Errorf("dry_run %v, results %+v; want %s would_clean", out.DryRun, out.Results, cache)
+	}
+	if want := []output.SkippedItem{{Path: venv, Reason: "caution"}}; !slices.Equal(out.Skipped, want) {
+		t.Errorf("skipped = %+v, want %+v", out.Skipped, want)
+	}
+	assertExists(t, cache)
+}
+
+// TestCleanJSONNeedsYes verifies --json without --yes fails before scanning.
+func TestCleanJSONNeedsYes(t *testing.T) {
+	root, proj := nodeProject(t, "app")
+
+	_, _, err := runCleanJSON(t, "--eco", "node", "--path", root)
+	if err == nil || !strings.Contains(err.Error(), "--json needs --yes") {
+		t.Fatalf("want the --json needs --yes error, got %v", err)
+	}
+	assertExists(t, filepath.Join(proj, "dist"))
 }
