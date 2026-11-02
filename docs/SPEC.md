@@ -371,7 +371,7 @@ Sizes use **decimal SI units** (1 KB = 1000 B). `--min-size` uses the same conve
 | `coverage` | build | safe | Test coverage reports |
 | `.svelte-kit` | build | safe | SvelteKit cache |
 | `src/.umi`, `src/.umi-production`, `src/.umi-test` | build | safe | Umi temp dirs (generated entry, routes, webpack cache) |
-| `.umi`, `.umi-production`, `.umi-test` | build | safe | Umi temp dirs when the project has no `src/` |
+| `.umi`, `.umi-production`, `.umi-test` | build | safe | Umi temp dirs at the project root (where Umi writes them when the project has no `src/`; also matched when `src/` exists) |
 
 **pnpm-installed `node_modules`**: pnpm clones (macOS) or hard-links (Linux) pnpm store files into `node_modules` by default, so deleting it alone frees little; running `pnpm store prune` afterwards removes packages no project references. The result carries this note when `node_modules/.modules.yaml` (written by pnpm on install, JSON since pnpm 12; `pnpm-lock.yaml` alone does not prove pnpm populated the folder) names a `storeDir` that exists on the same volume. On macOS its `size` leaves out blocks shared with the store or other projects. A store on another volume forces pnpm to copy, so no note is given. `packageImportMethod: copy` is not recorded in `.modules.yaml`, so such installs still get the note.
 

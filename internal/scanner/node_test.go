@@ -47,14 +47,17 @@ func TestNodeWalk(t *testing.T) {
 			tree: []string{
 				"crm/package.json", "crm/src/pages/index.tsx",
 				"crm/src/.umi/.cache/0.pack", "crm/src/.umi-production/umi.ts", "crm/src/.umi-test/umi.ts",
-				"flat/package.json", "flat/.umi/umi.ts", "flat/.umi-production/umi.ts",
+				"crm/.umi/umi.ts",
+				"flat/package.json", "flat/.umi/umi.ts", "flat/.umi-production/umi.ts", "flat/.umi-test/umi.ts",
 			},
 			want: []artifact{
+				safe("crm/.umi", model.CatBuild),
 				safe("crm/src/.umi", model.CatBuild),
 				safe("crm/src/.umi-production", model.CatBuild),
 				safe("crm/src/.umi-test", model.CatBuild),
 				safe("flat/.umi", model.CatBuild),
 				safe("flat/.umi-production", model.CatBuild),
+				safe("flat/.umi-test", model.CatBuild),
 			},
 		},
 		{
