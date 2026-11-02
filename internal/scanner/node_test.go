@@ -42,6 +42,22 @@ func TestNodeWalk(t *testing.T) {
 			want: []artifact{safe("app/node_modules", model.CatDeps)},
 		},
 		{
+			name: "umi temp dirs under src and at the root",
+			ecos: node,
+			tree: []string{
+				"crm/package.json", "crm/src/pages/index.tsx",
+				"crm/src/.umi/.cache/0.pack", "crm/src/.umi-production/umi.ts", "crm/src/.umi-test/umi.ts",
+				"flat/package.json", "flat/.umi/umi.ts", "flat/.umi-production/umi.ts",
+			},
+			want: []artifact{
+				safe("crm/src/.umi", model.CatBuild),
+				safe("crm/src/.umi-production", model.CatBuild),
+				safe("crm/src/.umi-test", model.CatBuild),
+				safe("flat/.umi", model.CatBuild),
+				safe("flat/.umi-production", model.CatBuild),
+			},
+		},
+		{
 			name: "react native via ios/Podfile",
 			ecos: node,
 			tree: []string{

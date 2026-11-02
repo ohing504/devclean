@@ -25,6 +25,14 @@ var nodeWalkEcosystem = walkEcosystem{
 		{RelPath: ".parcel-cache", Category: model.CatCache, Safety: model.SafetySafe},                              // Parcel cache
 		{RelPath: "coverage", Category: model.CatBuild, Safety: model.SafetySafe},                                   // Test coverage reports
 		{RelPath: ".svelte-kit", Category: model.CatBuild, Safety: model.SafetySafe},                                // SvelteKit cache
+		// Umi temp dirs (generated entry, routes and webpack cache), under src/
+		// when it exists, else at the project root.
+		{RelPath: "src/.umi", Category: model.CatBuild, Safety: model.SafetySafe},
+		{RelPath: "src/.umi-production", Category: model.CatBuild, Safety: model.SafetySafe},
+		{RelPath: "src/.umi-test", Category: model.CatBuild, Safety: model.SafetySafe},
+		{RelPath: ".umi", Category: model.CatBuild, Safety: model.SafetySafe},
+		{RelPath: ".umi-production", Category: model.CatBuild, Safety: model.SafetySafe},
+		{RelPath: ".umi-test", Category: model.CatBuild, Safety: model.SafetySafe},
 	},
 	ExtraRules: nodeExtraRules,
 }
