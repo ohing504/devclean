@@ -116,6 +116,15 @@ func TestGlobalScanner_DetectsExpandedCatalog(t *testing.T) {
 	// Settings live next to the caches and must never be picked up.
 	mustWriteFile(t, filepath.Join(cursorRoot, "settings.json"), []byte("{}"))
 
+	claudeRoot := filepath.Join(home, "Library", "Application Support", "Claude")
+	claudeCache := filepath.Join(claudeRoot, "Cache")
+	mustMkdir(t, claudeCache)
+	mustWriteFile(t, filepath.Join(claudeCache, "blob"), make([]byte, 256))
+	// The VM bundle sits next to the caches and must never be picked up.
+	claudeVM := filepath.Join(claudeRoot, "vm_bundles")
+	mustMkdir(t, claudeVM)
+	mustWriteFile(t, filepath.Join(claudeVM, "rootfs.img"), make([]byte, 256))
+
 	s := newIsolatedGlobalScanner(t)
 	results, err := s.Scan(context.Background(), home)
 	if err != nil {
@@ -166,6 +175,15 @@ func TestGlobalScanner_DetectsExpandedCatalog(t *testing.T) {
 	}
 	if _, ok := byPath[cursorRoot]; ok {
 		t.Errorf("Application Support/Cursor itself must not be reported (settings live there)")
+	}
+
+	if r, ok := byPath[claudeCache]; !ok || r.Safety != model.SafetySafe {
+		t.Errorf("expected Claude Desktop Cache subdir as safe, got %+v (found=%v)", r, ok)
+	}
+	for _, p := range []string{claudeRoot, claudeVM} {
+		if _, ok := byPath[p]; ok {
+			t.Errorf("%s must not be reported", p)
+		}
 	}
 }
 
