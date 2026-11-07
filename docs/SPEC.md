@@ -588,6 +588,8 @@ Each entry that is `caution` carries a consequence-of-deletion note in `recommen
 
 Only genuine caches under those trees (e.g. `~/.cargo/registry`, `~/Library/Application Support/Cursor/Cache`) or dedicated cache dirs remain eligible.
 
+**Claude Code worktrees**: project scans enter `<project>/.claude/worktrees` and report the artifacts of the projects inside (never the `~/.claude` tree or a worktree itself). An artifact that would be `safe` is `caution` there, because a session using the worktree must reinstall or rebuild.
+
 **Homebrew**: with brew installed, reported as one item reclaimed by `HOMEBREW_NO_AUTOREMOVE=1 brew cleanup` (the cleanup brew runs itself after upgrades: old formula versions, stale downloads, logs; casks excluded). Size is brew's dry-run estimate. The item replaces the `~/Library/Caches/Homebrew` entry when `brew --cache` is that path; with nothing to free, only the directory is reported.
 
 **Browser Temp (macOS)**: Chromium-family browsers (Chrome, Brave, Edge, Arc, Vivaldi, …) copy their own bundle to `/private/var/folders/<xx>/<yyy>/X/<bundle-id>.code_sign_clone/` on launch to verify their code signature, removing it on normal exit. Force-killed processes — typically headless automation like lighthouse or puppeteer — leave zombie copies that accumulate (observed: 92 copies / 156 GB of mostly shared blocks).
