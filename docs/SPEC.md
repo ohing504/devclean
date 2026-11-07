@@ -573,6 +573,7 @@ Each entry that is `caution` carries a consequence-of-deletion note in `recommen
 | `~/Library/Android/sdk/ndk` | deps | caution |
 | `~/Library/Android/sdk/build-tools` | runtime | caution |
 | `~/Library/Application Support/Cursor/{Cache,CachedData,Code Cache}` | cache | safe (cache subdirs only — settings live alongside) |
+| `~/Library/Application Support/Claude/{Cache,Code Cache,GPUCache,DawnGraphiteCache,DawnWebGPUCache,GraphiteDawnCache}` | cache | safe (cache subdirs only — sessions and login state live alongside) |
 | `/private/var/folders/*/*/X/*.code_sign_clone` | cache | safe / caution (macOS only — Browser Temp, see below) |
 
 **Config roots and user state are deliberately excluded.** A home dotfile is treated as config unless it is unambiguously a package/build cache (like `~/.cache/uv`). Deleting an excluded tree is unrecoverable or credential loss, and the "caches" inside only reappear as install-time scaffolding — worthless against that risk, so devclean never offers them for deletion.
@@ -580,6 +581,7 @@ Each entry that is `caution` carries a consequence-of-deletion note in `recommen
 | Excluded path | Why |
 |---|---|
 | `~/.claude` (whole tree) | session transcripts, project memory, agents, skills, plugins, todos |
+| `~/Library/Application Support/Claude` (except the caches above) | Claude Desktop sessions and login state; the app downloads its Cowork VM image again after deletion |
 | `~/.codex`, `~/.gemini` | agent CLI state |
 | `~/Library/Caches/claude-cli-nodejs` | Claude Code state |
 | `~/.cursor` | extensions & settings |
