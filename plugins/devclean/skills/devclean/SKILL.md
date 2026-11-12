@@ -46,6 +46,7 @@ Safety levels:
 - **Propose first**: `safe` artifacts in `stale`/`dormant` projects. Propose `active` projects only when the user asks.
 - **Wait**: the user approves a list of paths in chat before any `clean` run.
 - **Group approval**: approving a group ("all dormant node_modules") approves the paths listed for it, not paths found later.
+- **Trash or permanent delete**: for `safe` artifacts in the `build` and `deps` categories, offer permanent delete (`--force`) as an option next to Trash, and recommend it when the freed space is needed now — a Trash move frees nothing until the user empties the Trash, and these artifacts are rebuilt, not restored. Keep Trash for `cache`, `runtime` and `caution` artifacts unless the user asks otherwise.
 
 ## 4. Clean the approved artifacts
 
@@ -65,7 +66,7 @@ Scope:
 Flags that need the user's approval:
 
 - `--include-caution` — only for `caution` paths the user approved by name.
-- `--force` — permanent delete instead of Trash; only when the user asks for it.
+- `--force` — permanent delete instead of Trash; only when the user chose it (asked for it, or picked it when offered).
 - `--vendor-cleanup` — also runs tool cleanup commands (`npm cache clean --force`, `pnpm store prune`, `xcrun simctl delete unavailable`, …) for the targeted ecosystems; only when the user approves those commands.
 
 Failures:
