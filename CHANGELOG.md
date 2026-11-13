@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/ohing504/devclean/compare/v0.3.1...v0.4.0) (2026-11-13)
+
+
+### Added
+
+* check only the named paths in clean --item and add clean --json ([#76](https://github.com/ohing504/devclean/issues/76)) ([5f28653](https://github.com/ohing504/devclean/commit/5f286536f04baf7b16e3e686b2bc299c9223ec71))
+* detect Umi temp directories as safe Node build artifacts ([#78](https://github.com/ohing504/devclean/issues/78)) ([66b077a](https://github.com/ohing504/devclean/commit/66b077a875cf20979500ee970b06d4ca104ded2c))
+
 ## [0.3.1](https://github.com/ohing504/devclean/compare/v0.3.0...v0.3.1) (2026-10-29)
 
 
