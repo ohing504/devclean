@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -118,6 +119,19 @@ func (w *walkScanner) Scan(ctx context.Context, root string) ([]model.ScanResult
 	return runWalk(ctx, root, []walkEcosystem{w.table})
 }
 
+const (
+	claudeDirName          = ".claude"
+	claudeWorktreesDirName = "worktrees"
+
+	claudeWorktreeRecommendation = "inside a Claude Code worktree; a session using it must reinstall dependencies or rebuild"
+)
+
+// inClaudeWorktree reports whether dir lies inside a Claude Code worktree.
+func inClaudeWorktree(dir string) bool {
+	sep := string(filepath.Separator)
+	return strings.Contains(dir, sep+claudeDirName+sep+claudeWorktreesDirName+sep)
+}
+
 // projectContext is one entry of the walk's active-project stack: a detected
 // project root plus the artifact rules applying beneath it.
 type projectContext struct {
@@ -152,6 +166,8 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 			}
 		}
 	}
+
+	home, _ := os.UserHomeDir() // empty on error: no parent directory equals it
 
 	var mu sync.Mutex // guards results
 	var results []model.ScanResult
@@ -192,6 +208,10 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 					result.Recommendation = n.Recommendation
 					result.CloneAware, result.CloneSource = n.CloneAware, n.CloneSource
 				}
+				if inClaudeWorktree(dir) && result.Safety == model.SafetySafe {
+					result.Safety = model.SafetyCaution
+					result.Recommendation = claudeWorktreeRecommendation
+				}
 				mu.Lock()
 				results = append(results, result)
 				ReportProgress(ctx, len(results))
@@ -204,8 +224,20 @@ func runWalk(ctx context.Context, root string, tables []walkEcosystem) ([]model.
 			if installedPackageDirNames[name] {
 				return false
 			}
-			// The root is always entered: the hidden-dir rule applies below it.
-			return dir == root || !strings.HasPrefix(name, ".") || hiddenDescend[name]
+			// The root is always entered: the hidden-dir rules apply below it.
+			if dir == root {
+				return true
+			}
+			// A project's .claude is entered only to reach its worktrees.
+			// ~/.claude is user state and stays excluded.
+			parent := filepath.Dir(dir)
+			if name == claudeDirName {
+				return parent != home
+			}
+			if filepath.Base(parent) == claudeDirName && parent != root {
+				return name == claudeWorktreesDirName
+			}
+			return !strings.HasPrefix(name, ".") || hiddenDescend[name]
 		},
 		Entries: func(dir string, entries []fs.DirEntry, stack []projectContext) ([]projectContext, bool) {
 			names := make(map[string]bool, len(entries))

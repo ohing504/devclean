@@ -165,6 +165,64 @@ func TestWalkScan_HiddenNamedRootIsScanned(t *testing.T) {
 	}
 }
 
+// TestWalkScan_ClaudeWorktreeArtifactIsCaution pins that a safe artifact in a
+// Claude Code worktree is reported, as caution with its consequence.
+func TestWalkScan_ClaudeWorktreeArtifactIsCaution(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	worktree := filepath.Join(root, "proj", ".claude", "worktrees", "wt")
+	touch(t, filepath.Join(worktree, "package.json"))
+	deps := filepath.Join(worktree, "node_modules")
+	mkdirAll(t, deps)
+
+	results, err := WalkScan(context.Background(), root, model.EcoNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Path != deps {
+		t.Fatalf("got %v, want only %s", paths(results), deps)
+	}
+	if results[0].Safety != model.SafetyCaution || results[0].Recommendation == "" {
+		t.Errorf("got safety %s, recommendation %q; want caution with a recommendation", results[0].Safety, results[0].Recommendation)
+	}
+}
+
+// TestWalkScan_ClaudeDirOutsideWorktreesIsSkipped pins that entering .claude
+// for worktrees does not expose its other directories.
+func TestWalkScan_ClaudeDirOutsideWorktreesIsSkipped(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	skill := filepath.Join(root, "proj", ".claude", "skills", "s")
+	touch(t, filepath.Join(skill, "package.json"))
+	mkdirAll(t, filepath.Join(skill, "node_modules"))
+
+	results, err := WalkScan(context.Background(), root, model.EcoNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Errorf("got %v, want no results", paths(results))
+	}
+}
+
+// TestWalkScan_HomeClaudeDirIsSkipped pins that ~/.claude stays excluded, even
+// for a worktrees directory inside it.
+func TestWalkScan_HomeClaudeDirIsSkipped(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	worktree := filepath.Join(home, ".claude", "worktrees", "wt")
+	touch(t, filepath.Join(worktree, "package.json"))
+	mkdirAll(t, filepath.Join(worktree, "node_modules"))
+
+	results, err := WalkScan(context.Background(), home, model.EcoNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Errorf("got %v, want no results", paths(results))
+	}
+}
+
 // TestWalkScan_InstalledPackageRootIsPruned pins that a scan root named like
 // an installed-package tree is not read: a package's own node_modules inside
 // it is not a deletion target.
