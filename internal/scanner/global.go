@@ -123,6 +123,15 @@ var globalCaches = []globalCache{
 	{"Library/Application Support/Cursor/Cache", model.CatCache, model.SafetySafe, "Cursor cache", "", nil},
 	{"Library/Application Support/Cursor/CachedData", model.CatCache, model.SafetySafe, "Cursor cached data", "", nil},
 	{"Library/Application Support/Cursor/Code Cache", model.CatCache, model.SafetySafe, "Cursor code cache", "", nil},
+	// Only Claude Desktop's Chromium cache subdirectories. The rest of
+	// Application Support/Claude holds sessions and login state, and the app
+	// downloads its Cowork VM image (vm_bundles) again after deletion.
+	{"Library/Application Support/Claude/Cache", model.CatCache, model.SafetySafe, "Claude Desktop cache", "", nil},
+	{"Library/Application Support/Claude/Code Cache", model.CatCache, model.SafetySafe, "Claude Desktop code cache", "", nil},
+	{"Library/Application Support/Claude/GPUCache", model.CatCache, model.SafetySafe, "Claude Desktop GPU cache", "", nil},
+	{"Library/Application Support/Claude/DawnGraphiteCache", model.CatCache, model.SafetySafe, "Claude Desktop Dawn Graphite cache", "", nil},
+	{"Library/Application Support/Claude/DawnWebGPUCache", model.CatCache, model.SafetySafe, "Claude Desktop Dawn WebGPU cache", "", nil},
+	{"Library/Application Support/Claude/GraphiteDawnCache", model.CatCache, model.SafetySafe, "Claude Desktop Graphite Dawn cache", "", nil},
 }
 
 // GlobalScanner scans for shared, home-rooted developer caches that are not
